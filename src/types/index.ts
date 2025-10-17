@@ -45,6 +45,10 @@ export interface Expense {
   paidBy: string
   participants: ExpenseParticipant[]
   eventId?: string
+  notes?: string // 📝 Note e descrizioni aggiuntive
+  splitType?: 'equal' | 'custom' | 'percentage' // 🎛️ Tipo di divisione
+  attachments?: ExpenseAttachment[] // 📎 Allegati (scontrini, foto)
+  comments?: ExpenseComment[] // 💬 Commenti e discussioni
   createdAt: Date
   updatedAt: Date
 }
@@ -54,6 +58,38 @@ export interface ExpenseParticipant {
   name: string
   amount: number
   settled: boolean
+  percentage?: number // Per divisioni percentuali
+}
+
+export interface ExpenseAttachment {
+  id: string
+  type: 'image' | 'pdf' | 'receipt'
+  url: string
+  name: string
+  uploadedBy: string
+  uploadedAt: Date
+}
+
+export interface ExpenseComment {
+  id: string
+  text: string
+  authorId: string
+  authorName: string
+  createdAt: Date
+}
+
+// Nuovo tipo per transazioni di pagamento
+export interface PaymentTransaction {
+  id: string
+  fromUserId: string
+  fromUserName: string
+  toUserId: string
+  toUserName: string
+  amount: number
+  description?: string
+  eventId?: string
+  relatedExpenseIds?: string[] // Spese che questo pagamento sistema
+  createdAt: Date
 }
 
 export interface Poll {

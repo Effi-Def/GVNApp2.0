@@ -1,5 +1,6 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../stores/useAuthStore'
+import NotificationSystem from '../NotificationSystem'
 
 const Navbar = () => {
   const location = useLocation()
@@ -34,7 +35,6 @@ const Navbar = () => {
               </div>
               <div className="flex flex-col">
                 <span className="text-xl font-bold font-display text-neutral-900 tracking-tight">GVNApp</span>
-                <span className="text-xs text-neutral-500 font-medium -mt-1">Gruppo Vacanze Natali</span>
               </div>
               {/* Piccola mascotte */}
               <span className="text-lg group-hover:animate-bounce transition-transform">🐷</span>
@@ -61,6 +61,9 @@ const Navbar = () => {
 
           {/* User Menu - Redesigned */}
           <div className="flex items-center space-x-4">
+            {/* 🔔 Sistema Notifiche */}
+            <NotificationSystem userId={user?.id || ''} />
+            
             <div className="hidden sm:flex items-center space-x-3 bg-neutral-50 rounded-2xl p-2 pr-4">
               {user?.photoURL && (
                 <img

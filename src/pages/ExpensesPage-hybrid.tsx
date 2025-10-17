@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react'
-import { expenseService, eventService } from '../services/firestore'
+import { expenseService, eventService, paymentService } from '../services/firestore'
 import { useAuthStore } from '../stores/useAuthStore'
-import { Expense, Event, ExpenseParticipant } from '../types'
+import { useAppStore } from '../stores/AppStore'
+import { Expense, Event, ExpenseParticipant, ExpenseComment, ExpenseAttachment, PaymentTransaction } from '../types'
+import ExpenseComments from '../components/ExpenseComments'
+import ExpenseAttachments from '../components/ExpenseAttachments'
 
 // Dati mock per fallback
 const mockEvents: Event[] = [
@@ -11,6 +14,7 @@ const mockEvents: Event[] = [
     description: 'Cena al ristorante Da Mario',
     category: 'cena',
     date: new Date('2025-10-18T20:00:00'),
+    time: '20:00',
     location: 'Ristorante Da Mario',
     createdBy: 'mock-user',
     participants: [
@@ -28,6 +32,7 @@ const mockEvents: Event[] = [
     description: 'Film + aperitivo',
     category: 'cinema',
     date: new Date('2025-10-26T18:30:00'),
+    time: '18:30',
     location: 'Cinema Centrale',
     createdBy: 'user2',
     participants: [
@@ -74,8 +79,7 @@ const mockExpenses: Expense[] = [
 
 const ExpensesPage = () => {
   const { user } = useAuthStore()
-  const [expenses, setExpenses] = useState<Expense[]>([])
-  const [events, setEvents] = useState<Event[]>([])
+  const { expenses, events, setExpenses, setEvents, addExpense, updateExpense, deleteExpense } = useAppStore()
   const [loading, setLoading] = useState(true)
   const [useFirebase, setUseFirebase] = useState(true)
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'owed' | 'paid'>('all')
@@ -84,21 +88,32 @@ const ExpensesPage = () => {
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  // Form data per nuova spesa
+  // Form data per nuova spesa - ESTESO per divisione personalizzata
   const [formData, setFormData] = useState({
     title: '',
     amount: '',
     category: 'Cibo',
     eventId: '',
-    participants: [] as string[]
+    participants: [] as string[],
+    notes: '', // 📝 Note aggiuntive
+    splitType: 'equal' as 'equal' | 'custom' | 'percentage', // 🎛️ Tipo divisione
+    customAmounts: {} as Record<string, number>, // Importi custom per persona
+    customPercentages: {} as Record<string, number> // Percentuali custom per persona
   })
 
   const currentUser = user?.displayName || user?.email || 'Andrea'
-  const currentUserId = user?.uid || 'mock-user'
+  const currentUserId = user?.id || user?.email || 'mock-user'
 
-  // Carica dati (Firebase o mock)
+  // Carica dati (Firebase o mock) e aggiorna AppStore
   useEffect(() => {
     const loadData = async () => {
+      // Se i dati sono già caricati nell'AppStore, non ricaricarli
+      if (expenses.length > 0 && events.length > 0) {
+        setLoading(false)
+        console.log('📊 Using data from AppStore:', { expenses: expenses.length, events: events.length })
+        return
+      }
+
       try {
         setLoading(true)
         console.log('🔄 Loading expenses and events...')
@@ -130,7 +145,7 @@ const ExpensesPage = () => {
     }
 
     loadData()
-  }, [user, useFirebase])
+  }, [user, useFirebase, expenses.length, events.length, setExpenses, setEvents])
 
   // Calcolo del saldo totale
   const calculateBalance = () => {
@@ -151,6 +166,197 @@ const ExpensesPage = () => {
   }
 
   const balance = calculateBalance()
+
+  console.log('💰 ExpensesPage Balance Calculation:', { 
+    currentUserId, 
+    expensesCount: expenses.length, 
+    balance,
+    useFirebase,
+    expenses: expenses.map(e => ({
+      id: e.id,
+      title: e.title,
+      amount: e.amount,
+      paidBy: e.paidBy,
+      userParticipation: e.participants.find(p => p.userId === currentUserId)
+    }))
+  })
+
+  // --- NUOVI CALCOLI RIEPILOGO ---
+  // Totale che l'utente ha pagato (in tutte le spese o filtro corrente)
+  const calculateTotalPaid = (targetEventId: string | 'all' = 'all') => {
+    return expenses
+      .filter(e => targetEventId === 'all' ? true : e.eventId === targetEventId)
+      .reduce((s, e) => s + (e.paidBy === currentUserId ? e.amount : 0), 0)
+  }
+
+  // Totale che l'utente deve pagare (somma delle sue quote)
+  const calculateTotalOwed = (targetEventId: string | 'all' = 'all') => {
+    return expenses
+      .filter(e => targetEventId === 'all' ? true : e.eventId === targetEventId)
+      .reduce((s, e) => {
+        const p = e.participants.find(pp => pp.userId === currentUserId)
+        return s + (p ? p.amount : 0)
+      }, 0)
+  }
+
+  // Distribuzione di chi deve pagare a chi per evento (solo per 'all' mostrato per evento)
+  const calculateDistributionByEvent = () => {
+    // mappa eventId -> { eventTitle, map payeeId -> amount that others owe to payee }
+    const map: Record<string, { title: string; byPayee: Record<string, { name: string; amount: number }> }> = {}
+    expenses.forEach(exp => {
+      const ev = events.find(e => e.id === exp.eventId)
+      const evTitle = ev?.title || 'Evento sconosciuto'
+      if (!map[exp.eventId || 'no-event']) {
+        map[exp.eventId || 'no-event'] = { title: evTitle, byPayee: {} }
+      }
+      const target = map[exp.eventId || 'no-event'].byPayee
+      // chi ha pagato raccoglie gli importi dovuti dagli altri (escludendo se stesso)
+      exp.participants.forEach(p => {
+        if (p.userId !== exp.paidBy) {
+          if (!target[exp.paidBy]) target[exp.paidBy] = { name: '', amount: 0 }
+          target[exp.paidBy].name = exp.participants.find(x => x.userId === exp.paidBy)?.name || exp.paidBy
+          target[exp.paidBy].amount += p.amount
+        }
+      })
+    })
+    return map
+  }
+
+  // Per evento selezionato: dettaglio spesa e debiti verso/da
+  const calculateEventDetails = (eventId: string) => {
+    const eventExpenses = expenses.filter(e => e.eventId === eventId)
+    const totalEvent = eventExpenses.reduce((s, e) => s + e.amount, 0)
+
+    // Chi deve ricevere dall'utente e quanto
+    const userPaid = eventExpenses.filter(e => e.paidBy === currentUserId)
+    const userPaidTotal = userPaid.reduce((s, e) => s + e.participants.filter(p => p.userId !== currentUserId).reduce((ss, p) => ss + p.amount, 0), 0)
+
+    // Chi deve all'utente (gli importi che gli altri devono restituire a user)
+    const owesToUser: Record<string, { name: string; amount: number }> = {}
+    userPaid.forEach(e => {
+      e.participants.forEach(p => {
+        if (p.userId !== currentUserId && !p.settled) {
+          if (!owesToUser[p.userId]) owesToUser[p.userId] = { name: p.name, amount: 0 }
+          owesToUser[p.userId].amount += p.amount
+        }
+      })
+    })
+
+    // Quanto deve l'utente e a chi
+    const userOwes: Record<string, { name: string; amount: number }> = {}
+    eventExpenses.forEach(e => {
+      // trova la parte dell'utente
+      const up = e.participants.find(p => p.userId === currentUserId)
+      if (up && !up.settled) {
+        // paga a chi ha versato
+        if (!userOwes[e.paidBy]) userOwes[e.paidBy] = { name: e.participants.find(x => x.userId === e.paidBy)?.name || e.paidBy, amount: 0 }
+        userOwes[e.paidBy].amount += up.amount
+      }
+    })
+
+    return {
+      totalEvent,
+      userPaidTotal,
+      owesToUser,
+      userOwes
+    }
+  }
+
+  // 🧮 ALGORITMO SEMPLIFICAZIONE DEBITI
+  // Calcola i debiti netti e li semplifica per minimizzare le transazioni
+  const calculateSimplifiedDebts = (targetEventId: string | 'all' = 'all') => {
+    const filteredExpenses = expenses.filter(e => targetEventId === 'all' ? true : e.eventId === targetEventId)
+    
+    // Mappa: userId -> saldo netto (positivo = credito, negativo = debito)
+    const netBalances: Record<string, { name: string; balance: number }> = {}
+    
+    // Calcola saldi netti per ogni persona
+    filteredExpenses.forEach(exp => {
+      exp.participants.forEach(p => {
+        if (!netBalances[p.userId]) {
+          netBalances[p.userId] = { name: p.name, balance: 0 }
+        }
+        
+        if (p.userId === exp.paidBy) {
+          // Chi ha pagato: riceve credito per quello che gli altri devono
+          const othersOwed = exp.participants
+            .filter(other => other.userId !== exp.paidBy && !other.settled)
+            .reduce((sum, other) => sum + other.amount, 0)
+          netBalances[p.userId].balance += othersOwed
+        } else if (!p.settled) {
+          // Chi deve: debito verso chi ha pagato
+          netBalances[p.userId].balance -= p.amount
+        }
+      })
+    })
+    
+    // Separa creditori e debitori
+    const creditors = Object.entries(netBalances).filter(([_, data]) => data.balance > 0.01)
+    const debtors = Object.entries(netBalances).filter(([_, data]) => data.balance < -0.01)
+    
+    // Algoritmo di bilanciamento per minimizzare transazioni
+    const transactions: Array<{ from: string; fromName: string; to: string; toName: string; amount: number }> = []
+    
+    // Copia per non modificare originali
+    const creditorsWork = creditors.map(([id, data]) => ({ id, name: data.name, amount: data.balance }))
+    const debtorsWork = debtors.map(([id, data]) => ({ id, name: data.name, amount: -data.balance }))
+    
+    while (creditorsWork.length > 0 && debtorsWork.length > 0) {
+      const creditor = creditorsWork[0]
+      const debtor = debtorsWork[0]
+      
+      const transferAmount = Math.min(creditor.amount, debtor.amount)
+      
+      if (transferAmount > 0.01) {
+        transactions.push({
+          from: debtor.id,
+          fromName: debtor.name,
+          to: creditor.id,
+          toName: creditor.name,
+          amount: transferAmount
+        })
+      }
+      
+      creditor.amount -= transferAmount
+      debtor.amount -= transferAmount
+      
+      if (creditor.amount < 0.01) creditorsWork.shift()
+      if (debtor.amount < 0.01) debtorsWork.shift()
+    }
+    
+    return { netBalances, transactions }
+  }
+
+  // Funzione per azzerare debito mock/Firebase tra currentUser e otherUser per evento specifico
+  const settleDebtWith = async (otherUserId: string, eventId?: string) => {
+    // segnare come settled le quote relative fra currentUser e otherUser
+    try {
+      // Aggiorna le spese nell'AppStore
+      const updatedExpenses = expenses.map(exp => {
+        if (eventId && exp.eventId !== eventId) return exp
+        let modified = false
+        const participants = exp.participants.map(p => {
+          if ((p.userId === otherUserId && exp.paidBy === currentUserId) || (p.userId === currentUserId && exp.paidBy === otherUserId)) {
+            modified = true
+            return { ...p, settled: true }
+          }
+          return p
+        })
+        return modified ? { ...exp, participants, updatedAt: new Date() } : exp
+      })
+      setExpenses(updatedExpenses)
+
+      // Persist su Firebase se abilitato
+      if (useFirebase) {
+        // per ogni expense che cambiata, invia update
+        const toUpdate = expenses.filter(exp => (!eventId || exp.eventId === eventId) && exp.participants.some(p => (p.userId === otherUserId && exp.paidBy === currentUserId) || (p.userId === currentUserId && exp.paidBy === otherUserId)))
+        await Promise.all(toUpdate.map(exp => expenseService.update(exp.id, { participants: exp.participants } as any)))
+      }
+    } catch (error) {
+      console.error('❌ Error settling debt:', error)
+      alert('Errore durante l\'azzeramento del debito')
+    }
+  }
 
   const getCategoryIcon = (category: string) => {
     switch (category) {
@@ -232,12 +438,11 @@ const ExpensesPage = () => {
         // Salva su Firebase
         if (editingExpense) {
           await expenseService.update(editingExpense.id, expenseData)
-          const updatedExpenses = await expenseService.getAll()
-          setExpenses(updatedExpenses)
+          updateExpense(editingExpense.id, expenseData)
           setEditingExpense(null)
         } else {
           const newExpense = await expenseService.create(expenseData)
-          setExpenses(prev => [newExpense, ...prev])
+          addExpense(newExpense)
         }
       } else {
         // Simula salvataggio con dati mock
@@ -249,10 +454,10 @@ const ExpensesPage = () => {
         }
         
         if (editingExpense) {
-          setExpenses(prev => prev.map(exp => exp.id === editingExpense.id ? { ...newExpense, id: editingExpense.id } : exp))
+          updateExpense(editingExpense.id, newExpense)
           setEditingExpense(null)
         } else {
-          setExpenses(prev => [newExpense, ...prev])
+          addExpense(newExpense)
         }
       }
 
@@ -262,7 +467,11 @@ const ExpensesPage = () => {
         amount: '',
         category: 'Cibo',
         eventId: '',
-        participants: []
+        participants: [],
+        notes: '',
+        splitType: 'equal',
+        customAmounts: {},
+        customPercentages: {}
       })
       setShowForm(false)
       console.log('✅ Expense saved successfully')
@@ -293,7 +502,7 @@ const ExpensesPage = () => {
       if (useFirebase) {
         await expenseService.delete(expenseId)
       }
-      setExpenses(prev => prev.filter(exp => exp.id !== expenseId))
+      deleteExpense(expenseId)
       console.log('✅ Expense deleted successfully')
     } catch (error) {
       console.error('❌ Error deleting expense:', error)
@@ -420,6 +629,155 @@ const ExpensesPage = () => {
           </button>
         </div>
 
+        {/* Riepilogo avanzato */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          {selectedEvent === 'all' ? (
+            // Tutti gli eventi: mostra totale pagato, totale deve pagare, e DEBITI SEMPLIFICATI
+            <div>
+              <h3 className="text-sm font-semibold text-gray-600 uppercase mb-2">🧮 Riepilogo Ottimizzato (Tutti gli eventi)</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-xs text-gray-500">Totale pagato</p>
+                  <p className="text-lg font-bold">€{calculateTotalPaid('all').toFixed(2)}</p>
+                </div>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-xs text-gray-500">Totale che devi pagare</p>
+                  <p className="text-lg font-bold">€{calculateTotalOwed('all').toFixed(2)}</p>
+                </div>
+                <div className="p-3 bg-gray-50 rounded-lg">
+                  <p className="text-xs text-gray-500">Saldo netto</p>
+                  <p className={`text-lg font-bold ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>€{balance.toFixed(2)}</p>
+                </div>
+              </div>
+
+              {/* 🧮 DEBITI SEMPLIFICATI - Nuova sezione */}
+              <div className="mb-4">
+                <h4 className="text-sm font-medium text-gray-700 mb-2 flex items-center">
+                  <span className="mr-2">⚡</span>
+                  Transazioni Ottimizzate
+                  <span className="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                    Algoritmo di semplificazione
+                  </span>
+                </h4>
+                {(() => {
+                  const simplified = calculateSimplifiedDebts('all')
+                  return (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                      {simplified.transactions.length === 0 ? (
+                        <p className="text-sm text-blue-700 text-center">🎉 Tutti i conti sono in pari!</p>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-xs text-blue-600 font-medium">
+                            Solo {simplified.transactions.length} transazioni necessarie:
+                          </p>
+                          {simplified.transactions.map((tx, idx) => (
+                            <div key={idx} className="flex items-center justify-between bg-white rounded-md p-2">
+                              <div className="text-sm">
+                                <span className="font-medium">{tx.fromName}</span>
+                                <span className="mx-2">→</span>
+                                <span className="font-medium">{tx.toName}</span>
+                              </div>
+                              <div className="text-sm font-bold text-blue-700">
+                                €{tx.amount.toFixed(2)}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
+              </div>
+
+              <div>
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Distribuzione per evento</h4>
+                <div className="space-y-3">
+                  {Object.entries(calculateDistributionByEvent()).map(([evId, data]) => (
+                    <div key={evId} className="p-3 border rounded-lg bg-white/50">
+                      <div className="flex justify-between items-center mb-2">
+                        <div className="font-semibold">{data.title}</div>
+                        <div className="text-sm text-gray-500">{evId === 'no-event' ? 'Senza evento' : ''}</div>
+                      </div>
+                      <div className="grid grid-cols-1 gap-2">
+                        {Object.entries(data.byPayee).map(([payeeId, v]) => (
+                          <div key={payeeId} className="flex justify-between text-sm">
+                            <div>{v.name || payeeId}</div>
+                            <div className="font-medium">€{v.amount.toFixed(2)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : (
+            // Evento selezionato: dettagli specifici
+            <div>
+              <h3 className="text-sm font-semibold text-gray-600 uppercase mb-2">Riepilogo Evento</h3>
+              {(() => {
+                const details = calculateEventDetails(selectedEvent)
+                const ev = events.find(e => e.id === selectedEvent)
+                return (
+                  <div>
+                    <div className="mb-3">
+                      <p className="text-xs text-gray-500">Evento</p>
+                      <div className="font-semibold">{ev?.title || 'Evento sconosciuto'}</div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-3">
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <p className="text-xs text-gray-500">Totale speso (tutti)</p>
+                        <p className="text-lg font-bold">€{details.totalEvent.toFixed(2)}</p>
+                      </div>
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <p className="text-xs text-gray-500">Hai pagato (altro ti deve)</p>
+                        <p className="text-lg font-bold">€{details.userPaidTotal.toFixed(2)}</p>
+                      </div>
+                      <div className="p-3 bg-gray-50 rounded-lg">
+                        <p className="text-xs text-gray-500">Devi a altri</p>
+                        <p className="text-lg font-bold">€{calculateTotalOwed(selectedEvent).toFixed(2)}</p>
+                      </div>
+                    </div>
+
+                    <div className="mb-3">
+                      <h4 className="text-sm font-medium text-gray-700">Ti devono</h4>
+                      {Object.keys(details.owesToUser).length === 0 && <p className="text-sm text-gray-500">Nessuno ti deve</p>}
+                      {Object.entries(details.owesToUser).map(([uid, val]) => (
+                        <div key={uid} className="flex items-center justify-between py-2 border-b">
+                          <div>
+                            <div className="font-medium">{val.name}</div>
+                            <div className="text-sm text-gray-500">Ti deve €{val.amount.toFixed(2)}</div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button onClick={() => settleDebtWith(uid, selectedEvent)} className="px-3 py-1 bg-green-50 text-green-700 rounded-md text-sm">Azzera</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div>
+                      <h4 className="text-sm font-medium text-gray-700">Devi a</h4>
+                      {Object.keys(details.userOwes).length === 0 && <p className="text-sm text-gray-500">Non devi nulla</p>}
+                      {Object.entries(details.userOwes).map(([uid, val]) => (
+                        <div key={uid} className="flex items-center justify-between py-2 border-b">
+                          <div>
+                            <div className="font-medium">{val.name}</div>
+                            <div className="text-sm text-gray-500">Devi €{val.amount.toFixed(2)}</div>
+                          </div>
+                          <div className="flex items-center space-x-2">
+                            <button onClick={() => settleDebtWith(uid, selectedEvent)} className="px-3 py-1 bg-blue-50 text-blue-700 rounded-md text-sm">Segna come pagato</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+        </div>
+
         {/* Filtro per evento */}
         <div className="flex items-center space-x-2">
           <span className="text-sm font-medium text-gray-700">Evento:</span>
@@ -464,6 +822,36 @@ const ExpensesPage = () => {
                     <p className="text-sm text-gray-500">
                       {expense.participants.length} partecipanti: {expense.participants.map(p => p.name).join(', ')}
                     </p>
+                    
+                    {/* Mostra debiti per questa spesa */}
+                    {(() => {
+                      const userParticipation = expense.participants.find(p => p.userId === currentUserId)
+                      if (userParticipation && expense.paidBy !== currentUserId) {
+                        return (
+                          <div className="mt-2 p-2 bg-orange-50 rounded-lg">
+                            <div className="flex items-center justify-between">
+                              <div>
+                                <p className="text-sm text-orange-700">
+                                  Devi €{userParticipation.amount.toFixed(2)} a {paidByName}
+                                </p>
+                                {userParticipation.settled && (
+                                  <span className="text-xs text-green-600">✓ Già pagato</span>
+                                )}
+                              </div>
+                              {!userParticipation.settled && (
+                                <button
+                                  onClick={() => settleDebtWith(expense.paidBy, expense.eventId)}
+                                  className="px-3 py-1 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600 transition-colors"
+                                >
+                                  Segna come pagato
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )
+                      }
+                      return null
+                    })()}
                   </div>
                 </div>
                 <div className="flex items-center space-x-4">
@@ -476,6 +864,32 @@ const ExpensesPage = () => {
                       <span className="inline-block mt-1 px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
                         Hai pagato tu
                       </span>
+                    )}
+                    
+                    {/* Mostra chi deve soldi all'utente per questa spesa */}
+                    {expense.paidBy === currentUserId && (
+                      <div className="mt-2">
+                        {expense.participants.filter(p => p.userId !== currentUserId).map(participant => (
+                          <div key={participant.userId} className="flex items-center justify-between py-1 px-2 bg-green-50 rounded-md mt-1">
+                            <div className="flex items-center space-x-2">
+                              <span className="text-sm text-green-700">
+                                {participant.name} deve €{participant.amount.toFixed(2)}
+                              </span>
+                              {participant.settled && (
+                                <span className="text-xs text-green-600">✓</span>
+                              )}
+                            </div>
+                            {!participant.settled && (
+                              <button
+                                onClick={() => settleDebtWith(participant.userId, expense.eventId)}
+                                className="px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600 transition-colors"
+                              >
+                                Ricevuto
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
                   {/* Controlli modifica/cancellazione per chi ha creato la spesa */}

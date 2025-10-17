@@ -12,7 +12,7 @@ import {
   Timestamp 
 } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { Event, Expense, Poll, ShoppingList } from '../types'
+import { Event, Expense, Poll, ShoppingList, PaymentTransaction } from '../types'
 
 // Events Service
 export const eventService = {
@@ -267,6 +267,71 @@ export const expenseService = {
     } catch (error) {
       console.error('❌ Error deleting expense:', error)
       throw new Error('Errore durante l\'eliminazione della spesa')
+    }
+  }
+}
+
+// Payment Transactions Service - 💸 NUOVO
+export const paymentService = {
+  async create(paymentData: Omit<PaymentTransaction, 'id' | 'createdAt'>): Promise<PaymentTransaction> {
+    try {
+      console.log('💸 Creating payment transaction:', paymentData.amount)
+      const docRef = await addDoc(collection(db, 'payments'), {
+        ...paymentData,
+        createdAt: Timestamp.now()
+      })
+      
+      const newPayment: PaymentTransaction = {
+        id: docRef.id,
+        ...paymentData,
+        createdAt: new Date()
+      }
+      
+      console.log('✅ Payment transaction created:', newPayment.id)
+      return newPayment
+    } catch (error) {
+      console.error('❌ Error creating payment:', error)
+      throw new Error('Errore durante la registrazione del pagamento')
+    }
+  },
+
+  async getAll(): Promise<PaymentTransaction[]> {
+    try {
+      const q = query(collection(db, 'payments'), orderBy('createdAt', 'desc'))
+      const querySnapshot = await getDocs(q)
+      
+      const payments: PaymentTransaction[] = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      })) as PaymentTransaction[]
+      
+      return payments
+    } catch (error) {
+      console.error('❌ Error fetching payments:', error)
+      throw new Error('Errore durante il caricamento dei pagamenti')
+    }
+  },
+
+  async getByEvent(eventId: string): Promise<PaymentTransaction[]> {
+    try {
+      const q = query(
+        collection(db, 'payments'), 
+        where('eventId', '==', eventId),
+        orderBy('createdAt', 'desc')
+      )
+      const querySnapshot = await getDocs(q)
+      
+      const payments: PaymentTransaction[] = querySnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data().createdAt?.toDate() || new Date()
+      })) as PaymentTransaction[]
+      
+      return payments
+    } catch (error) {
+      console.error('❌ Error fetching payments for event:', error)
+      throw new Error('Errore durante il caricamento dei pagamenti per l\'evento')
     }
   }
 }

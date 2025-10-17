@@ -1,14 +1,13 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
-// import { AuthProvider } from './contexts/AuthContext'
-// import Layout from './components/Layout/Layout'
-// import { checkFirebaseConfig, debugFirebaseConfig } from './firebase/utils'
-import HomePage from './pages/HomePage-simple'
-// import EventsPage from './pages/EventsPage'
-// import ExpensesPage from './pages/ExpensesPage'
-// import PollsPage from './pages/PollsPage'
-// import ListsPage from './pages/ListsPage'
-// import LoginPage from './pages/LoginPage'
-// import { useAuthStore } from './stores/useAuthStore'
+import Layout from './components/Layout/Layout'
+import { checkFirebaseConfig, debugFirebaseConfig } from './firebase/utils'
+import HomePage from './pages/HomePage'
+import EventsPage from './pages/EventsPage-complete'
+import ExpensesPage from './pages/ExpensesPage-hybrid'
+import PollsPage from './pages/PollsPage-firebase'
+import ListsPage from './pages/ListsPage-firebase'
+import LoginPage from './pages/LoginPage'
+import { useAuthStore } from './stores/useAuthStore'
 
 function App() {
   // Check Firebase configuration in development
@@ -18,11 +17,9 @@ function App() {
   }
 
   return (
-    <AuthProvider>
-      <Router>
-        <AppContent />
-      </Router>
-    </AuthProvider>
+    <Router>
+      <AppContent />
+    </Router>
   )
 }
 
