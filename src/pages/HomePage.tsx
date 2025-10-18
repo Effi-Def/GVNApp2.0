@@ -1,87 +1,39 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../stores/AppStore'
 import { useAuthStore } from '../stores/useAuthStore'
-import { eventService, expenseService } from '../services/firestore'
+import { useNavigate } from 'react-router-dom'
+import MonthCalendar from '../components/Calendar/MonthCalendar'
 
 const HomePage = () => {
   const { user } = useAuthStore()
-  const { events, expenses, setEvents, setExpenses } = useAppStore()
+  const { events, expenses } = useAppStore()
+  const navigate = useNavigate()
   
   const [isLoading, setIsLoading] = useState(false)
 
-  // Funzione per ricaricare i dati manualmente
+  // Funzione per ricaricare i dati manualmente usando lo store
   const refreshData = async () => {
-    if (!user?.uid) return
-    
-    console.log('🔄 HomePage: Manual data refresh...')
     setIsLoading(true)
-    
     try {
-      const [eventsData, expensesData] = await Promise.all([
-        eventService.getEvents(user.uid),
-        expenseService.getExpenses(user.uid)
-      ])
-      
-      console.log('🔄 HomePage: Refreshed data:', { events: eventsData.length, expenses: expensesData.length })
-      setEvents(eventsData)
-      setExpenses(expensesData)
-    } catch (error) {
-      console.error('❌ HomePage: Error refreshing data:', error)
-      // Fallback ai dati mock
-      const mockData = await import('../data/mockData')
-      setEvents(mockData.mockEvents)
-      setExpenses(mockData.mockExpenses)
+      // Prova a usare una funzione di caricamento centralizzata se esiste
+      const { loadUserData } = useAuthStore.getState() as any
+      if (typeof loadUserData === 'function') {
+        await loadUserData()
+      }
     } finally {
       setIsLoading(false)
     }
   }
 
-  // Fallback data loading se l'AppStore è vuoto
+  // Assicurati che se lo store è vuoto proviamo un caricamento centralizzato una sola volta
   useEffect(() => {
-    const loadDataFallback = async () => {
-      if (!user?.uid) return
-      
-      // Controlla se i dati sono già caricati
-      if (events.length > 0 || expenses.length > 0) return
-      
-      console.log('📱 HomePage: Loading fallback data...')
-      setIsLoading(true)
-      
-      try {
-        // Prova Firebase prima
-        const [eventsData, expensesData] = await Promise.all([
-          eventService.getEvents(user.uid),
-          expenseService.getExpenses(user.uid)
-        ])
-        
-        if (eventsData.length > 0 || expensesData.length > 0) {
-          console.log('🔥 HomePage: Loaded from Firebase:', { events: eventsData.length, expenses: expensesData.length })
-          setEvents(eventsData)
-          setExpenses(expensesData)
-        } else {
-          // Fallback ai dati mock
-          console.log('🎭 HomePage: Using mock data fallback')
-          const mockData = await import('../data/mockData')
-          setEvents(mockData.mockEvents)
-          setExpenses(mockData.mockExpenses)
-        }
-      } catch (error) {
-        console.error('❌ HomePage: Error loading data:', error)
-        // Fallback ai dati mock in caso di errore
-        try {
-          const mockData = await import('../data/mockData')
-          setEvents(mockData.mockEvents)
-          setExpenses(mockData.mockExpenses)
-        } catch (mockError) {
-          console.error('❌ HomePage: Error loading mock data:', mockError)
-        }
-      } finally {
-        setIsLoading(false)
+    if (events.length === 0 && expenses.length === 0) {
+      const { loadUserData } = useAuthStore.getState() as any
+      if (typeof loadUserData === 'function') {
+        loadUserData()
       }
     }
-
-    loadDataFallback()
-  }, [user?.uid, events.length, expenses.length, setEvents, setExpenses])
+  }, [events.length, expenses.length])
 
   // Prendi i prossimi 3-5 eventi
   const today = new Date()
@@ -131,10 +83,10 @@ const HomePage = () => {
   })
 
   return (
-    <div className="space-y-8 pb-8">
+    <div className="space-y-6 sm:space-y-8 pb-6 sm:pb-8">
       {/* Loading state */}
       {isLoading && (
-        <div className="gvn-card p-6 bg-gradient-to-r from-primary-50 to-accent-50 border-primary-200">
+        <div className="gvn-card p-4 sm:p-6 bg-gradient-to-r from-primary-50 to-accent-50 border-primary-200">
           <div className="flex items-center space-x-3">
             <div className="animate-spin h-5 w-5 border-2 border-primary-600 border-t-transparent rounded-full"></div>
             <span className="text-primary-700 font-medium">Caricamento dati in corso...</span>
@@ -143,24 +95,24 @@ const HomePage = () => {
       )}
 
       {/* Hero Header con mascotte */}
-      <div className="gvn-card p-8 bg-gradient-to-br from-primary-50 via-white to-accent-50 border-primary-100 relative overflow-hidden">
+      <div className="gvn-card p-6 sm:p-8 bg-gradient-to-br from-primary-50 via-white to-accent-50 border-primary-100 relative overflow-hidden">
         {/* Mascotte floating */}
-        <div className="absolute top-4 right-6 text-4xl animate-float opacity-60">
+        <div className="hidden sm:block absolute top-4 right-6 text-4xl animate-float opacity-60">
           🐷
         </div>
         
-        <div className="flex items-center justify-between relative z-10">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between relative z-10">
           <div className="space-y-3">
             <div className="flex items-center space-x-3">
-              <h1 className="gvn-title text-3xl lg:text-4xl bg-gradient-to-r from-primary-600 to-accent-500 bg-clip-text text-transparent">
-                Ciao, {user?.displayName?.split(' ')[0] || 'Amico'}!
+              <h1 className="gvn-title text-2xl sm:text-3xl lg:text-4xl bg-gradient-to-r from-primary-600 to-accent-500 bg-clip-text text-transparent">
+                Ciao, {(user?.displayName && user.displayName !== 'Utente') ? user.displayName : (user?.email ? user.email.split('@')[0] : 'Amico')}!
               </h1>
               <span className="text-2xl animate-bounce">👋</span>
             </div>
-            <p className="text-neutral-600 text-lg font-medium">
+            <p className="text-neutral-600 text-base sm:text-lg font-medium">
               Benvenuto nel tuo hub sociale del <span className="gvn-badge-pig">🐷 Gruppo GVN</span>
             </p>
-            <p className="text-neutral-500 flex items-center gap-2">
+            <p className="text-neutral-500 flex flex-wrap items-center gap-2 text-sm sm:text-base">
               Gestisci eventi, spese e decisioni di gruppo tutto in un posto
               {/* Pulsante refresh dati */}
               <button
@@ -179,21 +131,15 @@ const HomePage = () => {
         </div>
       </div>
 
-      {/* Stats Cards redesigned */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="gvn-card p-6 group hover:scale-105">
-          <div className="flex items-center justify-between">
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">Eventi Totali</p>
-              <p className="gvn-title text-4xl text-primary-600">{events.length}</p>
-              <p className="text-xs text-neutral-400">
-                {upcomingEvents.length} in programma
-              </p>
-            </div>
-            <div className="bg-gradient-to-br from-primary-100 to-primary-200 p-4 rounded-2xl group-hover:scale-110 transition-transform">
-              <span className="text-3xl">🎉</span>
-            </div>
-          </div>
+      {/* Calendar + Stats */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+        <div className="lg:col-span-2">
+          <MonthCalendar
+            events={events}
+            onSelectEvent={(eventId) => navigate(`/events/${eventId}/summary`)}
+            compact
+            currentUserId={currentUserId}
+          />
         </div>
 
         <div className="gvn-card p-6 group hover:scale-105">
@@ -218,7 +164,6 @@ const HomePage = () => {
             </div>
           </div>
         </div>
-
         <div className="gvn-card p-6 group hover:scale-105">
           <div className="flex items-center justify-between">
             <div className="space-y-2">
@@ -236,8 +181,8 @@ const HomePage = () => {
       </div>
 
       {/* Prossimi Eventi - redesigned */}
-      <div className="gvn-card p-8">
-        <div className="flex items-center justify-between mb-6">
+      <div className="gvn-card p-6 sm:p-8">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
           <h2 className="gvn-title text-2xl flex items-center space-x-3">
             <span>🎉</span>
             <span>Eventi in Programma</span>
@@ -254,7 +199,7 @@ const HomePage = () => {
           <div className="space-y-4">
             {nextUpcomingEvents.map((event, index) => (
               <div key={event.id} className="relative">
-                <div className="flex items-start space-x-4 p-4 rounded-xl bg-gradient-to-r from-neutral-50 to-transparent border border-neutral-100 hover:shadow-md transition-all duration-200">
+                <div onClick={() => navigate(`/events/${event.id}/summary`)} className="cursor-pointer flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-0 sm:space-x-4 p-4 rounded-xl bg-gradient-to-r from-neutral-50 to-transparent border border-neutral-100 hover:shadow-md transition-all duration-200">
                   <div className="flex-shrink-0">
                     <div className="w-12 h-12 bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg">
                       {new Date(event.date).getDate()}
@@ -262,7 +207,7 @@ const HomePage = () => {
                   </div>
                   <div className="flex-1 min-w-0">
                     <h3 className="font-bold text-neutral-900 text-lg">{event.title}</h3>
-                    <div className="flex items-center space-x-4 mt-2 text-sm text-neutral-600">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 mt-2 text-sm text-neutral-600 space-y-2 sm:space-y-0">
                       <span className="flex items-center space-x-1">
                         <span>📅</span>
                         <span>{new Date(event.date).toLocaleDateString('it-IT')} alle {event.time}</span>
@@ -272,7 +217,7 @@ const HomePage = () => {
                         <span>{event.location}</span>
                       </span>
                     </div>
-                    <div className="mt-3 flex items-center justify-between">
+                    <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
                       <span className="text-xs font-semibold text-primary-600 bg-primary-50 px-3 py-1 rounded-full">
                         {event.participants.filter(p => p.status === 'yes').length} confermati
                       </span>
@@ -301,13 +246,13 @@ const HomePage = () => {
       </div>
 
       {/* Attività recenti - redesigned */}
-      <div className="gvn-card p-8">
+      <div className="gvn-card p-6 sm:p-8">
         <h2 className="gvn-title text-2xl flex items-center space-x-3 mb-6">
           <span>🔔</span>
           <span>Attività Recenti</span>
         </h2>
         <div className="space-y-4">
-          <div className="flex items-center space-x-4 p-4 rounded-xl bg-blue-50 border border-blue-100">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-3 sm:space-y-0 p-4 rounded-xl bg-blue-50 border border-blue-100">
             <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
             <div className="flex-1">
               <span className="font-medium text-neutral-700">Nuovo evento creato: "Cena al ristorante"</span>
@@ -315,7 +260,7 @@ const HomePage = () => {
             </div>
             <span className="text-xl">🎉</span>
           </div>
-          <div className="flex items-center space-x-4 p-4 rounded-xl bg-green-50 border border-green-100">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-3 sm:space-y-0 p-4 rounded-xl bg-green-50 border border-green-100">
             <div className="w-3 h-3 bg-green-500 rounded-full"></div>
             <div className="flex-1">
               <span className="font-medium text-neutral-700">Marco ha confermato la partecipazione</span>
@@ -323,7 +268,7 @@ const HomePage = () => {
             </div>
             <span className="text-xl">✅</span>
           </div>
-          <div className="flex items-center space-x-4 p-4 rounded-xl bg-amber-50 border border-amber-100">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-3 sm:space-y-0 p-4 rounded-xl bg-amber-50 border border-amber-100">
             <div className="w-3 h-3 bg-amber-500 rounded-full"></div>
             <div className="flex-1">
               <span className="font-medium text-neutral-700">Nuova spesa aggiunta: "Benzina viaggio"</span>

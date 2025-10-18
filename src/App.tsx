@@ -8,6 +8,7 @@ import PollsPage from './pages/PollsPage-firebase'
 import ListsPage from './pages/ListsPage-firebase'
 import LoginPage from './pages/LoginPage'
 import { useAuthStore } from './stores/useAuthStore'
+import EventSummary from './pages/EventSummary'
 
 function App() {
   // Check Firebase configuration in development
@@ -43,6 +44,7 @@ function AppContent() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/events" element={<EventsPage />} />
+        <Route path="/events/:id/summary" element={<EventSummary />} />
         <Route path="/expenses" element={<ExpensesPage />} />
         <Route path="/polls" element={<PollsPage />} />
         <Route path="/lists" element={<ListsPage />} />

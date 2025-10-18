@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { eventService } from '../services/firestore'
 import { useAuthStore } from '../stores/useAuthStore'
 import { Event, EventCategory, EventParticipant } from '../types'
 
 const EventsPage = () => {
   const { user } = useAuthStore()
+  const navigate = useNavigate()
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -281,7 +283,7 @@ const EventsPage = () => {
               return (
                 <div key={event.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
                   <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1">
+                    <div className="flex-1 cursor-pointer" onClick={() => navigate(`/events/${event.id}/summary`)}>
                       <div className="flex items-center space-x-2 mb-2">
                         <span className="text-2xl">{getCategoryIcon(event.category)}</span>
                         <h3 className="text-xl font-semibold text-gray-800">{event.title}</h3>
