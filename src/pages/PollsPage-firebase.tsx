@@ -8,6 +8,7 @@ const PollsPage = () => {
   const [polls, setPolls] = useState<Poll[]>([])
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedEvent, setSelectedEvent] = useState<string>('all')
   const [showForm, setShowForm] = useState(false)
   const [editingPoll, setEditingPoll] = useState<Poll | null>(null)
   const [submitting, setSubmitting] = useState(false)
@@ -48,6 +49,15 @@ const PollsPage = () => {
 
     loadData()
   }, [])
+
+  // Selezione evento per filtro (UI verrà aggiunta dove serve)
+  // Reset automatico se l'evento selezionato non esiste più
+  useEffect(() => {
+    if (selectedEvent !== 'all') {
+      const exists = events.some(e => e.id === selectedEvent)
+      if (!exists) setSelectedEvent('all')
+    }
+  }, [events, selectedEvent])
 
   // Timer per aggiornare i countdown
   useEffect(() => {
@@ -313,11 +323,30 @@ const PollsPage = () => {
             <span className="hidden sm:inline">Nuovo Sondaggio</span>
           </button>
         </div>
+
+        {/* Filtri */}
+        <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-700">Evento:</span>
+            <select
+              value={selectedEvent}
+              onChange={(e) => setSelectedEvent(e.target.value)}
+              className="px-3 py-1 rounded-lg border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
+            >
+              <option value="all">Tutti gli eventi</option>
+              {events.map(event => (
+                <option key={event.id} value={event.id}>{event.title}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* Lista Sondaggi */}
       <div className="space-y-6">
-        {polls.map(poll => {
+        {polls
+          .filter(p => selectedEvent === 'all' || p.eventId === selectedEvent)
+          .map(poll => {
           const userHasVoted = hasUserVoted(poll)
           const userVotedOption = getUserVotedOption(poll)
           const totalVotes = poll.votes.length
@@ -477,7 +506,7 @@ const PollsPage = () => {
           )
         })}
 
-        {polls.length === 0 && (
+        {polls.filter(p => selectedEvent === 'all' || p.eventId === selectedEvent).length === 0 && (
           <div className="text-center py-12">
             <div className="text-6xl mb-4">🗳️</div>
             <h3 className="text-xl font-semibold text-gray-600 mb-2">Nessun sondaggio</h3>

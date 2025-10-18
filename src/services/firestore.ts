@@ -86,7 +86,7 @@ export const eventService = {
     }
   },
 
-  // Delete event with cascading delete for related expenses and polls
+  // Delete event with cascading delete for related expenses, polls and lists
   async delete(id: string): Promise<void> {
     try {
       console.log('📅 Deleting event and related data:', id)
@@ -102,11 +102,18 @@ export const eventService = {
       const pollsSnapshot = await getDocs(pollsQuery)
       const pollDeletePromises = pollsSnapshot.docs.map(doc => deleteDoc(doc.ref))
       console.log(`🗑️ Found ${pollsSnapshot.docs.length} polls to delete`)
+
+      // Delete all shopping lists related to this event
+      const listsQuery = query(collection(db, 'lists'), where('eventId', '==', id))
+      const listsSnapshot = await getDocs(listsQuery)
+      const listDeletePromises = listsSnapshot.docs.map(doc => deleteDoc(doc.ref))
+      console.log(`🗑️ Found ${listsSnapshot.docs.length} lists to delete`)
       
       // Execute all deletions in parallel
       await Promise.all([
         ...expenseDeletePromises,
         ...pollDeletePromises,
+        ...listDeletePromises,
         deleteDoc(doc(db, 'events', id))
       ])
       
@@ -541,6 +548,41 @@ export const listService = {
     } catch (error) {
       console.error('❌ Error deleting list:', error)
       throw new Error('Errore durante l\'eliminazione della lista')
+    }
+  }
+}
+
+// Users Service (profiles and notification settings)
+export const userService = {
+  async get(userId: string): Promise<{ profile?: any; notifications?: any } | null> {
+    try {
+      const ref = doc(db, 'users', userId)
+      const snap = await getDoc(ref)
+      if (!snap.exists()) return null
+      return snap.data() as any
+    } catch (e) {
+      console.error('❌ Error fetching user settings:', e)
+      return null
+    }
+  },
+  async createOrUpdate(userId: string, data: any): Promise<void> {
+    try {
+      const ref = doc(db, 'users', userId)
+      // setDoc with merge will create the doc if missing and update otherwise
+      const { setDoc } = await import('firebase/firestore')
+      await setDoc(ref, data, { merge: true })
+    } catch (e) {
+      console.error('❌ Error creating/updating user settings:', e)
+      throw e
+    }
+  },
+  async updatePartial(userId: string, data: any): Promise<void> {
+    try {
+      const ref = doc(db, 'users', userId)
+      await updateDoc(ref, data)
+    } catch (e) {
+      console.error('❌ Error updating user settings:', e)
+      throw e
     }
   }
 }

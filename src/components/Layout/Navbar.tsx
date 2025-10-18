@@ -1,10 +1,13 @@
 import { Link, useLocation } from 'react-router-dom'
 import { useAuthStore } from '../../stores/useAuthStore'
 import NotificationSystem from '../NotificationSystem'
+import { PigAvatar } from '../Avatar/PigAvatar'
+import { useUserSettingsStore } from '../../stores/UserSettingsStore'
 
 const Navbar = () => {
   const location = useLocation()
   const { user, logout } = useAuthStore()
+  const { profile } = useUserSettingsStore()
 
   const navigation = [
     { name: 'Home', href: '/', icon: '🏠', emoji: '🏠' },
@@ -37,7 +40,9 @@ const Navbar = () => {
                 <span className="text-xl font-bold font-display text-neutral-900 tracking-tight">GVNApp</span>
               </div>
               {/* Piccola mascotte */}
-              <span className="text-lg group-hover:animate-bounce transition-transform">🐷</span>
+              <span className="text-lg group-hover:animate-bounce transition-transform">
+                <PigAvatar keyName={(profile?.avatarKey as any) || 'pig-0'} />
+              </span>
             </Link>
           </div>
 
@@ -63,6 +68,16 @@ const Navbar = () => {
           <div className="flex items-center space-x-4">
             {/* 🔔 Sistema Notifiche */}
             <NotificationSystem userId={user?.id || ''} />
+            {/* ⚙️ Settings */}
+            <Link
+              to="/settings"
+              className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+              title="Impostazioni"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 4a1 1 0 012 0v1.09a7.007 7.007 0 012.326.96l.77-.771a1 1 0 111.414 1.415l-.77.77c.39.707.676 1.478.84 2.29H20a1 1 0 110 2h-1.09a7.007 7.007 0 01-.96 2.326l.771.77a1 1 0 11-1.415 1.414l-.77-.77a7.007 7.007 0 01-2.29.84V20a1 1 0 11-2 0v-1.09a7.007 7.007 0 01-2.326-.96l-.77.771a1 1 0 11-1.414-1.415l.77-.77a7.007 7.007 0 01-.84-2.29H4a1 1 0 110-2h1.09a7.007 7.007 0 01.96-2.326l-.771-.77a1 1 0 111.415-1.414l.77.77A7.007 7.007 0 019.29 5.09V4zM12 9a3 3 0 100 6 3 3 0 000-6z" />
+              </svg>
+            </Link>
             
             <div className="hidden sm:flex items-center space-x-3 bg-neutral-50 rounded-2xl p-2 pr-4">
               {user?.photoURL && (

@@ -8,7 +8,7 @@ import { Event, Expense, Poll, ShoppingList } from '../types'
 const EventSummary = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { events } = useAppStore()
+  const { events, updateEvent } = useAppStore()
   const { user } = useAuthStore()
   const [event, setEvent] = useState<Event | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -44,6 +44,38 @@ const EventSummary = () => {
   }, [id, events])
 
   const participants = event?.participants || []
+
+  // Stato partecipazione utente corrente
+  const currentUserId = user?.id || user?.email || ''
+  const currentUserName = user?.displayName || user?.email || 'Utente'
+  const myParticipation = participants.find(p => p.userId === currentUserId)
+  const myStatus: 'yes' | 'no' | 'maybe' | 'none' = (myParticipation?.status as any) || 'none'
+
+  const handleParticipation = async (status: 'yes' | 'no' | 'maybe') => {
+    if (!event || !currentUserId) return
+    try {
+      await eventService.updateParticipation(event.id, currentUserId, currentUserName, status)
+
+      // Aggiorna localmente lo stato evento e lo store globale
+      const updatedParticipants = (() => {
+        const arr = [...(event.participants || [])]
+        const idx = arr.findIndex(p => p.userId === currentUserId)
+        if (idx >= 0) {
+          arr[idx] = { ...arr[idx], status, respondedAt: new Date() }
+        } else {
+          arr.push({ userId: currentUserId, name: currentUserName, status, respondedAt: new Date() })
+        }
+        return arr
+      })()
+
+      const updated = { ...event, participants: updatedParticipants, updatedAt: new Date() }
+      setEvent(updated)
+      updateEvent(event.id, { participants: updatedParticipants, updatedAt: new Date() })
+    } catch (err) {
+      console.error('❌ Error updating participation from summary:', err)
+      alert('Errore durante l\'aggiornamento della partecipazione')
+    }
+  }
 
   const balances = useMemo(() => {
     if (!event) return [] as { userId: string; name: string; balance: number }[]
@@ -116,6 +148,36 @@ const EventSummary = () => {
             <span key={p.userId} className="px-2 py-1 text-sm rounded bg-gray-100 text-gray-700">{p.name} ({p.status})</span>
           ))}
         </div>
+        {/* Controlli partecipazione utente corrente */}
+        {currentUserId && (
+          <div className="mt-4 flex items-center gap-2">
+            <span className="text-sm text-gray-700">La tua risposta:</span>
+            <button
+              onClick={() => handleParticipation('yes')}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                myStatus === 'yes' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-green-100'
+              }`}
+            >
+              ✓ Partecipo
+            </button>
+            <button
+              onClick={() => handleParticipation('maybe')}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                myStatus === 'maybe' ? 'bg-yellow-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-yellow-100'
+              }`}
+            >
+              ? Forse
+            </button>
+            <button
+              onClick={() => handleParticipation('no')}
+              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
+                myStatus === 'no' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-red-100'
+              }`}
+            >
+              ✗ Non partecipo
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Balances (summary) */}

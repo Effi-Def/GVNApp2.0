@@ -3,11 +3,13 @@ import { useNavigate } from 'react-router-dom'
 import { eventService } from '../services/firestore'
 import { useAuthStore } from '../stores/useAuthStore'
 import { Event, EventCategory, EventParticipant } from '../types'
+import { useAppStore } from '../stores/AppStore'
 
 const EventsPage = () => {
   const { user } = useAuthStore()
   const navigate = useNavigate()
-  const [events, setEvents] = useState<Event[]>([])
+  // Usa lo store centrale per avere eventi sincronizzati in tutta l'app
+  const { events, setEvents, addEvent, updateEvent, deleteEvent, expenses, polls, lists, setExpenses, setPolls, setLists } = useAppStore() as any
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | null>(null)
@@ -46,6 +48,7 @@ const EventsPage = () => {
         setLoading(true)
         console.log('📅 Loading events...')
         const eventsData = await eventService.getAll()
+        // Aggiorna lo store centrale
         setEvents(eventsData)
         console.log(`✅ Loaded ${eventsData.length} events`)
       } catch (error) {
@@ -114,12 +117,13 @@ const EventsPage = () => {
 
       if (editingEvent) {
         await eventService.update(editingEvent.id, eventData)
-        const updatedEvents = await eventService.getAll()
-        setEvents(updatedEvents)
+        // Aggiorna subito lo store per riflettere la modifica
+        updateEvent(editingEvent.id, { ...eventData, updatedAt: new Date() } as Partial<Event>)
         setEditingEvent(null)
       } else {
         const newEvent = await eventService.create(eventData)
-        setEvents(prev => [newEvent, ...prev])
+        // Aggiungi all'elenco eventi globale
+        addEvent(newEvent)
       }
 
       // Reset form
@@ -163,7 +167,12 @@ const EventsPage = () => {
 
     try {
       await eventService.delete(eventId)
-      setEvents(prev => prev.filter(e => e.id !== eventId))
+      // Rimuovi anche dallo store globale
+      deleteEvent(eventId)
+      // Pulisci dati correlati dal client store
+      setExpenses(expenses.filter((e: any) => e.eventId !== eventId))
+      setPolls(polls.filter((p: any) => p.eventId !== eventId))
+      setLists(lists.filter((l: any) => l.eventId !== eventId))
       console.log('✅ Event deleted successfully')
     } catch (error) {
       console.error('❌ Error deleting event:', error)
@@ -174,16 +183,18 @@ const EventsPage = () => {
   // Partecipa/non partecipa a evento
   const handleParticipation = async (eventId: string, status: 'yes' | 'no' | 'maybe') => {
     try {
-      const event = events.find(e => e.id === eventId)
-      if (!event) return
+  const ev = events.find((e: Event) => e.id === eventId)
+      if (!ev) return
 
-      // Aggiorna o aggiungi partecipazione
-      const existingParticipantIndex = event.participants.findIndex(p => p.userId === currentUserId)
-      let updatedParticipants = [...event.participants]
+      // Aggiorna su Firestore con l'helper dedicato
+      await eventService.updateParticipation(eventId, currentUserId, currentUserName, status)
 
-      if (existingParticipantIndex >= 0) {
-        updatedParticipants[existingParticipantIndex] = {
-          ...updatedParticipants[existingParticipantIndex],
+      // Aggiorna anche lo store globale per riflettere subito la modifica
+  const idx = ev.participants.findIndex((p: EventParticipant) => p.userId === currentUserId)
+      const updatedParticipants = [...ev.participants]
+      if (idx >= 0) {
+        updatedParticipants[idx] = {
+          ...updatedParticipants[idx],
           status,
           respondedAt: new Date()
         }
@@ -196,18 +207,7 @@ const EventsPage = () => {
         })
       }
 
-      const updatedEventData = {
-        ...event,
-        participants: updatedParticipants,
-        updatedAt: new Date()
-      }
-
-      await eventService.update(eventId, updatedEventData)
-      
-      // Aggiorna lo stato locale
-      setEvents(prev => prev.map(e => 
-        e.id === eventId ? updatedEventData : e
-      ))
+      updateEvent(eventId, { participants: updatedParticipants, updatedAt: new Date() })
 
       console.log('✅ Participation updated successfully')
     } catch (error) {
@@ -220,17 +220,17 @@ const EventsPage = () => {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const upcomingEvents = events.filter(event => {
+  const upcomingEvents = events.filter((event: Event) => {
     const eventDate = new Date(event.date)
     eventDate.setHours(0, 0, 0, 0)
     return eventDate >= today
-  }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+  }).sort((a: Event, b: Event) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
-  const pastEvents = events.filter(event => {
+  const pastEvents = events.filter((event: Event) => {
     const eventDate = new Date(event.date)
     eventDate.setHours(0, 0, 0, 0)
     return eventDate < today
-  }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  }).sort((a: Event, b: Event) => new Date(b.date).getTime() - new Date(a.date).getTime())
 
   // Ottieni stato partecipazione utente
   const getUserParticipationStatus = (event: Event) => {
@@ -276,7 +276,7 @@ const EventsPage = () => {
         <div className="mb-8">
           <h2 className="text-2xl font-bold text-gray-800 mb-4">Prossimi Eventi</h2>
           <div className="space-y-4">
-            {upcomingEvents.map(event => {
+            {upcomingEvents.map((event: Event) => {
               const userStatus = getUserParticipationStatus(event)
               const isCreator = event.createdBy === currentUserId
 
@@ -308,7 +308,7 @@ const EventsPage = () => {
 
                       {/* Partecipanti */}
                       <div className="flex flex-wrap gap-2 mb-4">
-                        {event.participants.map(participant => (
+                        {event.participants.map((participant: EventParticipant) => (
                           <span key={participant.userId} className={`px-2 py-1 text-xs rounded-full ${
                             participant.status === 'yes' 
                               ? 'bg-green-100 text-green-700' 
@@ -396,7 +396,7 @@ const EventsPage = () => {
         <div className="mb-8">
           <h2 className="text-2xl font-bold text-gray-800 mb-4">Eventi Passati</h2>
           <div className="space-y-4">
-            {pastEvents.slice(0, 5).map(event => (
+            {pastEvents.slice(0, 5).map((event: Event) => (
               <div key={event.id} className="bg-gray-50 rounded-xl shadow-sm border border-gray-200 p-4 opacity-75">
                 <div className="flex items-center space-x-2 mb-2">
                   <span className="text-lg">{getCategoryIcon(event.category)}</span>

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
-import { listService } from '../services/firestore'
+import { listService, eventService } from '../services/firestore'
 import { useAuthStore } from '../stores/useAuthStore'
-import { ShoppingList, ListItem } from '../types'
+import { ShoppingList, ListItem, Event } from '../types'
 
 const ListsPage = () => {
   const { user } = useAuthStore()
@@ -10,25 +10,32 @@ const ListsPage = () => {
   const [showForm, setShowForm] = useState(false)
   const [editingList, setEditingList] = useState<ShoppingList | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [events, setEvents] = useState<Event[]>([])
+  const [selectedEvent, setSelectedEvent] = useState<string>('all')
 
   // Form data per nuova lista
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    items: ['']
+    items: [''],
+    eventId: ''
   })
 
   const currentUserId = user?.id || 'anonymous'
 
-  // Carica liste
+  // Carica liste ed eventi
   useEffect(() => {
     const loadLists = async () => {
       try {
         setLoading(true)
-        console.log('📋 Loading lists...')
-        const listsData = await listService.getAll()
+        console.log('📋 Loading lists and events...')
+        const [listsData, eventsData] = await Promise.all([
+          listService.getAll(),
+          eventService.getAll(),
+        ])
         setLists(listsData)
-        console.log(`✅ Loaded ${listsData.length} lists`)
+        setEvents(eventsData)
+        console.log(`✅ Loaded ${listsData.length} lists and ${eventsData.length} events`)
       } catch (error) {
         console.error('❌ Error loading lists:', error)
       } finally {
@@ -38,6 +45,14 @@ const ListsPage = () => {
 
     loadLists()
   }, [])
+
+  // Reset automatico filtro evento (selezione placeholder) se l'evento selezionato non esiste più
+  useEffect(() => {
+    if (selectedEvent !== 'all') {
+      const exists = events.some(e => e.id === selectedEvent)
+      if (!exists) setSelectedEvent('all')
+    }
+  }, [events, selectedEvent])
 
   const formatDate = (date: Date) => {
     return date.toLocaleDateString('it-IT', { 
@@ -95,7 +110,8 @@ const ListsPage = () => {
         description: formData.description,
         items: listItems,
         createdBy: currentUserId,
-        shared: true
+        shared: true,
+        eventId: formData.eventId || undefined
       }
 
       if (editingList) {
@@ -112,7 +128,8 @@ const ListsPage = () => {
       setFormData({
         title: '',
         description: '',
-        items: ['']
+        items: [''],
+        eventId: ''
       })
       setShowForm(false)
       console.log('✅ List saved successfully')
@@ -198,7 +215,8 @@ const ListsPage = () => {
     setFormData({
       title: list.title,
       description: list.description || '',
-      items: list.items.map(item => item.text)
+      items: list.items.map(item => item.text),
+      eventId: list.eventId || ''
     })
     setShowForm(true)
   }
@@ -256,11 +274,29 @@ const ListsPage = () => {
             <span className="hidden sm:inline">Nuova Lista</span>
           </button>
         </div>
+        {/* Filtri */}
+        <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-700">Evento:</span>
+            <select
+              value={selectedEvent}
+              onChange={(e) => setSelectedEvent(e.target.value)}
+              className="px-3 py-1 rounded-lg border border-gray-300 text-sm focus:outline-none focus:border-green-500"
+            >
+              <option value="all">Tutti gli eventi</option>
+              {events.map(event => (
+                <option key={event.id} value={event.id}>{event.title}</option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
       {/* Lista delle Liste */}
       <div className="space-y-6">
-        {lists.map(list => {
+        {lists
+          .filter(l => selectedEvent === 'all' || l.eventId === selectedEvent)
+          .map(list => {
           const stats = getListStats(list)
 
           return (
@@ -271,9 +307,14 @@ const ListsPage = () => {
                   {list.description && (
                     <p className="text-gray-600 mb-3">{list.description}</p>
                   )}
-                  <div className="flex items-center space-x-4 text-sm text-gray-500 mb-4">
+                  <div className="flex items-center flex-wrap gap-3 text-sm text-gray-500 mb-4">
                     <span>📅 {formatDate(list.createdAt)}</span>
                     <span>📊 {stats.completed}/{stats.total} completati ({stats.percentage}%)</span>
+                    {list.eventId && (
+                      <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">
+                        📅 {events.find(e => e.id === list.eventId)?.title || 'Evento'}
+                      </span>
+                    )}
                     <span className={`px-2 py-1 rounded-full text-xs font-medium ${
                       list.shared 
                         ? 'bg-blue-100 text-blue-700' 
@@ -379,7 +420,7 @@ const ListsPage = () => {
           )
         })}
 
-        {lists.length === 0 && (
+        {lists.filter(l => selectedEvent === 'all' || l.eventId === selectedEvent).length === 0 && (
           <div className="text-center py-12">
             <div className="text-6xl mb-4">📋</div>
             <h3 className="text-xl font-semibold text-gray-600 mb-2">Nessuna lista</h3>
@@ -404,7 +445,8 @@ const ListsPage = () => {
                     setFormData({
                       title: '',
                       description: '',
-                      items: ['']
+                      items: [''],
+                      eventId: ''
                     })
                   }}
                   className="text-gray-500 hover:text-gray-700"
@@ -441,6 +483,26 @@ const ListsPage = () => {
                     rows={3}
                     placeholder="Aggiungi dettagli alla lista..."
                   />
+                </div>
+
+                {/* Evento collegato (opzionale) */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Evento collegato (opzionale)
+                  </label>
+                  <select
+                    value={formData.eventId}
+                    onChange={(e) => setFormData({ ...formData, eventId: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500"
+                  >
+                    <option value="">Nessun evento specifico</option>
+                    {events.map(event => (
+                      <option key={event.id} value={event.id}>{event.title}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Collega la lista a un evento specifico
+                  </p>
                 </div>
 
                 <div>
@@ -488,7 +550,8 @@ const ListsPage = () => {
                       setFormData({
                         title: '',
                         description: '',
-                        items: ['']
+                        items: [''],
+                        eventId: ''
                       })
                     }}
                     className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"

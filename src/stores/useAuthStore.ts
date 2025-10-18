@@ -69,6 +69,19 @@ onAuthStateChanged(auth, async (firebaseUser) => {
     
     // 🚀 CARICA AUTOMATICAMENTE I DATI DI BASE
     await loadUserData()
+
+    // 🔧 Carica impostazioni utente e avvia listeners notifiche
+    try {
+      const [{ useUserSettingsStore }, { startNotificationsListeners }] = await Promise.all([
+        import('./UserSettingsStore'),
+        import('../services/notifications')
+      ])
+      const { loadFromFirestore } = useUserSettingsStore.getState()
+      await loadFromFirestore(user.id)
+      startNotificationsListeners(user.id)
+    } catch (e) {
+      console.warn('⚠️ Impossibile inizializzare settings/notifications:', e)
+    }
   } else {
     console.log('🔥 Firebase Auth: Utente disconnesso')
     setUser(null)

@@ -1,64 +1,33 @@
 import { useState, useEffect } from 'react'
+import { useNotificationsStore } from '../stores/useNotificationsStore'
+import { useUserSettingsStore } from '../stores/UserSettingsStore'
 
-interface Notification {
-  id: string
-  type: 'expense' | 'payment' | 'comment' | 'reminder'
-  title: string
-  message: string
-  createdAt: Date
-  read: boolean
-  actionUrl?: string
-}
 
-interface NotificationSystemProps {
-  userId: string
-}
+interface NotificationSystemProps { userId: string }
 
-const NotificationSystem = ({ userId }: NotificationSystemProps) => {
-  const [notifications, setNotifications] = useState<Notification[]>([])
+const NotificationSystem = ({ userId: _userId }: NotificationSystemProps) => {
+  const notifications = useNotificationsStore(state => state.notifications)
+  const unreadCount = useNotificationsStore(state => state.unreadCount())
+  const markAsReadStore = useNotificationsStore(state => state.markAsRead)
+  const markAllAsReadStore = useNotificationsStore(state => state.markAllAsRead)
+  const { notifications: notifSettings } = useUserSettingsStore()
   const [isOpen, setIsOpen] = useState(false)
 
-  // Mock notifications per demo
+  // Request desktop notification permission if enabled
   useEffect(() => {
-    const mockNotifications: Notification[] = [
-      {
-        id: '1',
-        type: 'expense',
-        title: 'Nuova spesa aggiunta',
-        message: 'Marco ha aggiunto "Cena ristorante" (€45.00)',
-        createdAt: new Date(Date.now() - 1000 * 60 * 30), // 30 min fa
-        read: false
-      },
-      {
-        id: '2',
-        type: 'payment',
-        title: 'Pagamento ricevuto',
-        message: 'Giulia ti ha pagato €25.00',
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 2), // 2h fa
-        read: true
-      },
-      {
-        id: '3',
-        type: 'reminder',
-        title: 'Promemoria debito',
-        message: 'Devi €15.50 a Luca per "Biglietti cinema"',
-        createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24), // 1 giorno fa
-        read: false
+    if (notifSettings.desktopEnabled && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission()
       }
-    ]
-    setNotifications(mockNotifications)
-  }, [userId])
-
-  const unreadCount = notifications.filter(n => !n.read).length
+    }
+  }, [notifSettings.desktopEnabled])
 
   const markAsRead = (id: string) => {
-    setNotifications(prev => prev.map(n => 
-      n.id === id ? { ...n, read: true } : n
-    ))
+    markAsReadStore(id)
   }
 
   const markAllAsRead = () => {
-    setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    markAllAsReadStore()
   }
 
   const getIcon = (type: string) => {

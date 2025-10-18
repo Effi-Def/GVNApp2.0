@@ -71,6 +71,16 @@ const ExpensesPage = () => {
     loadData()
   }, [user, expenses.length, events.length, setExpenses, setEvents])
 
+  // Se l'evento selezionato viene eliminato o non esiste più, resetta il filtro a "all"
+  useEffect(() => {
+    if (selectedEvent !== 'all') {
+      const stillExists = events.some(e => e.id === selectedEvent)
+      if (!stillExists) {
+        setSelectedEvent('all')
+      }
+    }
+  }, [events, selectedEvent])
+
   // Calcolo del saldo totale (allineato a HomePage: considera "settled")
   const calculateBalance = () => {
     let balance = 0
@@ -711,7 +721,13 @@ const ExpensesPage = () => {
       <div className="space-y-4">
         {filteredExpenses.map(expense => {
           const eventName = events.find(e => e.id === expense.eventId)?.title
-          const paidByName = events.find(e => e.id === expense.eventId)?.participants.find(p => p.userId === expense.paidBy)?.name || expense.paidBy
+          // Risolvi il nome del pagatore in modo robusto:
+          // 1) prova dai partecipanti della spesa; 2) prova dai partecipanti dell'evento; 3) fallback all'ID
+          const paidByFromExpense = expense.participants.find(p => p.userId === expense.paidBy)?.name
+          const paidByFromEvent = events
+            .find(e => e.id === expense.eventId)?.participants
+            .find(p => p.userId === expense.paidBy)?.name
+          const paidByName = paidByFromExpense || paidByFromEvent || expense.paidBy
           
           return (
             <div key={expense.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
