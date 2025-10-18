@@ -216,7 +216,7 @@ const EventDashboard = ({ event, onClose }: EventDashboardProps) => {
                 <div className="space-y-3">
                   {polls.filter(poll => !poll.closedAt).slice(0, 3).map(poll => (
                     <div key={poll.id} className="py-2 border-b last:border-b-0">
-                      <p className="font-medium text-gray-900">{poll.question}</p>
+                      <p className="font-medium text-gray-900">{poll.title}</p>
                       <p className="text-sm text-gray-600">{poll.votes.length} voti • {poll.options.length} opzioni</p>
                     </div>
                   ))}

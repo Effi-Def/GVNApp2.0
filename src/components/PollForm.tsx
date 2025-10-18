@@ -83,14 +83,17 @@ const PollForm = ({ onSubmit, onClose, isLoading }: PollFormProps) => {
       votingEndsAt.setHours(votingEndsAt.getHours() + formData.votingDurationHours)
       
       const pollData: Omit<Poll, 'id' | 'createdAt' | 'updatedAt'> = {
-        question: formData.title.trim(),
+        title: formData.title.trim(),
+        description: formData.description || undefined,
         options: validOptions.map(option => ({
           id: crypto.randomUUID(),
-          text: option.trim()
+          text: option.trim(),
+          votes: 0
         })),
         votes: [],
         createdBy: user.id,
         eventId: formData.eventId || undefined,
+        isActive: true,
         votingDurationHours: formData.votingDurationHours,
         votingEndsAt: votingEndsAt
       }

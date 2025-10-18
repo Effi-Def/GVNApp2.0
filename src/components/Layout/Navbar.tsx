@@ -73,8 +73,10 @@ const Navbar = () => {
                 />
               )}
               <div className="flex flex-col">
-                <span className="text-sm font-semibold text-neutral-900 truncate max-w-32">
-                  {user?.displayName?.split(' ')[0] || 'Utente'}
+                <span className="text-sm font-semibold text-neutral-900 truncate max-w-32" title={(user?.displayName && user.displayName !== 'Utente') ? user.displayName : (user?.email ? user.email : undefined)}>
+                  {(user?.displayName && user.displayName !== 'Utente')
+                    ? user.displayName
+                    : (user?.email ? user.email.split('@')[0] : 'Utente')}
                 </span>
                 <span className="text-xs text-neutral-500">Online</span>
               </div>

@@ -1,87 +1,17 @@
 import { useState, useEffect } from 'react'
-import { expenseService, eventService, paymentService } from '../services/firestore'
+import { expenseService, eventService } from '../services/firestore'
 import { useAuthStore } from '../stores/useAuthStore'
 import { useAppStore } from '../stores/AppStore'
-import { Expense, Event, ExpenseParticipant, ExpenseComment, ExpenseAttachment, PaymentTransaction } from '../types'
-import ExpenseComments from '../components/ExpenseComments'
-import ExpenseAttachments from '../components/ExpenseAttachments'
+import { Expense, ExpenseParticipant } from '../types'
 
-// Dati mock per fallback
-const mockEvents: Event[] = [
-  {
-    id: 'mock-1',
-    title: 'Cena di Gruppo',
-    description: 'Cena al ristorante Da Mario',
-    category: 'cena',
-    date: new Date('2025-10-18T20:00:00'),
-    time: '20:00',
-    location: 'Ristorante Da Mario',
-    createdBy: 'mock-user',
-    participants: [
-      { userId: 'mock-user', name: 'Andrea', status: 'yes', respondedAt: new Date() },
-      { userId: 'user2', name: 'Marco', status: 'yes', respondedAt: new Date() },
-      { userId: 'user3', name: 'Giulia', status: 'yes', respondedAt: new Date() },
-      { userId: 'user4', name: 'Luca', status: 'yes', respondedAt: new Date() }
-    ],
-    createdAt: new Date(),
-    updatedAt: new Date()
-  },
-  {
-    id: 'mock-2',
-    title: 'Cinema & Aperitivo',
-    description: 'Film + aperitivo',
-    category: 'cinema',
-    date: new Date('2025-10-26T18:30:00'),
-    time: '18:30',
-    location: 'Cinema Centrale',
-    createdBy: 'user2',
-    participants: [
-      { userId: 'mock-user', name: 'Andrea', status: 'yes', respondedAt: new Date() },
-      { userId: 'user3', name: 'Giulia', status: 'yes', respondedAt: new Date() },
-      { userId: 'user5', name: 'Sara', status: 'maybe', respondedAt: new Date() }
-    ],
-    createdAt: new Date(),
-    updatedAt: new Date()
-  }
-]
-
-const mockExpenses: Expense[] = [
-  {
-    id: 'mock-exp-1',
-    title: 'Ristorante "Da Mario"',
-    amount: 158.00,
-    paidBy: 'user2',
-    participants: [
-      { userId: 'user2', name: 'Marco', amount: 39.50, settled: false },
-      { userId: 'mock-user', name: 'Andrea', amount: 39.50, settled: false },
-      { userId: 'user3', name: 'Giulia', amount: 39.50, settled: false },
-      { userId: 'user4', name: 'Luca', amount: 39.50, settled: false }
-    ],
-    eventId: 'mock-1',
-    createdAt: new Date('2025-10-15'),
-    updatedAt: new Date('2025-10-15')
-  },
-  {
-    id: 'mock-exp-2',
-    title: 'Biglietti Cinema',
-    amount: 84.50,
-    paidBy: 'mock-user',
-    participants: [
-      { userId: 'mock-user', name: 'Andrea', amount: 28.17, settled: false },
-      { userId: 'user3', name: 'Giulia', amount: 28.17, settled: false },
-      { userId: 'user5', name: 'Sara', amount: 28.16, settled: false }
-    ],
-    eventId: 'mock-2',
-    createdAt: new Date('2025-10-12'),
-    updatedAt: new Date('2025-10-12')
-  }
-]
+// Firebase-first: rimossi dati mock e fallback
 
 const ExpensesPage = () => {
   const { user } = useAuthStore()
   const { expenses, events, setExpenses, setEvents, addExpense, updateExpense, deleteExpense } = useAppStore()
   const [loading, setLoading] = useState(true)
-  const [useFirebase, setUseFirebase] = useState(true)
+  // Firebase-only mode
+  const useFirebase = true
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'owed' | 'paid'>('all')
   const [selectedEvent, setSelectedEvent] = useState<string>('all')
   const [showForm, setShowForm] = useState(false)
@@ -101,7 +31,6 @@ const ExpensesPage = () => {
     customPercentages: {} as Record<string, number> // Percentuali custom per persona
   })
 
-  const currentUser = user?.displayName || user?.email || 'Andrea'
   const currentUserId = user?.id || user?.email || 'mock-user'
 
   // Carica dati (Firebase o mock) e aggiorna AppStore
@@ -116,53 +45,53 @@ const ExpensesPage = () => {
 
       try {
         setLoading(true)
-        console.log('🔄 Loading expenses and events...')
-        
-        if (useFirebase && user) {
-          // Prova Firebase
-          const [eventsData, expensesData] = await Promise.all([
-            eventService.getAll(),
-            expenseService.getAll()
-          ])
-          
-          setEvents(eventsData)
-          setExpenses(expensesData)
-          console.log(`✅ Firebase: Loaded ${expensesData.length} expenses and ${eventsData.length} events`)
-        } else {
-          // Usa dati mock
-          setEvents(mockEvents)
-          setExpenses(mockExpenses)
-          console.log('✅ Mock: Loaded mock data')
+        console.log('🔄 Loading expenses and events from Firebase...')
+
+        if (!user) {
+          console.warn('⚠️ No authenticated user; skipping expenses/events load')
+          setLoading(false)
+          return
         }
+
+        const [eventsData, expensesData] = await Promise.all([
+          eventService.getAll(),
+          expenseService.getAll()
+        ])
+
+        setEvents(eventsData)
+        setExpenses(expensesData)
+        console.log(`✅ Firebase: Loaded ${expensesData.length} expenses and ${eventsData.length} events`)
       } catch (error) {
-        console.error('❌ Error loading from Firebase, switching to mock data:', error)
-        setUseFirebase(false)
-        setEvents(mockEvents)
-        setExpenses(mockExpenses)
+        console.error('❌ Error loading from Firebase:', error)
       } finally {
         setLoading(false)
       }
     }
 
     loadData()
-  }, [user, useFirebase, expenses.length, events.length, setExpenses, setEvents])
+  }, [user, expenses.length, events.length, setExpenses, setEvents])
 
-  // Calcolo del saldo totale
+  // Calcolo del saldo totale (allineato a HomePage: considera "settled")
   const calculateBalance = () => {
-    let totalPaid = 0
-    let totalOwed = 0
-    
+    let balance = 0
+
     expenses.forEach(expense => {
-      if (expense.paidBy === currentUserId) {
-        totalPaid += expense.amount
-      }
       const userParticipation = expense.participants.find(p => p.userId === currentUserId)
-      if (userParticipation) {
-        totalOwed += userParticipation.amount
+      if (!userParticipation) return
+
+      if (expense.paidBy === currentUserId) {
+        // L'utente ha pagato: somma solo le quote non saldate degli altri
+        const totalOwed = expense.participants
+          .filter(p => p.userId !== currentUserId && !p.settled)
+          .reduce((sum, p) => sum + p.amount, 0)
+        balance += totalOwed
+      } else if (!userParticipation.settled) {
+        // L'utente non ha pagato e la sua quota non è saldata
+        balance -= userParticipation.amount
       }
     })
-    
-    return totalPaid - totalOwed
+
+    return balance
   }
 
   const balance = calculateBalance()
@@ -462,7 +391,8 @@ const ExpensesPage = () => {
       }
 
       // Reset form
-      setFormData({
+      setFormData(prev => ({
+        ...prev,
         title: '',
         amount: '',
         category: 'Cibo',
@@ -472,7 +402,7 @@ const ExpensesPage = () => {
         splitType: 'equal',
         customAmounts: {},
         customPercentages: {}
-      })
+      }))
       setShowForm(false)
       console.log('✅ Expense saved successfully')
     } catch (error) {
@@ -485,13 +415,14 @@ const ExpensesPage = () => {
 
   const handleEditExpense = (expense: Expense) => {
     setEditingExpense(expense)
-    setFormData({
+    setFormData(prev => ({
+      ...prev,
       title: expense.title,
       amount: expense.amount.toString(),
       category: 'Cibo',
       eventId: expense.eventId || '',
       participants: expense.participants.map(p => p.userId)
-    })
+    }))
     setShowForm(true)
   }
 
@@ -524,44 +455,26 @@ const ExpensesPage = () => {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="px-4 py-6 sm:px-6 lg:px-8 max-w-4xl mx-auto">
         <div className="text-center py-12">
           <div className="text-6xl mb-4">💰</div>
           <h3 className="text-xl font-semibold text-gray-600 mb-2">Caricamento spese...</h3>
-          <p className="text-gray-500">{useFirebase ? 'Connessione a Firebase in corso' : 'Caricamento dati mock'}</p>
+          <p className="text-gray-500">Connessione a Firebase in corso</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="px-4 py-6 sm:px-6 lg:px-8 max-w-4xl mx-auto space-y-6">
       {/* Header */}
       <div className="mb-8">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">
-              Spese 💰 
-              {!useFirebase && <span className="text-sm bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full ml-2">Mock Mode</span>}
-            </h1>
-            <p className="text-gray-600">
-              Gestisci le spese di gruppo e i saldi
-              {!useFirebase && (
-                <span className="block text-sm text-yellow-600 mt-1">
-                  ⚠️ Usando dati di esempio - Firebase non disponibile
-                </span>
-              )}
-            </p>
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">Spese 💰</h1>
+            <p className="text-gray-600">Gestisci le spese di gruppo e i saldi</p>
           </div>
-          <div className="flex space-x-2">
-            {!useFirebase && (
-              <button
-                onClick={() => setUseFirebase(true)}
-                className="px-3 py-1 text-xs bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200"
-              >
-                🔄 Riprova Firebase
-              </button>
-            )}
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={() => setShowForm(true)}
               className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg transition-all duration-200 flex items-center space-x-2"
@@ -576,7 +489,7 @@ const ExpensesPage = () => {
       </div>
 
       {/* Saldo Totale */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 mb-6">
         <div className="text-center">
           <h2 className="text-lg font-semibold text-gray-700 mb-2">Il tuo saldo</h2>
           <div className={`text-4xl font-bold mb-2 ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
@@ -630,7 +543,7 @@ const ExpensesPage = () => {
         </div>
 
         {/* Riepilogo avanzato */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+  <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6">
           {selectedEvent === 'all' ? (
             // Tutti gli eventi: mostra totale pagato, totale deve pagare, e DEBITI SEMPLIFICATI
             <div>
@@ -694,7 +607,7 @@ const ExpensesPage = () => {
                 <div className="space-y-3">
                   {Object.entries(calculateDistributionByEvent()).map(([evId, data]) => (
                     <div key={evId} className="p-3 border rounded-lg bg-white/50">
-                      <div className="flex justify-between items-center mb-2">
+                      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
                         <div className="font-semibold">{data.title}</div>
                         <div className="text-sm text-gray-500">{evId === 'no-event' ? 'Senza evento' : ''}</div>
                       </div>
@@ -744,7 +657,7 @@ const ExpensesPage = () => {
                       <h4 className="text-sm font-medium text-gray-700">Ti devono</h4>
                       {Object.keys(details.owesToUser).length === 0 && <p className="text-sm text-gray-500">Nessuno ti deve</p>}
                       {Object.entries(details.owesToUser).map(([uid, val]) => (
-                        <div key={uid} className="flex items-center justify-between py-2 border-b">
+                        <div key={uid} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-2 border-b">
                           <div>
                             <div className="font-medium">{val.name}</div>
                             <div className="text-sm text-gray-500">Ti deve €{val.amount.toFixed(2)}</div>
@@ -760,7 +673,7 @@ const ExpensesPage = () => {
                       <h4 className="text-sm font-medium text-gray-700">Devi a</h4>
                       {Object.keys(details.userOwes).length === 0 && <p className="text-sm text-gray-500">Non devi nulla</p>}
                       {Object.entries(details.userOwes).map(([uid, val]) => (
-                        <div key={uid} className="flex items-center justify-between py-2 border-b">
+                        <div key={uid} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 py-2 border-b">
                           <div>
                             <div className="font-medium">{val.name}</div>
                             <div className="text-sm text-gray-500">Devi €{val.amount.toFixed(2)}</div>
@@ -779,7 +692,7 @@ const ExpensesPage = () => {
         </div>
 
         {/* Filtro per evento */}
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-2">
           <span className="text-sm font-medium text-gray-700">Evento:</span>
           <select
             value={selectedEvent}
@@ -802,13 +715,13 @@ const ExpensesPage = () => {
           
           return (
             <div key={expense.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center space-x-3 flex-1">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:space-x-3 gap-3 flex-1">
                   <div className="text-2xl">
                     {getCategoryIcon('Cibo')}
                   </div>
                   <div className="flex-1">
-                    <div className="flex items-center space-x-2 mb-1">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-2 gap-1 mb-1">
                       <h3 className="font-semibold text-gray-800">{expense.title}</h3>
                       {eventName && (
                         <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">
@@ -854,8 +767,8 @@ const ExpensesPage = () => {
                     })()}
                   </div>
                 </div>
-                <div className="flex items-center space-x-4">
-                  <div className="text-right">
+                <div className="flex flex-col sm:flex-row sm:items-end sm:space-x-4 gap-3">
+                  <div className="text-left sm:text-right">
                     <p className="text-xl font-bold text-gray-800">€{expense.amount.toFixed(2)}</p>
                     <p className="text-sm text-gray-500">
                       €{(expense.amount / expense.participants.length).toFixed(2)} a testa
@@ -894,7 +807,7 @@ const ExpensesPage = () => {
                   </div>
                   {/* Controlli modifica/cancellazione per chi ha creato la spesa */}
                   {expense.paidBy === currentUserId && (
-                    <div className="flex flex-col space-y-1">
+                    <div className="flex flex-row sm:flex-col gap-2">
                       <button
                         onClick={() => handleEditExpense(expense)}
                         className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
@@ -949,13 +862,18 @@ const ExpensesPage = () => {
                   onClick={() => {
                     setShowForm(false)
                     setEditingExpense(null)
-                    setFormData({
+                    setFormData(prev => ({
+                      ...prev,
                       title: '',
                       amount: '',
                       category: 'Cibo',
                       eventId: '',
-                      participants: []
-                    })
+                      participants: [],
+                      notes: '',
+                      splitType: 'equal',
+                      customAmounts: {},
+                      customPercentages: {}
+                    }))
                   }}
                   className="text-gray-500 hover:text-gray-700"
                 >
@@ -1056,7 +974,7 @@ const ExpensesPage = () => {
                       <div className="border border-gray-200 rounded-lg p-3 max-h-40 overflow-y-auto">
                         <div className="space-y-2">
                           {getAvailableParticipants().map(participant => (
-                            <label key={participant.userId} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md cursor-pointer">
+                            <label key={participant.userId} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-2 hover:bg-gray-50 rounded-md cursor-pointer">
                               <div className="flex items-center space-x-3">
                                 <input
                                   type="checkbox"
@@ -1086,7 +1004,7 @@ const ExpensesPage = () => {
 
                       {/* Riepilogo selezione */}
                       {formData.eventId && (
-                        <div className="flex items-center justify-between text-sm p-2 bg-blue-50 rounded-lg">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm p-2 bg-blue-50 rounded-lg">
                           <span className="text-gray-600">
                             {formData.participants.length > 0 
                               ? `${formData.participants.length} partecipanti selezionati`
@@ -1109,19 +1027,24 @@ const ExpensesPage = () => {
                   )}
                 </div>
 
-                <div className="flex space-x-3 pt-4">
+                <div className="flex flex-col sm:flex-row sm:space-x-3 gap-3 pt-4">
                   <button
                     type="button"
                     onClick={() => {
                       setShowForm(false)
                       setEditingExpense(null)
-                      setFormData({
+                      setFormData(prev => ({
+                        ...prev,
                         title: '',
                         amount: '',
                         category: 'Cibo',
                         eventId: '',
-                        participants: []
-                      })
+                        participants: [],
+                        notes: '',
+                        splitType: 'equal',
+                        customAmounts: {},
+                        customPercentages: {}
+                      }))
                     }}
                     className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
                     disabled={submitting}
@@ -1143,7 +1066,7 @@ const ExpensesPage = () => {
       )}
 
       {/* Bottone Aggiungi Spesa Mobile */}
-      <div className="fixed bottom-28 right-6 md:bottom-8 z-40">
+  <div className="fixed bottom-28 right-4 sm:right-6 md:bottom-8 z-40">
         <button 
           onClick={() => setShowForm(true)}
           className="bg-blue-500 hover:bg-blue-600 text-white p-4 rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 hover:scale-110 ring-4 ring-blue-100"

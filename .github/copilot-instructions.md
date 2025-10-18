@@ -24,3 +24,9 @@
 
 - [x] Ensure Documentation is Complete
 	<!-- README.md creato con documentazione completa del progetto e file copilot-instructions.md presente -->
+
+- [x] Align Poll Types and Build
+	<!-- Aggiornati PollForm/PollsPage/EventDashboard a title + userName; build verde -->
+
+- [ ] Finalize Firebase-first Expenses
+	<!-- Rimuovere fallback mock e forzare servizi Firestore per spese/eventi -->

@@ -369,12 +369,16 @@ export const pollService = {
       const q = query(collection(db, 'polls'), orderBy('createdAt', 'desc'))
       const querySnapshot = await getDocs(q)
       
-      const polls: Poll[] = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate() || new Date(),
-        updatedAt: doc.data().updatedAt?.toDate() || new Date()
-      })) as Poll[]
+      const polls: Poll[] = querySnapshot.docs.map(doc => {
+        const data = doc.data()
+        return {
+          id: doc.id,
+          ...data,
+          createdAt: data.createdAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate() || new Date(),
+          votingEndsAt: data.votingEndsAt?.toDate() || undefined
+        }
+      }) as Poll[]
       
       return polls
     } catch (error) {

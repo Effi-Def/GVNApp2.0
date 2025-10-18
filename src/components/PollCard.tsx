@@ -91,7 +91,7 @@ const PollCard = ({ poll, onVote, onClose }: PollCardProps) => {
       <div className="flex justify-between items-start mb-4">
         <div className="flex-1">
           <h3 className="text-lg font-semibold text-gray-900 mb-1">
-            {poll.question}
+            {poll.title}
           </h3>
           
           {/* Event and creation info */}

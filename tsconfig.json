@@ -21,5 +21,14 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
+  "exclude": [
+    "src/App-firebase.tsx",
+    "src/App-test.tsx",
+    "src/pages/HomePage-tailwind.tsx",
+    "src/pages/HomePage-temp.tsx",
+    "src/pages/ExpensesPage-firebase.tsx",
+    "src/pages/ListsPage-firebase.tsx",
+    "src/components/EventDashboard.tsx"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

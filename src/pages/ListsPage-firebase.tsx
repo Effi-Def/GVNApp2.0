@@ -19,7 +19,6 @@ const ListsPage = () => {
   })
 
   const currentUserId = user?.id || 'anonymous'
-  const currentUserName = user?.displayName || user?.email || 'Utente'
 
   // Carica liste
   useEffect(() => {

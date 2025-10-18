@@ -80,7 +80,7 @@ const PollsPage = () => {
         // Update existing vote
         updatedVotes = poll.votes.map(vote => 
           vote.userId === user.id 
-            ? { ...vote, optionId, votedAt: new Date() }
+            ? { ...vote, optionId, votedAt: new Date(), userName: vote.userName ?? (user.displayName || user.email || 'Utente') }
             : vote
         )
       } else {
@@ -89,6 +89,7 @@ const PollsPage = () => {
           ...poll.votes,
           {
             userId: user.id,
+            userName: user.displayName || user.email || 'Utente',
             optionId,
             votedAt: new Date()
           }

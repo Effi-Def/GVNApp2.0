@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useAuthStore } from './stores/useAuthStore'
 import { useAppStore } from './stores/AppStore'
@@ -126,8 +126,7 @@ const SimpleNav = ({ user, onLogout }: { user: any, onLogout: () => void }) => {
   )
 }
 
-// Importiamo il Layout esistente
-import Layout from './components/Layout/Layout'
+// (Layout già importato sopra)
 
 // Componente temporaneo per le pagine
 const TempPage = ({ title, icon }: { title: string; icon: string }) => (

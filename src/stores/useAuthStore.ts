@@ -28,7 +28,7 @@ export const useAuthStore = create<AuthState>((set) => ({
       const user: User = {
         id: firebaseUser.uid,
         email: firebaseUser.email || '',
-        displayName: firebaseUser.displayName || 'Utente',
+        displayName: firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Utente'),
         photoURL: firebaseUser.photoURL || undefined,
         createdAt: new Date()
       }
@@ -60,7 +60,7 @@ onAuthStateChanged(auth, async (firebaseUser) => {
     const user: User = {
       id: firebaseUser.uid,
       email: firebaseUser.email || '',
-      displayName: firebaseUser.displayName || 'Utente',
+      displayName: firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Utente'),
       photoURL: firebaseUser.photoURL || undefined,
       createdAt: new Date()
     }
