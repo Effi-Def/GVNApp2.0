@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useUserSettingsStore } from '../stores/UserSettingsStore'
 import { useAuthStore } from '../stores/useAuthStore'
 import { PigAvatar, PigAvatarGrid, PigAvatarKey } from '../components/Avatar/PigAvatar'
+import { initMessaging } from '../firebase/messaging'
 
 const SettingsPage = () => {
   const { user } = useAuthStore()
@@ -58,7 +59,12 @@ const SettingsPage = () => {
             <label htmlFor="desktop">Notifiche desktop leggere</label>
           </div>
           <div className="flex items-center gap-2">
-            <input id="push" type="checkbox" checked={notifications.pushEnabled} onChange={(e)=>setNotifications({ pushEnabled: e.target.checked })} />
+            <input id="push" type="checkbox" checked={notifications.pushEnabled} onChange={async (e)=>{
+              setNotifications({ pushEnabled: e.target.checked })
+              if (e.target.checked && user) {
+                await initMessaging(user.id)
+              }
+            }} />
             <label htmlFor="push">Notifiche push su cellulare</label>
           </div>
           <div className="pt-4">
