@@ -1,0 +1,60 @@
+import * as functions from 'firebase-functions'
+import * as admin from 'firebase-admin'
+
+admin.initializeApp()
+const db = admin.firestore()
+const fcm = admin.messaging()
+
+async function sendFcmToUsers(userIds: string[], payload: admin.messaging.MessagingPayload) {
+  if (userIds.length === 0) return
+  // fetch tokens for users
+  const tokens: string[] = []
+  const chunks = [] as string[][]
+  const size = 10
+  for (let i = 0; i < userIds.length; i += size) chunks.push(userIds.slice(i, i + size))
+  for (const group of chunks) {
+    const snaps = await Promise.all(group.map(id => db.doc(`users/${id}`).get()))
+    snaps.forEach(s => {
+      const t = (s.data()?.notifications?.fcmToken as string | undefined)
+      if (t) tokens.push(t)
+    })
+  }
+  if (tokens.length === 0) return
+  await fcm.sendEachForMulticast({ tokens, notification: { title: payload.notification?.title, body: payload.notification?.body } })
+}
+
+function getParticipantsUserIds(doc: FirebaseFirestore.DocumentData): string[] {
+  // Try participants arrays from events or expenses
+  const participants = (doc.participants || []) as Array<{ userId: string }>
+  const idsFromParticipants = participants.map(p => p.userId)
+  const createdBy = doc.createdBy ? [doc.createdBy] : []
+  // For expenses, include all participants plus payer
+  const payer = doc.paidBy ? [doc.paidBy] : []
+  const set = new Set([...idsFromParticipants, ...createdBy, ...payer])
+  set.delete(doc.createdBy) // creator won’t receive a push
+  return Array.from(set)
+}
+
+export const onEventCreated = functions.firestore.document('events/{id}').onCreate(async (snap) => {
+  const data = snap.data()
+  const userIds = getParticipantsUserIds(data)
+  await sendFcmToUsers(userIds, { notification: { title: 'Nuovo evento', body: data.title || 'È stato creato un evento' } })
+})
+
+export const onExpenseCreated = functions.firestore.document('expenses/{id}').onCreate(async (snap) => {
+  const data = snap.data()
+  const userIds = getParticipantsUserIds(data)
+  await sendFcmToUsers(userIds, { notification: { title: 'Nuova spesa', body: data.title || 'È stata aggiunta una spesa' } })
+})
+
+export const onPollCreated = functions.firestore.document('polls/{id}').onCreate(async (snap) => {
+  const data = snap.data()
+  const userIds = getParticipantsUserIds(data)
+  await sendFcmToUsers(userIds, { notification: { title: 'Nuovo sondaggio', body: data.title || 'È stato creato un sondaggio' } })
+})
+
+export const onListCreated = functions.firestore.document('lists/{id}').onCreate(async (snap) => {
+  const data = snap.data()
+  const userIds = getParticipantsUserIds(data)
+  await sendFcmToUsers(userIds, { notification: { title: 'Nuova lista', body: data.title || 'È stata creata una lista' } })
+})
