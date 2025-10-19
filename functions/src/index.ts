@@ -5,7 +5,12 @@ admin.initializeApp()
 const db = admin.firestore()
 const fcm = admin.messaging()
 
-async function sendFcmToUsers(userIds: string[], payload: admin.messaging.MessagingPayload) {
+type SimplePayload = {
+  notification?: { title: string; body?: string }
+  data?: { [key: string]: string }
+}
+
+async function sendFcmToUsers(userIds: string[], payload: SimplePayload) {
   if (userIds.length === 0) return
   // fetch tokens for users
   const tokens: string[] = []
@@ -46,19 +51,22 @@ function getParticipantsUserIds(doc: admin.firestore.DocumentData): string[] {
 }
 
 export const onEventCreated = functions.firestore.document('events/{id}').onCreate(async (snap: functions.firestore.DocumentSnapshot) => {
-  const data = snap.data()
+  const data = snap.data() as admin.firestore.DocumentData | undefined
+  if (!data) return
   const userIds = getParticipantsUserIds(data)
   await sendFcmToUsers(userIds, { notification: { title: 'Nuovo evento', body: data.title || 'È stato creato un evento' } })
 })
 
 export const onExpenseCreated = functions.firestore.document('expenses/{id}').onCreate(async (snap: functions.firestore.DocumentSnapshot) => {
-  const data = snap.data()
+  const data = snap.data() as admin.firestore.DocumentData | undefined
+  if (!data) return
   const userIds = getParticipantsUserIds(data)
   await sendFcmToUsers(userIds, { notification: { title: 'Nuova spesa', body: data.title || 'È stata aggiunta una spesa' } })
 })
 
 export const onPollCreated = functions.firestore.document('polls/{id}').onCreate(async (snap: functions.firestore.DocumentSnapshot) => {
-  const data = snap.data()
+  const data = snap.data() as admin.firestore.DocumentData | undefined
+  if (!data) return
   let userIds = getParticipantsUserIds(data)
   // if linked to event, include event participants
   if (data.eventId) {
@@ -70,11 +78,12 @@ export const onPollCreated = functions.firestore.document('polls/{id}').onCreate
   await sendFcmToUsers(userIds, { 
     notification: { title: 'Nuovo sondaggio', body: data.title || 'È stato creato un sondaggio' },
     data: { click_action: click }
-  } as any)
+  })
 })
 
 export const onListCreated = functions.firestore.document('lists/{id}').onCreate(async (snap: functions.firestore.DocumentSnapshot) => {
-  const data = snap.data()
+  const data = snap.data() as admin.firestore.DocumentData | undefined
+  if (!data) return
   let userIds = getParticipantsUserIds(data)
   if (data.eventId) {
     const evSnap = await db.doc(`events/${data.eventId}`).get()
@@ -85,5 +94,5 @@ export const onListCreated = functions.firestore.document('lists/{id}').onCreate
   await sendFcmToUsers(userIds, { 
     notification: { title: 'Nuova lista', body: data.title || 'È stata creata una lista' },
     data: { click_action: click }
-  } as any)
+  })
 })

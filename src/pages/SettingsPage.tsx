@@ -8,6 +8,7 @@ const SettingsPage = () => {
   const { user } = useAuthStore()
   const { profile, notifications, setProfile, setNotifications, loadFromFirestore, saveProfile, saveNotifications } = useUserSettingsStore()
   const [activeTab, setActiveTab] = useState<'profile' | 'notifications'>('profile')
+  const [customAvatar, setCustomAvatar] = useState('')
 
   useEffect(() => {
     if (user) loadFromFirestore(user.id)
@@ -40,10 +41,41 @@ const SettingsPage = () => {
             </div>
           </div>
 
-          <div className="mt-6">
-            <h3 className="font-semibold mb-2">Seleziona il tuo avatar (maialino)</h3>
-            <div className="mb-3">Attuale: <PigAvatar keyName={(profile?.avatarKey as PigAvatarKey) || 'pig-0'} className="text-3xl" /></div>
-            <PigAvatarGrid onSelect={(key)=>setProfile({ avatarKey: key })} />
+          <div className="mt-6 space-y-3">
+            <h3 className="font-semibold">Avatar</h3>
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-600">Attuale:</span>
+              <PigAvatar keyName={(profile?.avatarKey as PigAvatarKey) || 'pig-0'} className="text-3xl" />
+              <span className="text-xs text-gray-500">({profile?.avatarKey || 'pig-0'})</span>
+            </div>
+
+            <div>
+              <p className="text-sm font-medium mb-2">Scegli un maialino</p>
+              <PigAvatarGrid onSelect={(key)=>setProfile({ avatarKey: key })} />
+            </div>
+
+            <div className="pt-2">
+              <p className="text-sm font-medium mb-1">Oppure usa una tua immagine (PNG/JPG)</p>
+              <div className="flex flex-col sm:flex-row gap-2">
+                <input
+                  className="flex-1 border rounded-lg px-3 py-2"
+                  placeholder="avatars/mio-avatar.png oppure https://..."
+                  value={customAvatar}
+                  onChange={(e)=>setCustomAvatar(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const v = customAvatar.trim()
+                    if (!v) return
+                    const key: PigAvatarKey = v.startsWith('http') ? `url:${v}` : `img:${v.replace(/^\/?/, '')}`
+                    setProfile({ avatarKey: key })
+                  }}
+                  className="px-3 py-2 bg-blue-600 text-white rounded-lg"
+                >Usa immagine</button>
+              </div>
+              <p className="text-xs text-gray-500 mt-1">Suggerimento: metti i file in <code>public/avatars/</code> e inserisci ad es. <code>avatars/p1.png</code>. Le immagini in <code>public/</code> sono servite come tali.</p>
+            </div>
           </div>
 
           <div className="pt-4">

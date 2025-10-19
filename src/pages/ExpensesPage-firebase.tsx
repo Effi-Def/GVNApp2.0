@@ -23,8 +23,7 @@ const ExpensesPage = () => {
     participants: [] as string[]
   })
 
-  const currentUser = user?.displayName || user?.email || 'Utente'
-  const currentUserId = user?.uid || ''
+  const currentUserId = user?.id || ''
 
   // Carica dati iniziali
   useEffect(() => {

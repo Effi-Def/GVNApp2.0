@@ -5,11 +5,29 @@ const variants = [
   '🐷','🐽','🐗','🐖','🧑‍🌾🐷','🤠🐷','😇🐷','😈🐷','🎩🐷','👑🐷','🕶️🐷','🎭🐷','🩷🐷','💙🐷','💚🐷','💛🐷','🖤🐷','🤍🐷','💜🐷','🧢🐷','🎀🐷','🪖🐷'
 ]
 
-export type PigAvatarKey = `pig-${number}`
+// Accepted keys:
+// - pig-N           -> emoji avatar by index
+// - img:path.png    -> image in public/ (e.g., img:avatars/pig01.png)
+// - url:https://... -> external image URL
+export type PigAvatarKey = string
 
-export const PigAvatar: React.FC<{ keyName?: PigAvatarKey; className?: string }> = ({ keyName, className }) => {
+export const PigAvatar: React.FC<{ keyName?: PigAvatarKey; className?: string; size?: number }> = ({ keyName, className, size }) => {
+  // Render custom image if requested
+  if (keyName?.startsWith('img:')) {
+    const path = keyName.slice(4) // remove 'img:'
+    const src = path.startsWith('/') ? path : `/${path}`
+    const dim = size || 32
+    return <img src={src} alt="avatar" className={className} style={{ width: dim, height: dim, objectFit: 'cover', borderRadius: 8 }} />
+  }
+  if (keyName?.startsWith('url:')) {
+    const src = keyName.slice(4)
+    const dim = size || 32
+    return <img src={src} alt="avatar" className={className} style={{ width: dim, height: dim, objectFit: 'cover', borderRadius: 8 }} />
+  }
+
+  // Default emoji avatar
   let idx = 0
-  if (keyName) {
+  if (keyName?.startsWith('pig-')) {
     const num = parseInt(keyName.split('-')[1], 10)
     if (!Number.isNaN(num)) idx = Math.max(0, Math.min(variants.length - 1, num))
   }
