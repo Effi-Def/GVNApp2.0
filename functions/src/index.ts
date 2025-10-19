@@ -15,15 +15,25 @@ async function sendFcmToUsers(userIds: string[], payload: admin.messaging.Messag
   for (const group of chunks) {
     const snaps = await Promise.all(group.map(id => db.doc(`users/${id}`).get()))
     snaps.forEach(s => {
-      const t = (s.data()?.notifications?.fcmToken as string | undefined)
-      if (t) tokens.push(t)
+      const notif = s.data()?.notifications
+      const tSingle = notif?.fcmToken as string | undefined
+      const tMany = notif?.fcmTokens as string[] | undefined
+      if (tSingle) tokens.push(tSingle)
+      if (tMany && Array.isArray(tMany)) tokens.push(...tMany)
     })
   }
   if (tokens.length === 0) return
-  await fcm.sendEachForMulticast({ tokens, notification: { title: payload.notification?.title, body: payload.notification?.body } })
+  await fcm.sendEachForMulticast({
+    tokens,
+    notification: payload.notification,
+    data: payload.data,
+    webpush: {
+      fcmOptions: payload.data?.click_action ? { link: payload.data.click_action } : undefined
+    }
+  })
 }
 
-function getParticipantsUserIds(doc: FirebaseFirestore.DocumentData): string[] {
+function getParticipantsUserIds(doc: admin.firestore.DocumentData): string[] {
   // Try participants arrays from events or expenses
   const participants = (doc.participants || []) as Array<{ userId: string }>
   const idsFromParticipants = participants.map(p => p.userId)
@@ -35,26 +45,45 @@ function getParticipantsUserIds(doc: FirebaseFirestore.DocumentData): string[] {
   return Array.from(set)
 }
 
-export const onEventCreated = functions.firestore.document('events/{id}').onCreate(async (snap) => {
+export const onEventCreated = functions.firestore.document('events/{id}').onCreate(async (snap: functions.firestore.DocumentSnapshot) => {
   const data = snap.data()
   const userIds = getParticipantsUserIds(data)
   await sendFcmToUsers(userIds, { notification: { title: 'Nuovo evento', body: data.title || 'È stato creato un evento' } })
 })
 
-export const onExpenseCreated = functions.firestore.document('expenses/{id}').onCreate(async (snap) => {
+export const onExpenseCreated = functions.firestore.document('expenses/{id}').onCreate(async (snap: functions.firestore.DocumentSnapshot) => {
   const data = snap.data()
   const userIds = getParticipantsUserIds(data)
   await sendFcmToUsers(userIds, { notification: { title: 'Nuova spesa', body: data.title || 'È stata aggiunta una spesa' } })
 })
 
-export const onPollCreated = functions.firestore.document('polls/{id}').onCreate(async (snap) => {
+export const onPollCreated = functions.firestore.document('polls/{id}').onCreate(async (snap: functions.firestore.DocumentSnapshot) => {
   const data = snap.data()
-  const userIds = getParticipantsUserIds(data)
-  await sendFcmToUsers(userIds, { notification: { title: 'Nuovo sondaggio', body: data.title || 'È stato creato un sondaggio' } })
+  let userIds = getParticipantsUserIds(data)
+  // if linked to event, include event participants
+  if (data.eventId) {
+    const evSnap = await db.doc(`events/${data.eventId}`).get()
+    const evParts = (evSnap.data()?.participants || []).map((p: any) => p.userId)
+    userIds = Array.from(new Set([...userIds, ...evParts]))
+  }
+  const click = data.eventId ? `/events/${data.eventId}/summary` : '/polls'
+  await sendFcmToUsers(userIds, { 
+    notification: { title: 'Nuovo sondaggio', body: data.title || 'È stato creato un sondaggio' },
+    data: { click_action: click }
+  } as any)
 })
 
-export const onListCreated = functions.firestore.document('lists/{id}').onCreate(async (snap) => {
+export const onListCreated = functions.firestore.document('lists/{id}').onCreate(async (snap: functions.firestore.DocumentSnapshot) => {
   const data = snap.data()
-  const userIds = getParticipantsUserIds(data)
-  await sendFcmToUsers(userIds, { notification: { title: 'Nuova lista', body: data.title || 'È stata creata una lista' } })
+  let userIds = getParticipantsUserIds(data)
+  if (data.eventId) {
+    const evSnap = await db.doc(`events/${data.eventId}`).get()
+    const evParts = (evSnap.data()?.participants || []).map((p: any) => p.userId)
+    userIds = Array.from(new Set([...userIds, ...evParts]))
+  }
+  const click = data.eventId ? `/events/${data.eventId}/summary` : '/lists'
+  await sendFcmToUsers(userIds, { 
+    notification: { title: 'Nuova lista', body: data.title || 'È stata creata una lista' },
+    data: { click_action: click }
+  } as any)
 })

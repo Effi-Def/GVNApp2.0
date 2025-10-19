@@ -17,7 +17,7 @@ export async function initMessaging(userId: string) {
 
     const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: await navigator.serviceWorker.ready })
     if (token) {
-      await userService.updatePartial(userId, { notifications: { fcmToken: token, pushEnabled: true } })
+      await userService.addFcmToken(userId, token)
     }
 
     onMessage(messaging, (payload) => {
@@ -25,7 +25,13 @@ export async function initMessaging(userId: string) {
       const title = (payload.notification && payload.notification.title) || 'Notifica'
       const body = (payload.notification && payload.notification.body) || ''
       if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification(title, { body })
+        const click_action = (payload.fcmOptions as any)?.link || (payload.data && (payload.data as any).click_action)
+        const n = new Notification(title, { body })
+        n.onclick = () => {
+          if (click_action) {
+            window.open(click_action, '_blank')
+          }
+        }
       }
     })
 

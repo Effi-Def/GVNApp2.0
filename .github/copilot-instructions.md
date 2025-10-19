@@ -28,5 +28,5 @@
 - [x] Align Poll Types and Build
 	<!-- Aggiornati PollForm/PollsPage/EventDashboard a title + userName; build verde -->
 
-- [ ] Finalize Firebase-first Expenses
-	<!-- Rimuovere fallback mock e forzare servizi Firestore per spese/eventi -->
+- [x] Finalize Firebase-first Expenses
+	<!-- Rimosso fallback mock, forzati servizi Firestore per spese/eventi; App ora usa ExpensesPage-firebase -->

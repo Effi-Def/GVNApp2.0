@@ -9,7 +9,8 @@ import {
   query,
   orderBy,
   where,
-  Timestamp 
+  Timestamp,
+  arrayUnion 
 } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { Event, Expense, Poll, ShoppingList, PaymentTransaction } from '../types'
@@ -583,6 +584,17 @@ export const userService = {
     } catch (e) {
       console.error('❌ Error updating user settings:', e)
       throw e
+    }
+  },
+  async addFcmToken(userId: string, token: string): Promise<void> {
+    try {
+      const ref = doc(db, 'users', userId)
+      await updateDoc(ref, { notifications: { fcmTokens: arrayUnion(token), pushEnabled: true } })
+    } catch (e) {
+      // If user doc doesn't exist, create it
+      const { setDoc } = await import('firebase/firestore')
+      const ref = doc(db, 'users', userId)
+      await setDoc(ref, { notifications: { fcmTokens: [token], pushEnabled: true } }, { merge: true })
     }
   }
 }
