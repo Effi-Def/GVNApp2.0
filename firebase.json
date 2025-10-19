@@ -22,4 +22,8 @@
       }
     ]
   }
+  ,
+  "storage": {
+    "rules": "storage.rules"
+  }
 }
