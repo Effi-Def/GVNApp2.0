@@ -7,8 +7,13 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
+      registerType: 'prompt',
+      includeAssets: [
+        'icons/pig-maskable.svg',
+        'icons/pig-192.png',
+        'icons/pig-512.png',
+        'icons/apple-touch-icon.png'
+      ],
       manifest: {
         name: 'GVNApp - Social Events Hub',
         short_name: 'GVNApp',
@@ -20,14 +25,26 @@ export default defineConfig({
         start_url: '/',
         icons: [
           {
-            src: 'pwa-192x192.png',
+            src: 'icons/pig-192.png',
             sizes: '192x192',
             type: 'image/png'
           },
           {
-            src: 'pwa-512x512.png',
+            src: 'icons/pig-512.png',
             sizes: '512x512',
             type: 'image/png'
+          },
+          {
+            src: 'icons/pig-maskable.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any maskable'
+          },
+          {
+            src: 'icons/apple-touch-icon.png',
+            sizes: '180x180',
+            type: 'image/png',
+            purpose: 'any'
           }
         ]
       }

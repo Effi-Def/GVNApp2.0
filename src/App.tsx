@@ -10,6 +10,7 @@ import LoginPage from './pages/LoginPage'
 import { useAuthStore } from './stores/useAuthStore'
 import EventSummary from './pages/EventSummary'
 import SettingsPage from './pages/SettingsPage'
+import NotificationsPage from './pages/NotificationsPage'
 
 function App() {
   // Check Firebase configuration in development
@@ -50,6 +51,7 @@ function AppContent() {
         <Route path="/polls" element={<PollsPage />} />
         <Route path="/lists" element={<ListsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
       </Routes>
     </Layout>
   )

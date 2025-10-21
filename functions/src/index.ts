@@ -96,3 +96,16 @@ export const onListCreated = functions.firestore.document('lists/{id}').onCreate
     data: { click_action: click }
   })
 })
+
+// HTTPS callable for end-to-end push test from client
+export const sendTestPush = functions.https.onCall(async (data, context) => {
+  const uid = context.auth?.uid || (typeof data?.userId === 'string' ? data.userId : undefined)
+  if (!uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Missing auth; sign in to request a test push')
+  }
+  await sendFcmToUsers([uid], {
+    notification: { title: 'Test push', body: 'Notifica di test ricevuta' },
+    data: { click_action: '/' }
+  })
+  return { ok: true }
+})

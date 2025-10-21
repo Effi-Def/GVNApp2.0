@@ -2,6 +2,7 @@ import { ReactNode } from 'react'
 import Navbar from './Navbar'
 import BottomNavigation from './BottomNavigation'
 import FirebaseTroubleshooting from '../FirebaseTroubleshooting'
+import MobileTopActions from './MobileTopActions'
 
 interface LayoutProps {
   children: ReactNode
@@ -14,6 +15,8 @@ const Layout = ({ children }: LayoutProps) => {
       <div className="hidden md:block">
         <Navbar />
       </div>
+      {/* Mobile top-right actions (notifications + settings) */}
+      <MobileTopActions />
       
       {/* Main Content */}
       <main className="w-full max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-4 pb-28 md:pb-0 md:pt-24">

@@ -37,9 +37,13 @@ const ExpensesPage = () => {
           eventService.getAll(),
           expenseService.getAll()
         ])
-        
-        setEvents(eventsData)
-        setExpenses(expensesData)
+        // Filtra gli eventi ai soli dove l'utente partecipa (status 'yes')
+        const myEvents = eventsData.filter(e => e.participants.some(p => p.userId === currentUserId && p.status === 'yes'))
+        setEvents(myEvents)
+        // Mostra spese SOLO se collegate a un evento dove l'utente ha status 'yes'
+        const myEventIds = new Set(myEvents.map(e => e.id))
+        const visibleExpenses = expensesData.filter(exp => exp.eventId && myEventIds.has(exp.eventId))
+        setExpenses(visibleExpenses)
         console.log(`✅ Loaded ${expensesData.length} expenses and ${eventsData.length} events`)
       } catch (error) {
         console.error('❌ Error loading data:', error)
@@ -248,15 +252,6 @@ const ExpensesPage = () => {
             <h1 className="text-3xl font-bold text-gray-800 mb-2">Spese 💰</h1>
             <p className="text-gray-600">Gestisci le spese di gruppo e i saldi</p>
           </div>
-          <button
-            onClick={() => setShowForm(true)}
-            className="bg-blue-500 hover:bg-blue-600 text-white px-4 py-2 rounded-lg shadow-lg transition-all duration-200 flex items-center space-x-2"
-          >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            <span className="hidden sm:inline">Aggiungi Spesa</span>
-          </button>
         </div>
       </div>
 

@@ -54,6 +54,13 @@ const NotificationSystem = ({ userId: _userId }: NotificationSystemProps) => {
     return date.toLocaleDateString('it-IT')
   }
 
+  // Auto mark all as read when opening the dropdown, and also when closing it
+  useEffect(() => {
+    if (isOpen) {
+      markAllAsReadStore()
+    }
+  }, [isOpen, markAllAsReadStore])
+
   return (
     <div className="relative">
       {/* Pulsante notifiche */}
@@ -74,7 +81,13 @@ const NotificationSystem = ({ userId: _userId }: NotificationSystemProps) => {
       {/* Dropdown notifiche */}
       {isOpen && (
         <>
-          <div className="fixed inset-0 z-10" onClick={() => setIsOpen(false)} />
+          <div
+            className="fixed inset-0 z-10"
+            onClick={() => {
+              markAllAsReadStore()
+              setIsOpen(false)
+            }}
+          />
           <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-20 max-h-96 overflow-hidden">
             {/* Header */}
             <div className="p-3 border-b border-gray-200 flex items-center justify-between">

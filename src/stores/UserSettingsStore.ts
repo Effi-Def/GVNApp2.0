@@ -39,6 +39,16 @@ export const useUserSettingsStore = create<UserSettingsState>((set, get) => ({
       if (data) {
         const { profile, notifications } = data
         set({ profile: profile || { userId }, notifications: notifications || { desktopEnabled: false, pushEnabled: false } })
+        // Propagate displayName into auth store for consistent navbar/name after reload
+        if (profile?.displayName) {
+          try {
+            const { useAuthStore } = await import('./useAuthStore')
+            const { user, setUser } = useAuthStore.getState() as any
+            if (user && user.displayName !== profile.displayName) {
+              setUser({ ...user, displayName: profile.displayName })
+            }
+          } catch {}
+        }
       } else {
         set({ profile: { userId }, notifications: { desktopEnabled: false, pushEnabled: false } })
       }

@@ -15,26 +15,42 @@ export function startNotificationsListeners(currentUserId: string) {
   const add = useNotificationsStore.getState().add
   const settings = useUserSettingsStore.getState().notifications
 
-  const makeHandler = (type: 'event' | 'expense' | 'poll' | 'list') => (snapshot: any) => {
-    snapshot.docChanges().forEach((change: any) => {
-      if (change.type === 'added') {
-        const data = change.doc.data()
-        // skip self-authored
-        if (data.createdBy && data.createdBy === currentUserId) return
-        const titleMap: Record<string, string> = {
-          event: 'Nuovo evento',
-          expense: 'Nuova spesa',
-          poll: 'Nuovo sondaggio',
-          list: 'Nuova lista',
-        }
-        const title = titleMap[type]
-        const message = data.title || data.description || 'Nuovo elemento creato'
-        add({ type, title, message, createdAt: new Date() })
-        if (settings.desktopEnabled) {
-          showDesktopNotification(title, message)
-        }
+  // Create a handler that skips the initial snapshot (to avoid duplicates on app open)
+  const makeHandler = (type: 'event' | 'expense' | 'poll' | 'list') => {
+    let initialized = false
+    return (snapshot: any) => {
+      if (!initialized) {
+        initialized = true
+        return
       }
-    })
+      snapshot.docChanges().forEach((change: any) => {
+        if (change.type === 'added') {
+          const data = change.doc.data()
+          const id = change.doc.id
+          // skip self-authored
+          if (data.createdBy && data.createdBy === currentUserId) return
+
+          const titleMap: Record<string, string> = {
+            event: 'Nuovo evento',
+            expense: 'Nuova spesa',
+            poll: 'Nuovo sondaggio',
+            list: 'Nuova lista',
+          }
+          const title = titleMap[type]
+          const message = data.title || data.description || 'Nuovo elemento creato'
+
+          // Build navigation target when possible
+          let actionUrl: string | undefined
+          if (type === 'event') actionUrl = `/events/${id}/summary`
+          else if (data.eventId) actionUrl = `/events/${data.eventId}/summary`
+
+          add({ type, title, message, createdAt: new Date(), actionUrl })
+          if (settings.desktopEnabled) {
+            showDesktopNotification(title, message)
+          }
+        }
+      })
+    }
   }
 
   const unsubEvents = onSnapshot(query(collection(db, 'events'), orderBy('createdAt', 'desc')), makeHandler('event'))

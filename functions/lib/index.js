@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onListCreated = exports.onPollCreated = exports.onExpenseCreated = exports.onEventCreated = void 0;
+exports.sendTestPush = exports.onListCreated = exports.onPollCreated = exports.onExpenseCreated = exports.onEventCreated = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 admin.initializeApp();
@@ -95,5 +95,17 @@ exports.onListCreated = functions.firestore.document('lists/{id}').onCreate(asyn
         notification: { title: 'Nuova lista', body: data.title || 'È stata creata una lista' },
         data: { click_action: click }
     });
+});
+// HTTPS callable for end-to-end push test from client
+exports.sendTestPush = functions.https.onCall(async (data, context) => {
+    const uid = context.auth?.uid || (typeof data?.userId === 'string' ? data.userId : undefined);
+    if (!uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Missing auth; sign in to request a test push');
+    }
+    await sendFcmToUsers([uid], {
+        notification: { title: 'Test push', body: 'Notifica di test ricevuta' },
+        data: { click_action: '/' }
+    });
+    return { ok: true };
 });
 //# sourceMappingURL=index.js.map

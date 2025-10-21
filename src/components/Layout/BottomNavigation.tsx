@@ -1,7 +1,12 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { useState } from 'react'
+import { useAuthStore } from '../../stores/useAuthStore'
 
 const BottomNavigation = () => {
   const location = useLocation()
+  const navigate = useNavigate()
+  const { logout } = useAuthStore()
+  const [moreOpen, setMoreOpen] = useState(false)
 
   const navigation = [
     { name: 'Home', href: '/', icon: '🏠', emoji: '🏠' },
@@ -41,7 +46,7 @@ const BottomNavigation = () => {
                   ? 'font-semibold text-primary-600' 
                   : 'text-neutral-500'
               }`}>
-                {item.name}
+                {item.name} {location.pathname === item.href ? '🐷' : ''}
               </span>
               
               {/* Piccola mascotte per la home */}
@@ -50,6 +55,24 @@ const BottomNavigation = () => {
               )}
             </Link>
           ))}
+
+          {/* More menu for Settings/Notifications/Logout */}
+          <button
+            onClick={() => setMoreOpen(o => !o)}
+            className={`flex flex-col items-center justify-center space-y-1 mx-1 rounded-2xl transition-all duration-200 ${
+              moreOpen ? 'text-primary-600 bg-gradient-to-t from-primary-50 to-primary-25 shadow-lg transform -translate-y-1' : 'text-neutral-500 hover:text-primary-600 hover:bg-neutral-50'
+            }`}
+          >
+            <span className="text-xl">⋯</span>
+            <span className="text-xs">Altro 🐷</span>
+          </button>
+          {moreOpen && (
+            <div className="absolute bottom-24 right-4 left-4 bg-white border border-neutral-200 rounded-2xl shadow-xl p-2">
+              <button onClick={() => { setMoreOpen(false); navigate('/notifications') }} className="w-full text-left px-3 py-3 rounded-xl hover:bg-neutral-50">🔔 Notifiche</button>
+              <button onClick={() => { setMoreOpen(false); navigate('/settings') }} className="w-full text-left px-3 py-3 rounded-xl hover:bg-neutral-50">⚙️ Impostazioni</button>
+              <button onClick={async () => { setMoreOpen(false); await logout() }} className="w-full text-left px-3 py-3 rounded-xl hover:bg-red-50 text-red-600">🚪 Esci</button>
+            </div>
+          )}
         </div>
       </div>
     </nav>

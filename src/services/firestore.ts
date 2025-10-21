@@ -50,24 +50,76 @@ export const eventService = {
 
   // Get all events
   async getAll(): Promise<Event[]> {
+    // Helper to coerce various date shapes to Date safely
+    const toDate = (v: any): Date | undefined => {
+      if (!v) return undefined
+      if (v instanceof Date) return v
+      if (typeof v?.toDate === 'function') return v.toDate()
+      if (typeof v === 'string' || typeof v === 'number') {
+        const d = new Date(v)
+        return isNaN(d.getTime()) ? undefined : d
+      }
+      return undefined
+    }
+
     try {
-      console.log('📅 Fetching all events')
+      console.log('📅 Fetching all events (ordered by date desc)')
       const q = query(collection(db, 'events'), orderBy('date', 'desc'))
       const querySnapshot = await getDocs(q)
-      
-      const events: Event[] = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate() || new Date(),
-        updatedAt: doc.data().updatedAt?.toDate() || new Date(),
-        date: doc.data().date?.toDate() || new Date()
-      })) as Event[]
-      
+
+      const events: Event[] = querySnapshot.docs.map(d => {
+        const data: any = d.data()
+        const participants = Array.isArray(data.participants)
+          ? data.participants.map((p: any) => ({
+              ...p,
+              respondedAt: toDate(p?.respondedAt) || new Date(),
+            }))
+          : []
+        return {
+          id: d.id,
+          ...data,
+          participants,
+          createdAt: toDate(data.createdAt) || new Date(),
+          updatedAt: toDate(data.updatedAt) || new Date(),
+          date: toDate(data.date) || new Date(),
+          endDate: toDate(data.endDate),
+        } as Event
+      })
+
       console.log(`✅ Fetched ${events.length} events`)
       return events
     } catch (error) {
-      console.error('❌ Error fetching events:', error)
-      throw new Error('Errore durante il caricamento degli eventi')
+      console.warn('⚠️ Ordered query failed, falling back to unordered fetch:', error)
+      // Fallback: fetch without order and sort client-side
+      try {
+        const col = collection(db, 'events')
+        const snap = await getDocs(col)
+        const events: Event[] = snap.docs.map(d => {
+          const data: any = d.data()
+          const participants = Array.isArray(data.participants)
+            ? data.participants.map((p: any) => ({
+                ...p,
+                respondedAt: toDate(p?.respondedAt) || new Date(),
+              }))
+            : []
+          return {
+            id: d.id,
+            ...data,
+            participants,
+            createdAt: toDate(data.createdAt) || new Date(),
+            updatedAt: toDate(data.updatedAt) || new Date(),
+            date: toDate(data.date) || new Date(),
+            endDate: toDate(data.endDate),
+          } as Event
+        })
+        // Sort by date desc to mimic original
+        events.sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0))
+        console.log(`✅ Fallback fetched ${events.length} events`)
+        return events
+      } catch (e) {
+        console.error('❌ Error fetching events (fallback also failed):', e)
+        throw new Error('Errore durante il caricamento degli eventi')
+      }
     }
   },
 

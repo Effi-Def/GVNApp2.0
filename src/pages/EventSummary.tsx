@@ -17,6 +17,8 @@ const EventSummary = () => {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Ensure we start at the top when opening the summary
+    window.scrollTo({ top: 0, behavior: 'auto' })
     const load = async () => {
       try {
         setLoading(true)
@@ -136,8 +138,30 @@ const EventSummary = () => {
   return (
     <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Riepilogo: {event.title}</h1>
+        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">{event.title} <span>🐷</span></h1>
         <button onClick={() => navigate(-1)} className="text-sm text-gray-600 hover:text-gray-800">← Indietro</button>
+      </div>
+
+      {/* Primary event info */}
+      <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div className="space-y-1">
+            <div className="text-sm text-neutral-600 flex items-center gap-2">
+              <span>📅</span>
+              <span>
+                {new Date(event.date).toLocaleDateString('it-IT')} {event.time && `alle ${event.time}`}
+                {event.endDate && ` — ${new Date(event.endDate).toLocaleDateString('it-IT')}`}
+              </span>
+            </div>
+            <div className="text-sm text-neutral-600 flex items-center gap-2">
+              <span>📍</span>
+              <span>{event.location}</span>
+            </div>
+          </div>
+        </div>
+        {event.description && (
+          <p className="mt-3 text-sm text-neutral-700 whitespace-pre-line">{event.description}</p>
+        )}
       </div>
 
       {/* Participants */}

@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import { useAppStore } from '../stores/AppStore'
 import { useAuthStore } from '../stores/useAuthStore'
+import { useUserSettingsStore } from '../stores/UserSettingsStore'
 import { useNavigate } from 'react-router-dom'
+import { eventService } from '../services/firestore'
 import MonthCalendar from '../components/Calendar/MonthCalendar'
 
 const HomePage = () => {
   const { user } = useAuthStore()
-  const { events, expenses } = useAppStore()
+  const { profile } = useUserSettingsStore()
+  const { events, expenses, setEvents } = useAppStore()
   const navigate = useNavigate()
   
   const [isLoading, setIsLoading] = useState(false)
@@ -27,10 +30,21 @@ const HomePage = () => {
 
   // Assicurati che se lo store è vuoto proviamo un caricamento centralizzato una sola volta
   useEffect(() => {
-    if (events.length === 0 && expenses.length === 0) {
+    if (events.length === 0) {
+      // Prova prima la funzione centralizzata se disponibile
       const { loadUserData } = useAuthStore.getState() as any
       if (typeof loadUserData === 'function') {
-        loadUserData()
+        loadUserData().catch(() => {})
+      } else {
+        // Fallback diretto: carica eventi da Firestore
+        ;(async () => {
+          try {
+            const eventsData = await eventService.getAll()
+            setEvents(eventsData)
+          } catch (e) {
+            console.warn('⚠️ Impossibile caricare eventi (fallback HomePage):', e)
+          }
+        })()
       }
     }
   }, [events.length, expenses.length])
@@ -105,7 +119,9 @@ const HomePage = () => {
           <div className="space-y-3">
             <div className="flex items-center space-x-3">
               <h1 className="gvn-title text-2xl sm:text-3xl lg:text-4xl bg-gradient-to-r from-primary-600 to-accent-500 bg-clip-text text-transparent">
-                Ciao, {(user?.displayName && user.displayName !== 'Utente') ? user.displayName : (user?.email ? user.email.split('@')[0] : 'Amico')}!
+                Ciao, {(profile?.displayName && profile.displayName.trim().length > 0)
+                  ? profile.displayName
+                  : ((user?.displayName && user.displayName !== 'Utente') ? user.displayName : (user?.email ? user.email.split('@')[0] : 'Amico'))}!
               </h1>
               <span className="text-2xl animate-bounce">👋</span>
             </div>
@@ -139,10 +155,16 @@ const HomePage = () => {
             onSelectEvent={(eventId) => navigate(`/events/${eventId}/summary`)}
             compact
             currentUserId={currentUserId}
+            onCreateEvent={(date) => {
+              const y = date.getFullYear()
+              const m = String(date.getMonth() + 1).padStart(2, '0')
+              const d = String(date.getDate()).padStart(2, '0')
+              navigate(`/events?create=1&date=${y}-${m}-${d}`)
+            }}
           />
         </div>
 
-        <div className="gvn-card p-6 group hover:scale-105">
+  <button onClick={() => navigate('/expenses')} className="gvn-card p-6 group hover:scale-105 text-left">
           <div className="flex items-center justify-between">
             <div className="space-y-2">
               <p className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">Il Tuo Saldo</p>
@@ -163,21 +185,8 @@ const HomePage = () => {
               <span className="text-3xl">{userBalance >= 0 ? '💚' : '💸'}</span>
             </div>
           </div>
-        </div>
-        <div className="gvn-card p-6 group hover:scale-105">
-          <div className="flex items-center justify-between">
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">Spese Totali</p>
-              <p className="gvn-title text-4xl text-neutral-900">{expenses.length}</p>
-              <p className="text-xs text-neutral-400">
-                Condivise con il gruppo
-              </p>
-            </div>
-            <div className="bg-gradient-to-br from-accent-100 to-accent-200 p-4 rounded-2xl group-hover:scale-110 transition-transform">
-              <span className="text-3xl">💰</span>
-            </div>
-          </div>
-        </div>
+  </button>
+        {/* Riepilogo Spese Totali rimosso su richiesta */}
       </div>
 
       {/* Prossimi Eventi - redesigned */}
@@ -237,7 +246,7 @@ const HomePage = () => {
             <div className="text-6xl mb-4 opacity-50">📅</div>
             <h3 className="gvn-title text-xl text-neutral-600 mb-2">Nessun evento in programma</h3>
             <p className="text-neutral-500 mb-6">Crea il primo evento per il gruppo!</p>
-            <button className="gvn-btn-primary">
+            <button onClick={() => navigate('/events?create=1')} className="gvn-btn-primary">
               <span>🎉</span>
               <span>Crea Evento</span>
             </button>
@@ -245,38 +254,119 @@ const HomePage = () => {
         )}
       </div>
 
-      {/* Attività recenti - redesigned */}
+      {/* Attività recenti - dinamiche e filtrate */}
       <div className="gvn-card p-6 sm:p-8">
         <h2 className="gvn-title text-2xl flex items-center space-x-3 mb-6">
           <span>🔔</span>
           <span>Attività Recenti</span>
         </h2>
-        <div className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-3 sm:space-y-0 p-4 rounded-xl bg-blue-50 border border-blue-100">
-            <div className="w-3 h-3 bg-blue-500 rounded-full animate-pulse"></div>
-            <div className="flex-1">
-              <span className="font-medium text-neutral-700">Nuovo evento creato: "Cena al ristorante"</span>
-              <p className="text-sm text-neutral-500">2 ore fa</p>
+
+        {(() => {
+          // Helper: safe date
+          const toDate = (d: any) => d instanceof Date ? d : new Date(d)
+          // Event IDs dove partecipo (yes/maybe) o che ho creato
+          const myEventIds = new Set(
+            events
+              .filter(ev => ev.createdBy === currentUserId || (ev.participants || []).some(p => p.userId === currentUserId && (p.status === 'yes' || p.status === 'maybe')))
+              .map(ev => ev.id)
+          )
+
+          type Activity = { id: string; kind: 'event' | 'expense' | 'poll' | 'list'; text: string; when: Date; icon: string; click: () => void; accent: string }
+          const items: Activity[] = []
+
+          // Nuovi eventi creati (mostra come categoria dedicata)
+          for (const ev of events) {
+            items.push({
+              id: `ev-${ev.id}`,
+              kind: 'event',
+              text: `Nuovo evento: "${ev.title}"` ,
+              when: toDate(ev.createdAt),
+              icon: '🎉',
+              accent: 'bg-blue-50 border-blue-100',
+              click: () => navigate(`/events/${ev.id}/summary`)
+            })
+          }
+
+          // Attività inerenti ai miei eventi: spese, sondaggi, liste
+          for (const ex of expenses) {
+            if (!ex.eventId || !myEventIds.has(ex.eventId)) continue
+            items.push({
+              id: `ex-${ex.id}`,
+              kind: 'expense',
+              text: `Nuova spesa: "${ex.title}" · €${ex.amount.toFixed(2)}`,
+              when: toDate(ex.createdAt),
+              icon: '💰',
+              accent: 'bg-green-50 border-green-100',
+              click: () => navigate(`/events/${ex.eventId}/summary`)
+            })
+          }
+
+          // Polls
+          const appState: any = useAppStore.getState()
+          const polls = appState.polls || []
+          for (const p of polls) {
+            if (!p.eventId || !myEventIds.has(p.eventId)) continue
+            items.push({
+              id: `po-${p.id}`,
+              kind: 'poll',
+              text: `Nuovo sondaggio: "${p.title}"`,
+              when: toDate(p.createdAt),
+              icon: '🗳️',
+              accent: 'bg-purple-50 border-purple-100',
+              click: () => navigate(`/events/${p.eventId}/summary`)
+            })
+          }
+
+          // Lists
+          const lists = appState.lists || []
+          for (const l of lists) {
+            if (!l.eventId || !myEventIds.has(l.eventId)) continue
+            items.push({
+              id: `li-${l.id}`,
+              kind: 'list',
+              text: `Nuova lista: "${l.title}"`,
+              when: toDate(l.createdAt),
+              icon: '📝',
+              accent: 'bg-amber-50 border-amber-100',
+              click: () => navigate(`/events/${l.eventId}/summary`)
+            })
+          }
+
+          // Ordina per data desc e prendi i più recenti
+          items.sort((a, b) => b.when.getTime() - a.when.getTime())
+          const top = items.slice(0, 6)
+
+          const timeAgo = (d: Date) => {
+            const diff = Date.now() - d.getTime()
+            const minutes = Math.floor(diff / 60000)
+            if (minutes < 1) return 'adesso'
+            if (minutes < 60) return `${minutes} min fa`
+            const hours = Math.floor(minutes / 60)
+            if (hours < 24) return `${hours} h fa`
+            const days = Math.floor(hours / 24)
+            if (days === 1) return 'ieri'
+            return `${days} gg fa`
+          }
+
+          return (
+            <div className="space-y-3">
+              {top.length === 0 ? (
+                <div className="text-center py-8 text-neutral-500">Nessuna attività recente</div>
+              ) : (
+                top.map(a => (
+                  <button key={a.id} onClick={a.click} className={`text-left flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-3 sm:space-y-0 p-4 rounded-xl border w-full ${a.accent}`}>
+                    <div className="w-3 h-3 bg-neutral-400 rounded-full"></div>
+                    <div className="flex-1">
+                      <span className="font-medium text-neutral-700">{a.text}</span>
+                      <p className="text-sm text-neutral-500">{timeAgo(a.when)}</p>
+                    </div>
+                    <span className="text-xl">{a.icon}</span>
+                  </button>
+                ))
+              )}
             </div>
-            <span className="text-xl">🎉</span>
-          </div>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-3 sm:space-y-0 p-4 rounded-xl bg-green-50 border border-green-100">
-            <div className="w-3 h-3 bg-green-500 rounded-full"></div>
-            <div className="flex-1">
-              <span className="font-medium text-neutral-700">Marco ha confermato la partecipazione</span>
-              <p className="text-sm text-neutral-500">5 ore fa</p>
-            </div>
-            <span className="text-xl">✅</span>
-          </div>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-3 sm:space-y-0 p-4 rounded-xl bg-amber-50 border border-amber-100">
-            <div className="w-3 h-3 bg-amber-500 rounded-full"></div>
-            <div className="flex-1">
-              <span className="font-medium text-neutral-700">Nuova spesa aggiunta: "Benzina viaggio"</span>
-              <p className="text-sm text-neutral-500">1 giorno fa</p>
-            </div>
-            <span className="text-xl">💰</span>
-          </div>
-        </div>
+          )
+        })()}
       </div>
     </div>
   )

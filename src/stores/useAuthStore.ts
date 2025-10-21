@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { User } from '../types'
-import { auth } from '../firebase/config'
+import { auth, storage } from '../firebase/config'
 import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth'
 
 interface AuthState {
@@ -34,6 +34,11 @@ export const useAuthStore = create<AuthState>((set) => ({
       }
       
       set({ user, loading: false })
+      // Prefetch shared avatars right after first sign-in for instant Settings load
+      try {
+        const { fetchAndCacheAvatars } = await import('../utils/avatarCache')
+        fetchAndCacheAvatars(storage)
+      } catch {}
     } catch (error) {
       console.error('Errore durante il login:', error)
       set({ loading: false })
@@ -66,6 +71,11 @@ onAuthStateChanged(auth, async (firebaseUser) => {
     }
     console.log('🔥 Firebase Auth: Utente autenticato:', user.displayName)
     setUser(user)
+    // Also prefetch avatars on session restore (page refresh)
+    try {
+      const { fetchAndCacheAvatars } = await import('../utils/avatarCache')
+      fetchAndCacheAvatars(storage)
+    } catch {}
     
     // 🚀 CARICA AUTOMATICAMENTE I DATI DI BASE
     await loadUserData()
@@ -93,7 +103,7 @@ onAuthStateChanged(auth, async (firebaseUser) => {
 })
 
 // Funzione per caricare automaticamente i dati dell'utente
-async function loadUserData() {
+export async function loadUserData() {
   try {
     console.log('📊 Loading user data automatically...')
     
