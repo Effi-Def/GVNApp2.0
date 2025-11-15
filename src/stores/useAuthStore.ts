@@ -1,7 +1,14 @@
 import { create } from 'zustand'
 import { User } from '../types'
 import { auth, storage } from '../firebase/config'
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth'
+import { 
+  signInWithPopup, 
+  signInWithRedirect, 
+  GoogleAuthProvider, 
+  signOut, 
+  onAuthStateChanged 
+} from 'firebase/auth'
+import { isMobileDevice } from '../utils/deviceDetection'
 
 interface AuthState {
   user: User | null
@@ -22,23 +29,43 @@ export const useAuthStore = create<AuthState>((set) => ({
     try {
       set({ loading: true })
       const provider = new GoogleAuthProvider()
-      const result = await signInWithPopup(auth, provider)
-      const firebaseUser = result.user
       
-      const user: User = {
-        id: firebaseUser.uid,
-        email: firebaseUser.email || '',
-        displayName: firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Utente'),
-        photoURL: firebaseUser.photoURL || undefined,
-        createdAt: new Date()
+      // Add additional scopes
+      provider.addScope('profile')
+      provider.addScope('email')
+      
+      // Force account selection
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      })
+      
+      const useMobile = isMobileDevice()
+      console.log(`📱 Login method: ${useMobile ? 'redirect' : 'popup'}`)
+      
+      if (useMobile) {
+        // Use redirect on mobile
+        await signInWithRedirect(auth, provider)
+        // Result handled by AuthContext
+      } else {
+        // Use popup on desktop
+        const result = await signInWithPopup(auth, provider)
+        const firebaseUser = result.user
+        
+        const user: User = {
+          id: firebaseUser.uid,
+          email: firebaseUser.email || '',
+          displayName: firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Utente'),
+          photoURL: firebaseUser.photoURL || undefined,
+          createdAt: new Date()
+        }
+        
+        set({ user, loading: false })
+        // Prefetch shared avatars right after first sign-in for instant Settings load
+        try {
+          const { fetchAndCacheAvatars } = await import('../utils/avatarCache')
+          fetchAndCacheAvatars(storage)
+        } catch {}
       }
-      
-      set({ user, loading: false })
-      // Prefetch shared avatars right after first sign-in for instant Settings load
-      try {
-        const { fetchAndCacheAvatars } = await import('../utils/avatarCache')
-        fetchAndCacheAvatars(storage)
-      } catch {}
     } catch (error) {
       console.error('Errore durante il login:', error)
       set({ loading: false })

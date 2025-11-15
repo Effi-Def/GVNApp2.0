@@ -1,10 +1,16 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../hooks'
+import { isMobileDevice } from '../utils/deviceDetection'
 
 const LoginPage = () => {
   const { signInWithGoogle } = useAuth()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    setIsMobile(isMobileDevice())
+  }, [])
 
   const handleGoogleLogin = async () => {
     setIsLoading(true)
@@ -17,7 +23,6 @@ const LoginPage = () => {
     } catch (error) {
       console.error('❌ Errore durante il login:', error)
       setError(error instanceof Error ? error.message : 'Errore durante il login')
-    } finally {
       setIsLoading(false)
     }
   }
@@ -60,8 +65,18 @@ const LoginPage = () => {
                 d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
               />
             </svg>
-            {isLoading ? 'Accesso in corso...' : 'Continua con Google'}
+            {isLoading 
+              ? (isMobile ? 'Reindirizzamento in corso...' : 'Accesso in corso...') 
+              : 'Continua con Google'}
           </button>
+
+          {isMobile && isLoading && (
+            <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-700">
+                📱 Verrai reindirizzato per completare l'accesso. Potrebbe volerci qualche secondo...
+              </p>
+            </div>
+          )}
 
           {error && (
             <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">

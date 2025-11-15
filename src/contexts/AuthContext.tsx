@@ -1,9 +1,17 @@
 import { createContext, useEffect, ReactNode } from 'react'
-import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth'
+import { 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
+  GoogleAuthProvider, 
+  signOut 
+} from 'firebase/auth'
 import { doc, setDoc, getDoc } from 'firebase/firestore'
 import { auth, db } from '../firebase/config'
 import { useAuthStore } from '../stores/useAuthStore'
 import { User } from '../types'
+import { isMobileDevice } from '../utils/deviceDetection'
 
 export interface AuthContextType {
   signInWithGoogle: () => Promise<void>
@@ -17,6 +25,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     console.log('🔥 AuthProvider: Setting up auth listener')
+    
+    // Check for redirect result on mount (for mobile devices)
+    const checkRedirectResult = async () => {
+      try {
+        console.log('🔄 Checking for redirect result...')
+        const result = await getRedirectResult(auth)
+        if (result) {
+          console.log('✅ Redirect result found:', result.user.email)
+          // User will be processed by onAuthStateChanged
+        } else {
+          console.log('ℹ️ No redirect result found')
+        }
+      } catch (error) {
+        console.error('❌ Error handling redirect result:', error)
+        // Don't set loading to false here, let onAuthStateChanged handle it
+      }
+    }
+    
+    checkRedirectResult()
     
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       console.log('🔐 Auth state changed:', firebaseUser ? 'User logged in' : 'User logged out')
@@ -96,11 +123,45 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const signInWithGoogle = async () => {
     console.log('🚀 Attempting Google sign in...')
     const provider = new GoogleAuthProvider()
+    
+    // Add additional scopes to get better user profile data
+    provider.addScope('profile')
+    provider.addScope('email')
+    
+    // Force account selection to avoid cached account issues
+    provider.setCustomParameters({
+      prompt: 'select_account'
+    })
+    
     try {
-      const result = await signInWithPopup(auth, provider)
-      console.log('✅ Google sign in successful:', result.user.email)
-    } catch (error) {
+      const useMobile = isMobileDevice()
+      console.log(`📱 Device type: ${useMobile ? 'Mobile (using redirect)' : 'Desktop (using popup)'}`)
+      
+      if (useMobile) {
+        // Use redirect on mobile devices for better compatibility
+        console.log('🔄 Starting redirect-based sign in...')
+        await signInWithRedirect(auth, provider)
+        // The result will be handled by getRedirectResult in useEffect
+      } else {
+        // Use popup on desktop for better UX
+        console.log('🪟 Starting popup-based sign in...')
+        const result = await signInWithPopup(auth, provider)
+        console.log('✅ Google sign in successful:', result.user.email)
+      }
+    } catch (error: any) {
       console.error('❌ Error signing in with Google:', error)
+      
+      // Provide more helpful error messages
+      if (error.code === 'auth/popup-blocked') {
+        throw new Error('Il popup è stato bloccato. Permetti i popup per questo sito e riprova.')
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        throw new Error('Login annullato.')
+      } else if (error.code === 'auth/network-request-failed') {
+        throw new Error('Errore di rete. Controlla la connessione internet e riprova.')
+      } else if (error.code === 'auth/unauthorized-domain') {
+        throw new Error('Dominio non autorizzato. Contatta l\'amministratore.')
+      }
+      
       throw error
     }
   }
