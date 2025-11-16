@@ -25,9 +25,12 @@ const NotificationsPage = () => {
     <div className="p-4 sm:p-6 max-w-2xl mx-auto">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold flex items-center gap-2">Notifiche <span>🐷</span></h1>
-        {notifications.some(n => !n.read) && (
-          <button onClick={markAllAsRead} className="text-sm text-blue-600 hover:text-blue-800">Segna tutte come lette</button>
-        )}
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate('/notifications/settings')} className="text-sm text-gray-700 hover:text-gray-900">Preferenze</button>
+          {notifications.some(n => !n.read) && (
+            <button onClick={markAllAsRead} className="text-sm text-blue-600 hover:text-blue-800">Segna tutte come lette</button>
+          )}
+        </div>
       </div>
 
       {notifications.length === 0 ? (

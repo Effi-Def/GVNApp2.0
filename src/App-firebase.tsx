@@ -314,7 +314,7 @@ function AppContent() {
   
   return (
     <Router>
-      <Layout user={user} onLogout={logout}>
+      <Layout>
         <Routes>
           <Route path="/" element={<HomePage user={user} />} />
           <Route path="/events" element={<EventsPage />} />

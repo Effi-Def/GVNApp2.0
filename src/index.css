@@ -9,7 +9,7 @@
   font-weight: 400;
   
   /* Colori del design system */
-  --color-primary: #007bff;
+  --color-primary: #10b981;
   --color-accent: #ec4899;
   --color-neutral-50: #fafafa;
   --color-neutral-900: #171717;
@@ -47,7 +47,7 @@ body {
   
   /* Button primario con il nuovo stile */
   .gvn-btn-primary, .gvn-button-primary {
-    @apply bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold px-6 py-3 rounded-xl shadow-lg shadow-blue-500/25 transition-all duration-200 hover:shadow-xl hover:shadow-blue-500/30 hover:scale-105 active:scale-95;
+    @apply bg-gradient-to-r from-primary-500 to-primary-600 text-white font-semibold px-6 py-3 rounded-xl shadow-lg shadow-primary-500/25 transition-all duration-200 hover:shadow-xl hover:shadow-primary-500/30 hover:scale-105 active:scale-95;
   }
   
   /* Button secondario */
@@ -57,7 +57,7 @@ body {
   
   /* Input moderno */
   .gvn-input {
-    @apply w-full px-4 py-3 rounded-xl border-2 border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 font-medium transition-all duration-200 focus:outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10;
+    @apply w-full px-4 py-3 rounded-xl border-2 border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 font-medium transition-all duration-200 focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10;
   }
   
   /* Titoli con font display */

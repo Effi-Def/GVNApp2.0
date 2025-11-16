@@ -17,6 +17,12 @@ export interface Event {
   location: string
   createdBy: string
   participants: EventParticipant[]
+  // Priorità evento per ordinamento/visibilità
+  priority?: EventPriority
+  // Ultima attività chat per badge "Nuovi"
+  chatLastActivityAt?: Date
+  // Flag per consentire la condivisione pubblica dell'evento
+  publicShareEnabled?: boolean
   createdAt: Date
   updatedAt: Date
 }
@@ -31,11 +37,16 @@ export type EventCategory =
   | 'shopping' 
   | 'altro'
 
+// Livelli di priorità supportati (default: 'medium')
+export type EventPriority = 'low' | 'medium' | 'high'
+
 export interface EventParticipant {
   userId: string
   name: string
   status: 'yes' | 'no' | 'maybe'
   respondedAt: Date
+  // Presenza per singolo giorno (chiave YYYY-MM-DD → presente:boolean)
+  days?: Record<string, boolean>
 }
 
 export interface Expense {
@@ -129,9 +140,14 @@ export interface ShoppingList {
   eventId?: string
   createdBy: string
   shared?: boolean  // Aggiungiamo flag condivisione
+  // Tipo lista: shopping (default), todo, transport, lodging
+  type?: ListType
   createdAt: Date
   updatedAt: Date
 }
+
+// Tipi supportati per le liste (estendibili)
+export type ListType = 'shopping' | 'todo' | 'transport' | 'lodging'
 
 export interface ListItem {  // Rinominiamo e aggiungiamo proprietà
   id: string
@@ -141,6 +157,14 @@ export interface ListItem {  // Rinominiamo e aggiungiamo proprietà
   completedAt?: Date
   addedBy: string
   addedAt: Date
+  // Campi opzionali per To-do e altri tipi specializzati
+  status?: 'todo' | 'in-progress' | 'done'
+  dueDate?: Date
+  assignees?: { userId?: string; userName: string }[]
+  notes?: string
+  // Estensioni per tipi speciali: trasporti (macchine) e stanze
+  capacity?: number // posti disponibili nello slot (es. 5 per auto, 2 per stanza)
+  driver?: { userId?: string; userName: string } // solo per macchine
 }
 
 // Alias per backward compatibility
@@ -152,4 +176,35 @@ export interface Group {
   members: string[]
   createdBy: string
   createdAt: Date
+}
+
+// 💬 Chat per evento (v1)
+export type ChatReactionKey = 'like' | 'love' | 'fun'
+
+export interface ChatAttachment {
+  id: string
+  url: string
+  name: string
+  type: 'image' | 'file'
+  size?: number
+  contentType?: string
+}
+
+export interface ChatMessage {
+  id: string
+  eventId: string
+  userId: string
+  userName: string
+  userPhotoURL?: string
+  text?: string
+  attachments?: ChatAttachment[]
+  reactions?: Partial<Record<ChatReactionKey, string[]>>
+  quoted?: {
+    messageId: string
+    textPreview?: string
+    mediaThumbUrl?: string
+  }
+  createdAt: Date
+  editedAt?: Date
+  deleted?: boolean
 }

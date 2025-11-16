@@ -30,34 +30,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid))
           
           let userData: User
-          const betterDisplayName =
-            firebaseUser.displayName ||
-            (firebaseUser.email ? firebaseUser.email.split('@')[0] : undefined) ||
-            'Utente'
           
           if (userDoc.exists()) {
             console.log('✅ User document found in Firestore')
             userData = { id: firebaseUser.uid, ...userDoc.data() } as User
-            // Fill missing fields from firebase user
-            if (!userData.email && firebaseUser.email) userData.email = firebaseUser.email
-            if (!userData.photoURL && firebaseUser.photoURL) userData.photoURL = firebaseUser.photoURL
-            // Se il displayName è mancante o generico, aggiorniamo con uno migliore
-            if (!userData.displayName || userData.displayName === 'Utente') {
-              userData.displayName = betterDisplayName
-              await setDoc(
-                doc(db, 'users', firebaseUser.uid),
-                { displayName: betterDisplayName },
-                { merge: true }
-              )
-              console.log('✏️ Updated user displayName in Firestore')
-            }
           } else {
             console.log('📝 Creating new user document in Firestore')
             // Crea un nuovo utente nel database
             userData = {
               id: firebaseUser.uid,
               email: firebaseUser.email!,
-              displayName: betterDisplayName,
+              displayName: firebaseUser.displayName || firebaseUser.email!.split('@')[0],
               photoURL: firebaseUser.photoURL || undefined,
               createdAt: new Date(),
             }

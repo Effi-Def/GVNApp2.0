@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import ErrorBoundary from './components/ErrorBoundary'
 import { AuthProvider } from './contexts/AuthContext'
 import './index.css'
 import { registerSW } from 'virtual:pwa-register'
@@ -63,48 +64,86 @@ function showToast(message: string, opts?: { action?: { label: string; onClick: 
   }
 }
 
+// Guards to avoid duplicate update prompts and repeated updates
+const g: any = (window as any)
+if (g.__gvn_sw_update_prompt_shown == null) g.__gvn_sw_update_prompt_shown = false
+if (g.__gvn_sw_update_in_progress == null) g.__gvn_sw_update_in_progress = false
+if (g.__gvn_sw_controllerchange_bound == null) g.__gvn_sw_controllerchange_bound = false
+
 // Register PWA and show a toast when a new version is available
 const updateSW = registerSW({
   onNeedRefresh() {
+    // CRITICAL: Prevent update loops during development
+    if (import.meta.env.DEV) {
+      console.log('🔧 DEV mode: skipping SW update prompt to prevent reload loops')
+      return
+    }
+    
+    // Rate-limit prompts across reloads (increased from 15s to 5 minutes)
+    try {
+      const last = Number(localStorage.getItem('gvn_last_update_prompt') || '0')
+      const now = Date.now()
+      if (now - last < 300000) { // 5 minutes
+        console.log('⏭️ Skipping update prompt (too soon since last prompt)')
+        return
+      }
+      localStorage.setItem('gvn_last_update_prompt', String(now))
+    } catch {}
+    
+    if (g.__gvn_sw_update_prompt_shown) {
+      console.log('⏭️ Skipping update prompt (already shown in this session)')
+      return
+    }
+    
+    g.__gvn_sw_update_prompt_shown = true
+    console.log('🔔 Showing update prompt')
+    
     // Visible toast
     showToast('Nuova versione disponibile', {
       action: {
         label: 'Aggiorna',
-        onClick: () => updateSW(true),
+        onClick: () => {
+          if (g.__gvn_sw_update_in_progress) {
+            console.log('⏭️ Update already in progress')
+            return
+          }
+          g.__gvn_sw_update_in_progress = true
+          console.log('🔄 Starting update...')
+          
+          if (!g.__gvn_sw_controllerchange_bound && 'serviceWorker' in navigator) {
+            try {
+              navigator.serviceWorker.addEventListener('controllerchange', () => {
+                if (g.__gvn_sw_controllerchange_bound === true) return
+                g.__gvn_sw_controllerchange_bound = true
+                console.log('✅ New SW activated, reloading in 200ms...')
+                setTimeout(() => { try { location.reload() } catch {} }, 200)
+              }, { once: true } as any)
+            } catch (e) {
+              console.error('❌ Failed to bind controllerchange:', e)
+            }
+          }
+          try { 
+            updateSW(true)
+            console.log('✅ SW update triggered')
+          } catch (e) {
+            console.error('❌ Failed to trigger SW update:', e)
+          }
+        },
       },
     })
-    // Also add an in-app notification so it's clearly visible
-    import('./stores/useNotificationsStore').then(({ useNotificationsStore }) => {
-      const add = useNotificationsStore.getState().add
-      add({
-        type: 'reminder',
-        title: 'Nuova versione disponibile',
-        message: 'Tocca per aggiornare l\'app all\'ultima versione.',
-        createdAt: new Date(),
-        actionUrl: undefined,
-      })
-    }).catch(() => {})
   },
   onOfflineReady() {
+    console.log('✅ App ready for offline use')
     showToast('App disponibile offline')
-    // Also add an in-app notification for offline-ready
-    import('./stores/useNotificationsStore').then(({ useNotificationsStore }) => {
-      const add = useNotificationsStore.getState().add
-      add({
-        type: 'reminder',
-        title: 'Disponibile offline',
-        message: 'Puoi usare l\'app anche senza connessione.',
-        createdAt: new Date(),
-        actionUrl: undefined,
-      })
-    }).catch(() => {})
   },
 })
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <AuthProvider>
-      <App />
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <App />
+      </AuthProvider>
+    </ErrorBoundary>
   </React.StrictMode>,
 )

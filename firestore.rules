@@ -1,0 +1,113 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    // Users collection
+    match /users/{userId} {
+      // Anyone authenticated can read user profiles
+      allow read: if isSignedIn();
+      // Users can only write their own profile
+      allow write: if isSignedIn() && isOwner(userId);
+    }
+    
+    // Events collection
+    match /events/{eventId} {
+      // Anyone authenticated can read events
+      allow read: if isSignedIn();
+      // Anyone authenticated can create events
+      allow create: if isSignedIn();
+      // Only the creator can update/delete
+      allow update, delete: if isSignedIn() && 
+        (resource.data.createdBy == request.auth.uid || 
+         request.auth.uid in resource.data.participants);
+    }
+    
+    // Event participants subcollection
+    match /events/{eventId}/participants/{participantId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+    
+    // Chats collection
+    match /chats/{chatId} {
+      allow read: if isSignedIn() && 
+        request.auth.uid in resource.data.participants;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && 
+        request.auth.uid in resource.data.participants;
+    }
+    
+    // Chat messages subcollection
+    match /chats/{chatId}/messages/{messageId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+    }
+    
+    // Expenses collection
+    match /expenses/{expenseId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && 
+        (resource.data.paidBy == request.auth.uid || 
+         request.auth.uid in resource.data.splitBetween);
+    }
+    
+    // Lists collection
+    match /lists/{listId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && 
+        (resource.data.createdBy == request.auth.uid ||
+         request.auth.uid in get(/databases/$(database)/documents/lists/$(listId)).data.sharedWith);
+    }
+    
+    // List items subcollection
+    match /lists/{listId}/items/{itemId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+    
+    // Polls collection
+    match /polls/{pollId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && 
+        resource.data.createdBy == request.auth.uid;
+    }
+    
+    // Poll votes subcollection
+    match /polls/{pollId}/votes/{voteId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isOwner(voteId);
+      allow update, delete: if isSignedIn() && isOwner(voteId);
+    }
+    
+    // Notifications collection
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && 
+        resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn();
+      allow update, delete: if isSignedIn() && 
+        resource.data.userId == request.auth.uid;
+    }
+    
+    // User settings collection
+    match /userSettings/{userId} {
+      allow read, write: if isSignedIn() && isOwner(userId);
+    }
+    
+    // Public events (read-only for unauthenticated users)
+    match /publicEvents/{eventId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
+  }
+}

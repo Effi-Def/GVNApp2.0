@@ -4,10 +4,20 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  build: {
+    sourcemap: true,
+  },
   plugins: [
     react(),
     VitePWA({
+      disable: process.env.NODE_ENV === 'development', // CRITICAL: Disable SW in dev to prevent loops
       registerType: 'prompt',
+      // Ensure our messaging handlers are included in the generated SW,
+      // so we only have ONE service worker at scope '/'
+      workbox: {
+        importScripts: ['firebase-messaging-sw.js'],
+        clientsClaim: true,
+      },
       includeAssets: [
         'icons/pig-maskable.svg',
         'icons/pig-192.png',

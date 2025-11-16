@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { User } from '../types'
 import { auth, storage } from '../firebase/config'
-import { signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth'
+import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth'
 
 interface AuthState {
   user: User | null
@@ -14,7 +14,7 @@ interface AuthState {
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: null,
-  loading: false, // Inizialmente false per evitare problemi
+  loading: true, // Avvia in loading finché Firebase non idrata la sessione
   setUser: (user) => set({ user }),
   setLoading: (loading) => set({ loading }),
   
@@ -57,51 +57,6 @@ export const useAuthStore = create<AuthState>((set) => ({
   },
 }))
 
-// Listener per i cambi di stato dell'autenticazione
-onAuthStateChanged(auth, async (firebaseUser) => {
-  const { setUser, setLoading } = useAuthStore.getState()
-  
-  if (firebaseUser) {
-    const user: User = {
-      id: firebaseUser.uid,
-      email: firebaseUser.email || '',
-      displayName: firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Utente'),
-      photoURL: firebaseUser.photoURL || undefined,
-      createdAt: new Date()
-    }
-    console.log('🔥 Firebase Auth: Utente autenticato:', user.displayName)
-    setUser(user)
-    // Also prefetch avatars on session restore (page refresh)
-    try {
-      const { fetchAndCacheAvatars } = await import('../utils/avatarCache')
-      fetchAndCacheAvatars(storage)
-    } catch {}
-    
-    // 🚀 CARICA AUTOMATICAMENTE I DATI DI BASE
-    await loadUserData()
-
-    // 🔧 Carica impostazioni utente e avvia listeners notifiche
-    try {
-      const [{ useUserSettingsStore }, { startNotificationsListeners }] = await Promise.all([
-        import('./UserSettingsStore'),
-        import('../services/notifications')
-      ])
-      const { loadFromFirestore } = useUserSettingsStore.getState()
-      await loadFromFirestore(user.id)
-      startNotificationsListeners(user.id)
-    } catch (e) {
-      console.warn('⚠️ Impossibile inizializzare settings/notifications:', e)
-    }
-  } else {
-    console.log('🔥 Firebase Auth: Utente disconnesso')
-    setUser(null)
-    // Pulisci i dati quando l'utente si disconnette
-    clearUserData()
-  }
-  
-  setLoading(false)
-})
-
 // Funzione per caricare automaticamente i dati dell'utente
 export async function loadUserData() {
   try {
@@ -109,23 +64,27 @@ export async function loadUserData() {
     
     // Importa dinamicamente per evitare circular dependencies
     const [
-      { eventService, expenseService },
+      { eventService, expenseService, pollService, listService },
       { useAppStore }
     ] = await Promise.all([
       import('../services/firestore'),
       import('./AppStore')
     ])
     
-    const { setEvents, setExpenses } = useAppStore.getState()
+    const { setEvents, setExpenses, setPolls, setLists } = useAppStore.getState()
     // Carica da Firebase; in caso di errore non inserire mock: mantieni vuoto e logga
     try {
-      const [eventsData, expensesData] = await Promise.all([
+      const [eventsData, expensesData, pollsData, listsData] = await Promise.all([
         eventService.getAll(),
-        expenseService.getAll()
+        expenseService.getAll(),
+        pollService.getAll(),
+        listService.getAll(),
       ])
       setEvents(eventsData)
       setExpenses(expensesData)
-      console.log('✅ Auto-loaded from Firebase:', { events: eventsData.length, expenses: expensesData.length })
+      setPolls(pollsData)
+      setLists(listsData)
+      console.log('✅ Auto-loaded from Firebase:', { events: eventsData.length, expenses: expensesData.length, polls: pollsData.length, lists: listsData.length })
     } catch (error) {
       console.warn('⚠️ Impossibile caricare dati da Firebase:', error)
     }
@@ -135,7 +94,7 @@ export async function loadUserData() {
 }
 
 // Funzione per pulire i dati al logout
-function clearUserData() {
+export function clearUserData() {
   import('./AppStore').then(({ useAppStore }) => {
     const { setEvents, setExpenses, setPolls, setLists } = useAppStore.getState()
     setEvents([])

@@ -10,10 +10,13 @@ import {
   orderBy,
   where,
   Timestamp,
-  arrayUnion 
+  arrayUnion,
+  onSnapshot
 } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { Event, Expense, Poll, ShoppingList, PaymentTransaction } from '../types'
+import { Event, Expense, Poll, ShoppingList, PaymentTransaction, ChatMessage, ChatAttachment, ChatReactionKey } from '../types'
+import { storage } from '../firebase/config'
+import { ref, getDownloadURL, uploadBytesResumable } from 'firebase/storage'
 
 // Events Service
 export const eventService = {
@@ -29,6 +32,7 @@ export const eventService = {
       
       const docRef = await addDoc(collection(db, 'events'), {
         ...cleanEventData,
+        publicShareEnabled: cleanEventData.publicShareEnabled !== false,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
       })
@@ -73,16 +77,19 @@ export const eventService = {
           ? data.participants.map((p: any) => ({
               ...p,
               respondedAt: toDate(p?.respondedAt) || new Date(),
+              days: p?.days || undefined,
             }))
           : []
         return {
           id: d.id,
           ...data,
           participants,
+          publicShareEnabled: data.publicShareEnabled !== false,
           createdAt: toDate(data.createdAt) || new Date(),
           updatedAt: toDate(data.updatedAt) || new Date(),
           date: toDate(data.date) || new Date(),
           endDate: toDate(data.endDate),
+          chatLastActivityAt: toDate((data as any).chatLastActivityAt),
         } as Event
       })
 
@@ -100,16 +107,19 @@ export const eventService = {
             ? data.participants.map((p: any) => ({
                 ...p,
                 respondedAt: toDate(p?.respondedAt) || new Date(),
+                days: p?.days || undefined,
               }))
             : []
           return {
             id: d.id,
             ...data,
             participants,
+            publicShareEnabled: data.publicShareEnabled !== false,
             createdAt: toDate(data.createdAt) || new Date(),
             updatedAt: toDate(data.updatedAt) || new Date(),
             date: toDate(data.date) || new Date(),
             endDate: toDate(data.endDate),
+            chatLastActivityAt: toDate((data as any).chatLastActivityAt),
           } as Event
         })
         // Sort by date desc to mimic original
@@ -123,13 +133,61 @@ export const eventService = {
     }
   },
 
+  // Get a single event by ID
+  async getById(id: string): Promise<Event | null> {
+    // Same date coercion helper as getAll
+    const toDate = (v: any): Date | undefined => {
+      if (!v) return undefined
+      if (v instanceof Date) return v
+      if (typeof v?.toDate === 'function') return v.toDate()
+      if (typeof v === 'string' || typeof v === 'number') {
+        const d = new Date(v)
+        return isNaN(d.getTime()) ? undefined : d
+      }
+      return undefined
+    }
+
+    try {
+      const ref = doc(db, 'events', id)
+      const snap = await getDoc(ref)
+      if (!snap.exists()) return null
+      const data: any = snap.data()
+      const participants = Array.isArray(data.participants)
+        ? data.participants.map((p: any) => ({
+            ...p,
+            respondedAt: toDate(p?.respondedAt) || new Date(),
+            days: p?.days || undefined,
+          }))
+        : []
+      const ev: Event = {
+        id: snap.id,
+        ...data,
+        participants,
+        publicShareEnabled: data.publicShareEnabled !== false,
+        createdAt: toDate(data.createdAt) || new Date(),
+        updatedAt: toDate(data.updatedAt) || new Date(),
+        date: toDate(data.date) || new Date(),
+        endDate: toDate(data.endDate),
+        chatLastActivityAt: toDate((data as any).chatLastActivityAt),
+      }
+      return ev
+    } catch (e) {
+      console.error('❌ Error fetching event by id:', e)
+      return null
+    }
+  },
+
   // Update event
   async update(id: string, eventData: Partial<Event>): Promise<void> {
     try {
       console.log('📅 Updating event:', id)
       const eventRef = doc(db, 'events', id)
+      // Remove undefined to prevent Firestore from rejecting the update
+      const cleanEventData = Object.fromEntries(
+        Object.entries(eventData).filter(([_, value]) => value !== undefined)
+      )
       await updateDoc(eventRef, {
-        ...eventData,
+        ...cleanEventData,
         updatedAt: Timestamp.now()
       })
       console.log('✅ Event updated successfully')
@@ -198,6 +256,7 @@ export const eventService = {
       if (existingIndex >= 0) {
         // Aggiorna la partecipazione esistente
         participants[existingIndex] = {
+          ...participants[existingIndex],
           userId,
           name: userName,
           status,
@@ -223,6 +282,48 @@ export const eventService = {
     } catch (error) {
       console.error('❌ Error updating participation:', error)
       throw new Error('Errore durante l\'aggiornamento della partecipazione')
+    }
+  },
+
+  // Update per-day presence for a user in an event (keys are YYYY-MM-DD)
+  async updateDailyPresence(eventId: string, userId: string, userName: string, daysKeys: string[]): Promise<void> {
+    try {
+      console.log(`📅 Updating daily presence for event ${eventId}, user ${userId}`)
+      const eventRef = doc(db, 'events', eventId)
+      const eventDoc = await getDoc(eventRef)
+      if (!eventDoc.exists()) throw new Error('Evento non trovato')
+
+      const event = eventDoc.data() as any
+      const participants = Array.isArray(event.participants) ? [...event.participants] : []
+      const existingIndex = participants.findIndex((p: any) => p.userId === userId)
+      const days: Record<string, boolean> = {}
+      for (const k of daysKeys) days[k] = true
+
+      if (existingIndex >= 0) {
+        const existing = participants[existingIndex] as any
+        participants[existingIndex] = {
+          ...existing,
+          userId,
+          name: userName,
+          days,
+          // Preserve existing respondedAt if present (Timestamp or Date), otherwise set now
+          respondedAt: existing?.respondedAt || new Date()
+        }
+      } else {
+        participants.push({
+          userId,
+          name: userName,
+          status: 'maybe',
+          days,
+          respondedAt: new Date()
+        })
+      }
+
+      await updateDoc(eventRef, { participants, updatedAt: Timestamp.now() })
+      console.log('✅ Daily presence updated successfully')
+    } catch (error) {
+      console.error('❌ Error updating daily presence:', error)
+      throw new Error('Errore durante l\'aggiornamento dei giorni di presenza')
     }
   }
 }
@@ -536,11 +637,30 @@ export const listService = {
   async create(listData: Omit<ShoppingList, 'id' | 'createdAt' | 'updatedAt'>): Promise<ShoppingList> {
     try {
       console.log('📋 Creating new list:', listData.title)
-      const docRef = await addDoc(collection(db, 'lists'), {
+      // Helper to remove undefined fields deeply while preserving Date objects
+      const cleanUndefinedDeep = (value: any): any => {
+        if (value instanceof Date) return value
+        if (Array.isArray(value)) return value.map(cleanUndefinedDeep)
+        if (value && typeof value === 'object') {
+          const result: any = {}
+          for (const [k, v] of Object.entries(value)) {
+            if (v !== undefined) {
+              const cleaned = cleanUndefinedDeep(v)
+              if (cleaned !== undefined) result[k] = cleaned
+            }
+          }
+          return result
+        }
+        return value
+      }
+
+      const dataToWrite = cleanUndefinedDeep({
         ...listData,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
       })
+
+      const docRef = await addDoc(collection(db, 'lists'), dataToWrite)
       
       const newList: ShoppingList = {
         id: docRef.id,
@@ -553,7 +673,12 @@ export const listService = {
       return newList
     } catch (error) {
       console.error('❌ Error creating list:', error)
-      throw new Error('Errore durante la creazione della lista')
+      const e: any = error
+      if (e && (e.code || e.name === 'FirebaseError')) {
+        // Preserve original Firebase error for accurate UI diagnostics
+        throw e
+      }
+      throw new Error(`Errore durante la creazione della lista: ${e?.message ?? ''}`)
     }
   },
 
@@ -562,12 +687,26 @@ export const listService = {
       const q = query(collection(db, 'lists'), orderBy('createdAt', 'desc'))
       const querySnapshot = await getDocs(q)
       
-      const lists: ShoppingList[] = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate() || new Date(),
-        updatedAt: doc.data().updatedAt?.toDate() || new Date()
-      })) as ShoppingList[]
+      const lists: ShoppingList[] = querySnapshot.docs.map(doc => {
+        const data: any = doc.data()
+        // Normalizza le date anche dentro gli items
+        const items = Array.isArray(data.items)
+          ? data.items.map((it: any) => ({
+              ...it,
+              addedAt: it?.addedAt?.toDate ? it.addedAt.toDate() : it?.addedAt,
+              completedAt: it?.completedAt?.toDate ? it.completedAt.toDate() : it?.completedAt,
+              dueDate: it?.dueDate?.toDate ? it.dueDate.toDate() : it?.dueDate,
+            }))
+          : []
+
+        return {
+          id: doc.id,
+          ...data,
+          items,
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(),
+          updatedAt: data.updatedAt?.toDate ? data.updatedAt.toDate() : new Date(),
+        } as ShoppingList
+      })
       
       return lists
     } catch (error) {
@@ -579,18 +718,39 @@ export const listService = {
   async update(id: string, listData: Partial<ShoppingList>): Promise<void> {
     try {
       const docRef = doc(db, 'lists', id)
-      const updateData = {
+      const updateData: any = {
         ...listData,
         updatedAt: Timestamp.now()
       }
       delete updateData.id
       delete updateData.createdAt
+      // Helper to remove undefined fields deeply while preserving Date objects
+      const cleanUndefinedDeep = (value: any): any => {
+        if (value instanceof Date) return value
+        if (Array.isArray(value)) return value.map(cleanUndefinedDeep)
+        if (value && typeof value === 'object') {
+          const result: any = {}
+          for (const [k, v] of Object.entries(value)) {
+            if (v !== undefined) {
+              const cleaned = cleanUndefinedDeep(v)
+              if (cleaned !== undefined) result[k] = cleaned
+            }
+          }
+          return result
+        }
+        return value
+      }
+      const sanitized = cleanUndefinedDeep(updateData)
       
-      await updateDoc(docRef, updateData)
+      await updateDoc(docRef, sanitized)
       console.log('✅ List updated successfully:', id)
     } catch (error) {
       console.error('❌ Error updating list:', error)
-      throw new Error('Errore durante l\'aggiornamento della lista')
+      const e: any = error
+      if (e && (e.code || e.name === 'FirebaseError')) {
+        throw e
+      }
+      throw new Error(`Errore durante l'aggiornamento della lista: ${e?.message ?? ''}`)
     }
   },
 
@@ -648,5 +808,166 @@ export const userService = {
       const ref = doc(db, 'users', userId)
       await setDoc(ref, { notifications: { fcmTokens: [token], pushEnabled: true } }, { merge: true })
     }
+  }
+}
+
+// 💬 Event Chat Service (v1)
+export const chatService = {
+  // Listen to messages for an event in real-time (ascending by createdAt)
+  listen(eventId: string, cb: (messages: ChatMessage[]) => void, onError?: (e: any) => void) {
+    const col = collection(db, 'events', eventId, 'messages')
+    const qy = query(col, orderBy('createdAt', 'asc'))
+    const unsub = onSnapshot(
+      qy,
+      (snap) => {
+        const toDate = (v: any): Date => v?.toDate ? v.toDate() : (v instanceof Date ? v : new Date())
+        const msgs: ChatMessage[] = snap.docs.map(d => {
+          const data: any = d.data()
+          return {
+            id: d.id,
+            eventId,
+            userId: data.userId,
+            userName: data.userName,
+            userPhotoURL: data.userPhotoURL,
+            text: data.text,
+            attachments: Array.isArray(data.attachments) ? data.attachments : undefined,
+            reactions: data.reactions || undefined,
+            createdAt: toDate(data.createdAt),
+            editedAt: data.editedAt ? toDate(data.editedAt) : undefined,
+            deleted: !!data.deleted,
+          }
+        })
+        cb(msgs)
+      },
+      (err) => {
+        console.error('❌ Chat listener error:', err)
+        onError?.(err)
+      }
+    )
+    return unsub
+  },
+
+  // Send a message with optional attachments and quoted reply
+  async sendMessage(
+    eventId: string,
+    payload: { text?: string; files?: File[]; quoted?: { messageId: string; textPreview?: string; mediaThumbUrl?: string } },
+    user: { id: string; displayName: string; photoURL?: string },
+    onProgress?: (fileName: string, progress: number) => void
+  ) {
+    const base = {
+      userId: user.id,
+      userName: user.displayName || 'Utente',
+      userPhotoURL: user.photoURL || null,
+      text: payload.text || null,
+      attachments: [] as ChatAttachment[],
+      reactions: { like: [], love: [], fun: [] } as Partial<Record<ChatReactionKey, string[]>>,
+      quoted: payload.quoted || null,
+      deleted: false,
+      createdAt: Timestamp.now(),
+    }
+
+    // Create doc first to get id (use optimistic empty attachments, update after upload)
+    const col = collection(db, 'events', eventId, 'messages')
+    const docRef = await addDoc(col, base)
+    // Update event chat last activity
+    try {
+      await updateDoc(doc(db, 'events', eventId), { chatLastActivityAt: Timestamp.now(), updatedAt: Timestamp.now() })
+    } catch {}
+
+    // Upload files if any
+    if (payload.files && payload.files.length > 0) {
+      const uploaded: ChatAttachment[] = []
+      for (const f of payload.files) {
+        const path = `events/${eventId}/chat/${docRef.id}/${encodeURIComponent(f.name)}`
+        const r = ref(storage, path)
+        const task = uploadBytesResumable(r, f)
+        await new Promise<void>((resolve, reject) => {
+          task.on('state_changed', (snap) => {
+            const pct = snap.totalBytes ? Math.round((snap.bytesTransferred / snap.totalBytes) * 100) : 0
+            onProgress?.(f.name, pct)
+          }, reject, async () => {
+            resolve()
+          })
+        })
+        const url = await getDownloadURL(r)
+        uploaded.push({
+          id: crypto.randomUUID(),
+          url,
+          name: f.name,
+          type: f.type.startsWith('image/') ? 'image' : 'file',
+          size: f.size,
+          contentType: f.type,
+        })
+      }
+      await updateDoc(docRef, { attachments: uploaded })
+    }
+  },
+
+  // Edit a message (own message)
+  async editMessage(eventId: string, messageId: string, newText: string) {
+    const refDoc = doc(db, 'events', eventId, 'messages', messageId)
+    await updateDoc(refDoc, { text: newText, editedAt: Timestamp.now() })
+  },
+
+  // Soft delete a message (own message)
+  async deleteMessage(eventId: string, messageId: string) {
+    const refDoc = doc(db, 'events', eventId, 'messages', messageId)
+    await updateDoc(refDoc, { deleted: true, text: null })
+  },
+
+  // Toggle reaction from user
+  async toggleReaction(eventId: string, messageId: string, key: ChatReactionKey, userId: string, hasReacted: boolean) {
+    const refDoc = doc(db, 'events', eventId, 'messages', messageId)
+    const { arrayUnion, arrayRemove } = await import('firebase/firestore')
+    // Field path like reactions.like
+    const field = `reactions.${key}` as any
+    await updateDoc(refDoc, { [field]: hasReacted ? arrayRemove(userId) : arrayUnion(userId) })
+  },
+
+  // Participants lastReadAt tracking
+  async markRead(eventId: string, userId: string, profile?: { displayName?: string; photoURL?: string }) {
+    const { setDoc, serverTimestamp } = await import('firebase/firestore')
+    const pRef = doc(db, 'events', eventId, 'participants', userId)
+    await setDoc(pRef, {
+      lastReadAt: serverTimestamp(),
+      displayName: profile?.displayName || null,
+      photoUrl: profile?.photoURL || null
+    }, { merge: true })
+  },
+  listenParticipants(eventId: string, cb: (participants: { uid: string; lastReadAt?: Date; displayName?: string; photoUrl?: string }[]) => void) {
+    const colRef = collection(db, 'events', eventId, 'participants')
+    const unsub = onSnapshot(colRef, (snap) => {
+      const list = snap.docs.map(d => {
+        const data: any = d.data()
+        const toDate = (v: any): Date | undefined => v?.toDate ? v.toDate() : (v instanceof Date ? v : undefined)
+        return {
+          uid: d.id,
+          lastReadAt: toDate(data.lastReadAt),
+          displayName: data.displayName,
+          photoUrl: data.photoUrl,
+        }
+      })
+      cb(list)
+    })
+    return unsub
+  },
+
+  // Typing indicator
+  async setTyping(eventId: string, userId: string, typing: boolean) {
+    const { setDoc, serverTimestamp } = await import('firebase/firestore')
+    const tRef = doc(db, 'events', eventId, 'typing', userId)
+    await setDoc(tRef, { typing, updatedAt: serverTimestamp() }, { merge: true })
+  },
+  listenTyping(eventId: string, cb: (typingUsers: { uid: string; updatedAt: Date; typing: boolean }[]) => void) {
+    const colRef = collection(db, 'events', eventId, 'typing')
+    const unsub = onSnapshot(colRef, (snap) => {
+      const list = snap.docs.map(d => {
+        const data: any = d.data()
+        const toDate = (v: any): Date => v?.toDate ? v.toDate() : (v instanceof Date ? v : new Date())
+        return { uid: d.id, updatedAt: toDate(data.updatedAt), typing: !!data.typing }
+      })
+      cb(list)
+    })
+    return unsub
   }
 }

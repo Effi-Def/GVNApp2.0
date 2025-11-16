@@ -66,7 +66,18 @@ const Navbar = () => {
 
           {/* User Menu - Redesigned */}
           <div className="flex items-center space-x-3 sm:space-x-4">
-            {/* 🔔 Notifiche (pig) always visible on all sizes */}
+            {/* � Chats icon */}
+            <Link
+              to="/chats"
+              className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+              title="Chat"
+              aria-label="Chat"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h8M8 14h5m-9 7l2.5-2.5A9 9 0 1121 12a9 9 0 01-9 9H4z" />
+              </svg>
+            </Link>
+            {/* �🔔 Notifiche (pig) always visible on all sizes */}
             <Link
               to="/notifications"
               className="relative p-2 text-2xl hover:scale-110 transition-transform"

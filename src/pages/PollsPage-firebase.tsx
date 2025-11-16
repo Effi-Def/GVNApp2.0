@@ -12,6 +12,14 @@ const PollsPage = () => {
   const [showForm, setShowForm] = useState(false)
   const [editingPoll, setEditingPoll] = useState<Poll | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  
+  // Prevent background scroll on mobile when poll form modal is open
+  useEffect(() => {
+    const original = document.body.style.overflow
+    if (showForm) document.body.style.overflow = 'hidden'
+    else document.body.style.overflow = original || ''
+    return () => { document.body.style.overflow = original || '' }
+  }, [showForm])
 
   // Form data per nuovo sondaggio
   const [formData, setFormData] = useState({
@@ -510,9 +518,9 @@ const PollsPage = () => {
 
       {/* Modal Form */}
       {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
-            <div className="p-6">
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-4 z-[70]">
+          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
+            <div className="p-6 pb-[calc(6rem+env(safe-area-inset-bottom))]">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-gray-800">
                   {editingPoll ? 'Modifica Sondaggio' : 'Nuovo Sondaggio'}
@@ -637,32 +645,35 @@ const PollsPage = () => {
                   </button>
                 </div>
 
-                <div className="flex space-x-3 pt-4">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowForm(false)
-                      setEditingPoll(null)
-                      setFormData({
-                        title: '',
-                        description: '',
-                        eventId: '',
-                        votingDurationHours: 24,
-                        options: ['', '']
-                      })
-                    }}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
-                    disabled={submitting}
-                  >
-                    Annulla
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    {submitting ? 'Salvataggio...' : (editingPoll ? 'Salva' : 'Crea Sondaggio')}
-                  </button>
+                {/* Fixed action bar with safe-area */}
+                <div className="fixed left-1/2 -translate-x-1/2 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[60] w-full max-w-md px-6">
+                  <div className="bg-white border rounded-xl shadow-md px-4 py-3 flex space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowForm(false)
+                        setEditingPoll(null)
+                        setFormData({
+                          title: '',
+                          description: '',
+                          eventId: '',
+                          votingDurationHours: 24,
+                          options: ['', '']
+                        })
+                      }}
+                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                      disabled={submitting}
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {submitting ? 'Salvataggio...' : (editingPoll ? 'Salva' : 'Crea Sondaggio')}
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>

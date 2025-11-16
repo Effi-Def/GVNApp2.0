@@ -144,7 +144,8 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
     const status = me?.status || 'none' // none = non ha ancora risposto → nuovo
     switch (status) {
       case 'yes':
-        return { label: 'bg-green-50 text-green-700 hover:bg-green-100', dot: 'bg-green-500 hover:bg-green-600' }
+        // Stronger green for better visibility
+        return { label: 'bg-green-100 text-green-800 hover:bg-green-200', dot: 'bg-green-600 hover:bg-green-700' }
       case 'maybe':
         return { label: 'bg-gray-50 text-gray-700 hover:bg-gray-100', dot: 'bg-gray-400 hover:bg-gray-500' }
       // 'no' viene escluso a monte, quindi non serve gestirlo qui
@@ -245,7 +246,7 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
             : dayColor === 'red'
             ? 'bg-red-50 border-red-200'
             : dayColor === 'green'
-            ? 'bg-green-50 border-green-200'
+            ? 'bg-green-100 border-green-300'
             : 'bg-white border-gray-200'
 
           const handleDayClick = () => {

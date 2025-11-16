@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { eventService } from '../services/firestore'
 import { useAuthStore } from '../stores/useAuthStore'
-import { Event, EventCategory, EventParticipant } from '../types'
+import { Event, EventCategory, EventParticipant, EventPriority } from '../types'
+import { useUserSettingsStore } from '../stores/UserSettingsStore'
 import { useAppStore } from '../stores/AppStore'
 
 const EventsPage = () => {
@@ -11,6 +12,7 @@ const EventsPage = () => {
   const location = useLocation()
   // Usa lo store centrale per avere eventi sincronizzati in tutta l'app
   const { events, setEvents, addEvent, updateEvent, deleteEvent, expenses, polls, lists, setExpenses, setPolls, setLists } = useAppStore() as any
+  const { notifications } = useUserSettingsStore()
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [editingEvent, setEditingEvent] = useState<Event | null>(null)
@@ -24,8 +26,10 @@ const EventsPage = () => {
     date: '',
     endDate: '',
     time: '',
-    location: ''
+    location: '',
+    priority: 'medium' as EventPriority
   })
+  const [sortMode, setSortMode] = useState<'byDate' | 'createdDesc' | 'createdAsc' | 'priority'>('byDate')
 
   const currentUserId = user?.id || 'anonymous'
   const currentUserName = user?.displayName || user?.email || 'Utente'
@@ -40,6 +44,12 @@ const EventsPage = () => {
     { value: 'cinema', label: 'Cinema 🎬', multiDay: false },
     { value: 'shopping', label: 'Shopping 🛍️', multiDay: false },
     { value: 'altro', label: 'Altro 📅', multiDay: false }
+  ]
+
+  const priorityOptions: { value: EventPriority; label: string }[] = [
+    { value: 'high', label: 'Alta 🔥' },
+    { value: 'medium', label: 'Media ⚖️' },
+    { value: 'low', label: 'Bassa 💤' }
   ]
 
   // Carica eventi
@@ -127,7 +137,8 @@ const EventsPage = () => {
         time: formData.time,
         location: formData.location,
         createdBy: currentUserId,
-        participants: [initialParticipant]
+        participants: [initialParticipant],
+        priority: formData.priority
       }
 
       if (editingEvent) {
@@ -149,7 +160,8 @@ const EventsPage = () => {
         date: '',
         endDate: '',
         time: '',
-        location: ''
+        location: '',
+        priority: 'medium'
       })
       setShowForm(false)
       console.log('✅ Event saved successfully')
@@ -171,7 +183,8 @@ const EventsPage = () => {
       date: event.date.toISOString().split('T')[0],
       endDate: event.endDate ? event.endDate.toISOString().split('T')[0] : '',
       time: event.time,
-      location: event.location
+      location: event.location,
+      priority: event.priority || 'medium'
     })
     setShowForm(true)
   }
@@ -235,17 +248,39 @@ const EventsPage = () => {
   const today = new Date()
   today.setHours(0, 0, 0, 0)
 
-  const upcomingEvents = events.filter((event: Event) => {
+  let upcomingEvents = events.filter((event: Event) => {
     const eventDate = new Date(event.date)
     eventDate.setHours(0, 0, 0, 0)
     return eventDate >= today
-  }).sort((a: Event, b: Event) => new Date(a.date).getTime() - new Date(b.date).getTime())
-
-  const pastEvents = events.filter((event: Event) => {
+  })
+  let pastEvents = events.filter((event: Event) => {
     const eventDate = new Date(event.date)
     eventDate.setHours(0, 0, 0, 0)
     return eventDate < today
-  }).sort((a: Event, b: Event) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  })
+
+  const priorityWeight = (p?: EventPriority) => (p === 'high' ? 3 : p === 'medium' || !p ? 2 : 1)
+
+  // Applica ordinamento
+  if (sortMode === 'byDate') {
+    upcomingEvents = upcomingEvents.sort((a: Event, b: Event) => new Date(a.date).getTime() - new Date(b.date).getTime())
+    pastEvents = pastEvents.sort((a: Event, b: Event) => new Date(b.date).getTime() - new Date(a.date).getTime())
+  } else if (sortMode === 'createdDesc') {
+    upcomingEvents = upcomingEvents.sort((a: Event, b: Event) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    pastEvents = pastEvents.sort((a: Event, b: Event) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  } else if (sortMode === 'createdAsc') {
+    upcomingEvents = upcomingEvents.sort((a: Event, b: Event) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+    pastEvents = pastEvents.sort((a: Event, b: Event) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+  } else if (sortMode === 'priority') {
+    upcomingEvents = upcomingEvents.sort((a: Event, b: Event) => {
+      const diff = priorityWeight(b.priority) - priorityWeight(a.priority)
+      return diff !== 0 ? diff : new Date(a.date).getTime() - new Date(b.date).getTime()
+    })
+    pastEvents = pastEvents.sort((a: Event, b: Event) => {
+      const diff = priorityWeight(b.priority) - priorityWeight(a.priority)
+      return diff !== 0 ? diff : new Date(b.date).getTime() - new Date(a.date).getTime()
+    })
+  }
 
   // Ottieni stato partecipazione utente
   const getUserParticipationStatus = (event: Event) => {
@@ -276,6 +311,19 @@ const EventsPage = () => {
           </div>
           {/* Rimosso pulsante header: creazione evento solo dal FAB in basso */}
         </div>
+        <div className="mt-4 flex items-center gap-2">
+          <span className="text-sm text-gray-600">Ordina:</span>
+          <select
+            value={sortMode}
+            onChange={(e) => setSortMode(e.target.value as any)}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-green-500"
+          >
+            <option value="byDate">Per data</option>
+            <option value="createdDesc">Inserimento (nuovi → vecchi)</option>
+            <option value="createdAsc">Inserimento (vecchi → nuovi)</option>
+            <option value="priority">Per priorità</option>
+          </select>
+        </div>
       </div>
 
       {/* Eventi Prossimi */}
@@ -287,14 +335,35 @@ const EventsPage = () => {
               const userStatus = getUserParticipationStatus(event)
               const isCreator = event.createdBy === currentUserId
               const participants = event.participants || []
+              const lastRead = notifications.lastReadByEvent?.[event.id] || 0
+              const hasUnread = (event.chatLastActivityAt?.getTime?.() || 0) > lastRead
+              const isMuted = (notifications.mutedEventIds || []).includes(event.id)
 
               return (
-                <div key={event.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="flex-1 cursor-pointer" onClick={() => navigate(`/events/${event.id}/summary`)}>
+                <div key={event.id} className={`bg-white rounded-xl shadow-sm border p-6 ${
+                  (userStatus === 'yes') ? 'border-green-400 ring-1 ring-green-200' : 'border-gray-200'
+                }`}>
+                  <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3 mb-4">
+                    <div className="md:flex-1 cursor-pointer" onClick={() => navigate(`/events/${event.id}/summary`)}>
                       <div className="flex items-center space-x-2 mb-2">
                         <span className="text-2xl">{getCategoryIcon(event.category)}</span>
-                        <h3 className="text-xl font-semibold text-gray-800">{event.title}</h3>
+                        <h3 className="text-xl font-semibold text-gray-800 flex items-center gap-2">
+                          <span>{event.title}</span>
+                          {hasUnread && (
+                            <span className={`px-2 py-0.5 text-[11px] rounded-full ${isMuted ? 'bg-gray-100 text-gray-600' : 'bg-blue-100 text-blue-700'}`} title={isMuted ? 'Nuovi messaggi (silenzioso)' : 'Nuovi messaggi'}>
+                              {isMuted ? 'Nuovi' : 'Nuovi'}
+                            </span>
+                          )}
+                        </h3>
+                        {event.priority && (
+                          <span className={`px-2 py-1 text-xs rounded-full font-medium ${
+                            event.priority === 'high' ? 'bg-red-100 text-red-700' :
+                            event.priority === 'low' ? 'bg-gray-100 text-gray-700' :
+                            'bg-amber-100 text-amber-700'
+                          }`}>
+                            {event.priority === 'high' ? 'Priorità alta' : event.priority === 'low' ? 'Priorità bassa' : 'Priorità media'}
+                          </span>
+                        )}
                         <span className="px-2 py-1 bg-gray-100 text-gray-700 text-xs rounded-full">
                           {(() => { const cat = categories.find(c => c.value === event.category); const label = cat?.label; return label ? label.split(' ')[0] : 'Evento' })()}
                         </span>
@@ -311,25 +380,22 @@ const EventsPage = () => {
                         )}
                         {event.time && <span>🕐 {event.time}</span>}
                         <span>📍 {event.location}</span>
-                        <span>👥 {participants.length} partecipanti</span>
+                        <span>👥 {participants.filter((p: EventParticipant) => p.status !== 'no').length} partecipanti</span>
                       </div>
 
                       {/* Partecipanti */}
                       <div className="flex flex-wrap gap-2 mb-4">
-                        {participants.map((participant: EventParticipant) => (
-                          <span key={participant.userId} className={`px-2 py-1 text-xs rounded-full ${
-                            participant.status === 'yes' 
-                              ? 'bg-green-100 text-green-700' 
-                              : participant.status === 'maybe'
-                                ? 'bg-yellow-100 text-yellow-700'
-                                : 'bg-red-100 text-red-700'
-                          }`}>
-                            {participant.name} {
-                              participant.status === 'yes' ? '✓' :
-                              participant.status === 'maybe' ? '?' : '✗'
-                            }
-                          </span>
-                        ))}
+                        {participants
+                          .filter((participant: EventParticipant) => participant.status !== 'no')
+                          .map((participant: EventParticipant) => (
+                            <span key={participant.userId} className={`px-2 py-1 text-xs rounded-full ${
+                              participant.status === 'yes' 
+                                ? 'bg-green-600 text-white' 
+                                : 'bg-yellow-100 text-yellow-700'
+                            }`}>
+                              {participant.name} {participant.status === 'yes' ? '✓' : '?'}
+                            </span>
+                          ))}
                       </div>
 
                       {/* Controlli partecipazione */}
@@ -368,29 +434,71 @@ const EventsPage = () => {
                       </div>
                     </div>
                     
-                    {/* Controlli per chi ha creato l'evento */}
-                    {isCreator && (
-                      <div className="flex space-x-2">
-                        <button
-                          onClick={() => handleEditEvent(event)}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          title="Modifica evento"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                          </svg>
-                        </button>
-                        <button
-                          onClick={() => handleDeleteEvent(event.id)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Elimina evento"
-                        >
-                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        </button>
-                      </div>
-                    )}
+                    {/* Azioni: condividi + modifica/elimina */}
+                    {(() => {
+                      const canEdit = isCreator || userStatus === 'yes' || userStatus === 'maybe'
+                      return (
+                        <div className="flex items-center gap-2 md:self-start md:shrink-0">
+                          {/* Share */}
+                          <button
+                            onClick={async () => {
+                              const shareUrl = `${window.location.origin}/share/e/${event.id}`
+                              const shareData = {
+                                title: `Invito: ${event.title}`,
+                                text: `${event.title} • ${new Date(event.date).toLocaleDateString('it-IT')} ${event.time ? 'alle ' + event.time : ''} • ${event.location}`,
+                                url: shareUrl
+                              }
+                              try {
+                                if ((navigator as any).share) {
+                                  await (navigator as any).share(shareData)
+                                } else if (navigator.clipboard) {
+                                  await navigator.clipboard.writeText(shareUrl)
+                                  alert('Link copiato negli appunti')
+                                } else {
+                                  prompt('Copia il link', shareUrl)
+                                }
+                              } catch (e) {
+                                console.error('Share failed:', e)
+                              }
+                            }}
+                            className="inline-flex items-center gap-1.5 p-2.5 text-gray-800 hover:bg-gray-50 rounded-lg transition-colors border border-gray-200"
+                            title="Condividi evento"
+                            aria-label="Condividi evento"
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 8a3 3 0 10-2.83-4H12a3 3 0 00.17 6h.01A3 3 0 0015 8zM5 12a3 3 0 100 6 3 3 0 000-6zm10 1l-6 3m0-6l6 3" />
+                            </svg>
+                            <span className="hidden sm:inline text-sm">Condividi</span>
+                          </button>
+                          {canEdit && (
+                            <button
+                              onClick={() => handleEditEvent(event)}
+                              className="inline-flex items-center gap-1.5 p-2.5 text-blue-700 hover:bg-blue-50 rounded-lg transition-colors border border-blue-200"
+                              title="Modifica evento"
+                              aria-label="Modifica evento"
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                              </svg>
+                              <span className="hidden sm:inline text-sm">Modifica</span>
+                            </button>
+                          )}
+                          {isCreator && (
+                            <button
+                              onClick={() => handleDeleteEvent(event.id)}
+                              className="inline-flex items-center gap-1.5 p-2.5 text-red-700 hover:bg-red-50 rounded-lg transition-colors border border-red-200"
+                              title="Elimina evento"
+                              aria-label="Elimina evento"
+                            >
+                              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1 1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                              <span className="hidden sm:inline text-sm">Elimina</span>
+                            </button>
+                          )}
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               )
@@ -432,7 +540,7 @@ const EventsPage = () => {
 
       {/* Modal Form */}
       {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-[70]">
           <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
@@ -450,7 +558,8 @@ const EventsPage = () => {
                       date: '',
                       endDate: '',
                       time: '',
-                      location: ''
+                      location: '',
+                      priority: 'medium'
                     })
                   }}
                   className="text-gray-500 hover:text-gray-700"
@@ -510,6 +619,21 @@ const EventsPage = () => {
                       <option key={category.value} value={category.value}>
                         {category.label}
                       </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Priorità
+                  </label>
+                  <select
+                    value={formData.priority}
+                    onChange={(e) => setFormData({ ...formData, priority: e.target.value as EventPriority })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500"
+                  >
+                    {priorityOptions.map(p => (
+                      <option key={p.value} value={p.value}>{p.label}</option>
                     ))}
                   </select>
                 </div>
@@ -581,7 +705,8 @@ const EventsPage = () => {
                         date: '',
                         endDate: '',
                         time: '',
-                        location: ''
+                        location: '',
+                        priority: 'medium'
                       })
                     }}
                     className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"

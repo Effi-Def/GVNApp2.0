@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../hooks'
+import { auth } from '../firebase/config'
+import { getAuth } from 'firebase/auth'
 
 const LoginPage = () => {
   const { signInWithGoogle } = useAuth()
@@ -14,6 +16,7 @@ const LoginPage = () => {
       console.log('🔄 Starting login process...')
       await signInWithGoogle()
       console.log('✅ Login completed')
+      // Navigation will be handled automatically by App.tsx when user state updates
     } catch (error) {
       console.error('❌ Errore durante il login:', error)
       setError(error instanceof Error ? error.message : 'Errore durante il login')
@@ -99,9 +102,95 @@ const LoginPage = () => {
             </div>
           </div>
         </div>
+
+        {/* Debug toggle */}
+        <LoginDebugPanel />
       </div>
     </div>
   )
 }
 
 export default LoginPage
+
+// Collapsible debug panel to troubleshoot mobile login issues
+const LoginDebugPanel = () => {
+  const [open, setOpen] = useState(false)
+  const [swInfo, setSwInfo] = useState<{ active: boolean; scriptURL?: string }|null>(null)
+  const [envInfo, setEnvInfo] = useState<any>({})
+  const [redirectSupported, setRedirectSupported] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    // Gather service worker info
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = navigator.serviceWorker.controller
+        if (reg) setSwInfo({ active: true, scriptURL: (reg as any).scriptURL })
+        else setSwInfo({ active: false })
+      } catch { setSwInfo({ active: false }) }
+    }
+    // Environment variable sanity (placeholder detection)
+    const placeholders = {
+      apiKeyPlaceholder: /your_actual_api_key_here/i.test(import.meta.env.VITE_FIREBASE_API_KEY || ''),
+      senderIdPlaceholder: /(123456789|your)/i.test(import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || ''),
+      appIdPlaceholder: /(abcdef123456|123456789:web)/i.test(import.meta.env.VITE_FIREBASE_APP_ID || ''),
+      vapidPlaceholder: /your_vapid_key_here/i.test(import.meta.env.VITE_FIREBASE_VAPID_KEY || ''),
+    }
+    setEnvInfo({
+      projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+      authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+      messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+      appId: import.meta.env.VITE_FIREBASE_APP_ID,
+      vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY ? 'present' : 'missing',
+      ...placeholders,
+    })
+    // Simple redirect support heuristic
+    setRedirectSupported(typeof window !== 'undefined')
+  }, [])
+
+  const resetCaches = async () => {
+    try {
+      // Unregister SW
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations()
+        await Promise.all(regs.map(r => r.unregister()))
+      }
+    } catch {}
+    try {
+      if ('caches' in window) {
+        const names = await caches.keys()
+        await Promise.all(names.map(n => caches.delete(n)))
+      }
+    } catch {}
+    try { localStorage.clear(); sessionStorage.clear() } catch {}
+    window.location.reload()
+  }
+
+  return (
+    <div className="mt-6">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="text-xs text-gray-500 hover:text-gray-700 underline"
+      >{open ? 'Nascondi diagnostica login' : 'Mostra diagnostica login'}</button>
+      {open && (
+        <div className="mt-3 p-3 rounded-lg bg-gray-50 border border-gray-200 text-[11px] leading-relaxed font-mono space-y-1 max-h-64 overflow-auto">
+          <div><strong>UserAgent:</strong> {navigator.userAgent}</div>
+          <div><strong>Location:</strong> {location.origin}</div>
+          <div><strong>SW:</strong> {swInfo ? (swInfo.active ? `attivo (${swInfo.scriptURL?.split('/').pop()})` : 'non attivo') : 'n/d'}</div>
+          <div><strong>DisplayMode standalone:</strong> {window.matchMedia?.('(display-mode: standalone)')?.matches ? 'si' : 'no'}</div>
+          <div><strong>auth.currentUser:</strong> {(() => { try { return getAuth().currentUser?.email || 'null' } catch { return auth.currentUser ? auth.currentUser.email : 'null' } })()}</div>
+          <div><strong>Env projectId:</strong> {envInfo.projectId}</div>
+          <div><strong>Placeholder apiKey:</strong> {envInfo.apiKeyPlaceholder ? '⚠️' : 'ok'}</div>
+          <div><strong>Placeholder senderId:</strong> {envInfo.senderIdPlaceholder ? '⚠️' : 'ok'}</div>
+          <div><strong>Placeholder appId:</strong> {envInfo.appIdPlaceholder ? '⚠️' : 'ok'}</div>
+          <div><strong>VAPID key:</strong> {envInfo.vapidKey}</div>
+          <div><strong>Redirect heuristic supported:</strong> {redirectSupported ? 'yes' : 'no'}</div>
+          <div className="pt-2 flex gap-2">
+            <button onClick={resetCaches} className="px-2 py-1 rounded bg-red-600 text-white">Reset cache</button>
+            <button onClick={()=>{ try { sessionStorage.removeItem('postLoginRedirect'); alert('Redirect pulito') } catch {} }} className="px-2 py-1 rounded bg-gray-200">Clear redirect</button>
+          </div>
+          <div className="text-gray-500 pt-1">Se vedi ⚠️ sostituisci i valori placeholder in .env.local con quelli reali dalla Firebase Console.</div>
+        </div>
+      )}
+    </div>
+  )
+}

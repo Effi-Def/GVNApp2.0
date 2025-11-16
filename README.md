@@ -1,168 +1,121 @@
-# GVNApp 2.0 - Progressive Web App per Eventi Sociali
+# GVNApp 2.0
 
-GVNApp è una Progressive Web App (PWA) progettata per fungere da hub centrale per un gruppo di amici. L'applicazione semplifica l'organizzazione di eventi sociali, la gestione delle spese di gruppo e la comunicazione.
+Hub sociale del gruppo: organizza eventi, coordina liste e spese, chatta e ricevi promemoria — tutto in una PWA veloce, installabile e che funziona anche con rete ballerina.
 
-## 🎯 Caratteristiche Principali
+Hosting: https://gvnapp-e3e7d.web.app
 
-- **📅 Gestione Eventi**: Crea, modifica e gestisci eventi con sondaggi di partecipazione integrati
-- **💰 Gestione Spese**: Divisione automatica dei costi con calcolo dei bilanci
-- **📊 Sondaggi**: Creazione di sondaggi rapidi per decisioni di gruppo
-- **📋 Liste Collaborative**: Liste della spesa e checklist condivise
-- **🔔 Notifiche Push**: Aggiornamenti in tempo reale per eventi e attività
-- **📱 PWA**: Installabile su dispositivi mobili, funziona offline
+## 🎯 Scopo dell’app
 
-## 🛠️ Stack Tecnologico
+Ridurre l’attrito dell’organizzazione fra amici. In pratica: fissare una data (“stasera si gioca?”), vedere chi c’è, gestire quote e cose da portare, e parlare al volo con una chat per evento. Il tutto con notifiche leggere e “umane”.
 
-### Frontend
-- **React 18** con **TypeScript** per una UI robusta e type-safe
-- **Vite** come build tool per sviluppo rapido
-- **Tailwind CSS** per styling rapido e consistente
-- **Zustand** per gestione dello stato leggera
-- **React Router** per navigazione SPA
+## � Funzionalità principali (oggi in produzione)
 
-### Backend & Database
-- **Firebase Auth** per autenticazione con provider sociali
-- **Firestore** database NoSQL in tempo reale
-- **Firebase Storage** per gestione file
-- **Firebase Functions** per logiche serverless
+- Eventi
+   - Creazione/modifica con categorie, luogo, orari, priorità (low/medium/high)
+   - Multi‑day: selezione presenza per giorno
+   - Partecipazione Sì/No/Forse; hint “Confermati/Forse” senza esporre nomi
+   - Ordinamenti: per data, creato asc/desc, priorità
+   - Condivisione pubblica: route pubblica `/share/e/:id` con pagina mini‑riassunto (senza auth)
+- Chat per evento (v1)
+   - Messaggi realtime, reazioni, modifica/cancella (finestra 15’), allegati (Storage) con limiti sicuri
+   - Badge “Nuovi” nella lista eventi basato su `chatLastActivityAt` e tuo `lastReadByEvent`
+   - Muto per singolo evento; ultimo letto per evento
+   - Error‑handling in ascolto chat per evitare schermi bianchi
+- Spese
+   - Riepilogo saldi evento e “La tua situazione” (collassabili, chiusi di default)
+   - Calcolo bilanci by payer/quote partecipanti
+- Liste
+   - Liste collaborative con nuovi generatori “Macchine” e “Stanze” con capienza (es. 5/2), driver, vincoli di unicità
+- Sondaggi
+   - Creazione sondaggi e collegamento ad evento con deep‑link nella notifica
+- Notifiche
+   - Push su mobile e notifiche desktop “leggere” (in‑app)
+   - Preferenze granulari per tipologia (eventi, spese, sondaggi, liste, chat)
+   - Test push da UI (Impostazioni → Notifiche → “Test push”)
+   - Copy umani dalle Cloud Functions (“Stasera si gioca? 🎉”, “Vota anche tu 🗳️”, “Lista pronta 📝”, “Nuova spesa 💰 …”)
+- UI/UX
+   - Modali bottom‑sheet consistenti (safe‑area, scroll‑lock, action bar fissa, z‑index elevato)
+   - Calendario con verdi più “leggibili”; azioni migliorate
+   - Eliminati crash: sanitizzazione payload Firestore, gestione errori listener chat, normalizzazione date
+- PWA
+   - Service Worker Workbox + SW dedicato `firebase-messaging-sw.js` per push in background
+   - Installabile, precache, offline di base
 
-### PWA
-- **vite-plugin-pwa** per service worker e manifest
-- **Workbox** per strategie di caching
+## 🧩 Architettura & stack
 
-## 🚀 Setup del Progetto
+- Frontend: React 18 + TypeScript + Vite, Tailwind CSS, Zustand, React Router v6
+- Firebase: Auth, Firestore, Storage, Functions (Node 20), Hosting
+- PWA: vite‑plugin‑pwa, Workbox
 
-### Prerequisiti
-- Node.js 20.19.0+ o 22.12.0+
-- npm o yarn
+## �️ Struttura (ridotta)
 
-### Installazione
-
-1. Clona il repository:
-\`\`\`bash
-git clone <repository-url>
-cd GVNApp2.0
-\`\`\`
-
-2. Installa le dipendenze:
-\`\`\`bash
-npm install
-\`\`\`
-
-3. Configura Firebase:
-   - Crea un progetto Firebase su [console.firebase.google.com](https://console.firebase.google.com)
-   - Abilita **Authentication** (provider Google), **Firestore**, e **Storage**
-   - Copia \`.env.example\` in \`.env.local\`
-   - Sostituisci i valori placeholder con la tua configurazione Firebase reale
-   - Le credenziali si trovano in Project Settings > General > Your apps
-
-4. Avvia il server di sviluppo:
-\`\`\`bash
-npm run dev
-\`\`\`
-
-## 📁 Struttura del Progetto
-
-\`\`\`
+```
 src/
-├── components/          # Componenti riutilizzabili
-│   └── Layout/         # Componenti di layout (Navbar, BottomNav)
-├── contexts/           # React contexts (Auth)
-├── firebase/           # Configurazione Firebase
-├── pages/             # Pagine principali dell'app
-├── stores/            # Stores Zustand per gestione stato
-├── types/             # Definizioni TypeScript
-├── App.tsx            # Componente principale
-├── main.tsx           # Entry point
-└── index.css          # Stili globali
-\`\`\`
+   components/           # UI (Navbar, BottomNav, Chat, Calendario, …)
+   pages/                # Home, Events, EventSummary, Expenses, Lists, Polls, PublicEvent, Settings, Notifications, NotificationPreferences
+   services/             # Firestore services (event/expense/list/poll/chat/user)
+   stores/               # Zustand (Auth, App, UserSettings, Notifications)
+   firebase/             # config, messaging SW client
+   types/                # tipi condivisi
+```
 
-## 🔧 Comandi Disponibili
+## 🚀 Avvio rapido
 
-- \`npm run dev\` - Avvia il server di sviluppo
-- \`npm run build\` - Build per produzione
-- \`npm run preview\` - Preview della build di produzione
-- \`npm run lint\` - Controllo linting
+1) Requisiti: Node 20+ e un progetto Firebase (Auth, Firestore, Storage, Functions)
+2) Configura `.env.local` partendo da `.env.example` (incluso `VITE_FIREBASE_VAPID_KEY` per push)
+3) Comandi principali:
 
-## 🌟 Funzionalità Implementate
+```
+npm install
+npm run dev        # sviluppo
+npm run build      # build produzione
+npm run deploy     # build + deploy Hosting/Rules/Functions
+```
 
-### ✅ Struttura Base
-- [x] Setup Vite + React + TypeScript
-- [x] Configurazione Tailwind CSS
-- [x] Setup PWA con vite-plugin-pwa
-- [x] Configurazione Firebase
-- [x] Routing con React Router
-- [x] Layout responsive con navigazione desktop/mobile
+### Se vedi avvisi sui placeholder senderId/appId
 
-### ✅ Autenticazione
-- [x] Context per autenticazione Firebase
-- [x] Login con Google
-- [x] Gestione stato utente con Zustand
-- [x] Pagina di login
+Se in console compare l’avviso “Skipping init: placeholder senderId/appId”, significa che nel file `.env.local` non hai ancora sostituito i valori di esempio:
 
-### ✅ Pagine Principali
-- [x] Dashboard home con riepilogo
-- [x] Struttura pagine Eventi, Spese, Sondaggi, Liste
-- [x] Layout responsive
+- VITE_FIREBASE_MESSAGING_SENDER_ID deve essere l’ID numerico del mittente FCM del tuo progetto
+- VITE_FIREBASE_APP_ID deve essere l’appId esatto della tua app Web
 
-### ✅ Eventi
-- [x] Creazione eventi con 8 categorie (cena, aperitivo, viaggio, sport, festa, cinema, shopping, altro)
-- [x] Gestione date speciali per viaggi (data inizio e fine)
-- [x] Sistema di partecipazione con stati: Sì, No, Forse
-- [x] Auto-partecipazione del creatore dell'evento
-- [x] Eliminazione a cascata (eventi + spese + sondaggi collegati)
-- [x] Dashboard con statistiche eventi
+Dove trovarli:
+- Vai su Firebase Console → Project settings (⚙️) → tab General → sezione “Your apps” → Web app → Config: copia `messagingSenderId` e `appId`
+- Per le notifiche push, imposta anche `VITE_FIREBASE_VAPID_KEY` da Project settings → tab Cloud Messaging → Web push certificates → “Key pair”
 
-### 🚧 In Sviluppo
-- [ ] Sistema gestione spese completo
-- [ ] Creazione e votazione sondaggi
-- [ ] Liste collaborative
-- [ ] Notifiche push
-- [ ] Sincronizzazione Firestore avanzata
+Dopo aver aggiornato `.env.local`, riavvia il dev server o rifai la build.
 
-## 🎨 Design System
+## 🔔 Notifiche: come funzionano
 
-L'app utilizza un design system basato su Tailwind CSS con:
-- **Colori primari**: Scala di blu (primary-50 to primary-900)
-- **Typography**: Font system native
-- **Responsive**: Mobile-first con breakpoints standard
-- **Accessibilità**: Contrasti conformi WCAG
+- SW dedicato `public/firebase-messaging-sw.js` gestisce `push` e `notificationclick` (background)
+- In app, `initMessaging()` chiede permesso e salva il token FCM nel documento utente (`users/{id}`)
+- Le Cloud Functions inviano push solo se consentite e rispettando le preferenze per tipologia
+- Pagina “Preferenze notifiche” (`/notifications/settings`) per attivare push/desktop e scegliere i tipi
 
-## 🔐 Sicurezza
+## 🔐 Sicurezza & robustezza
 
-- Autenticazione Firebase con provider sociali
-- Rules Firestore per controllo accessi
-- Validazione TypeScript per type safety
-- Sanitizzazione input utente
+- Sanitizzazione update verso Firestore (rimozione `undefined`, propagazione errori reali Firebase)
+- Listener realtime con `onError` e banner UI per evitare schermate bianche
+- (Da indurire ulteriormente) Regole Firestore per chat solo partecipanti
 
-## 📱 PWA Features
+## 🧭 Roadmap (idee prossime)
 
-- **Installabile**: Aggiungibile alla home screen
-- **Offline**: Funzionalità base disponibili offline
-- **Responsive**: Ottimizzata per tutti i dispositivi
-- **Performance**: Caricamento rapido con caching intelligente
+- Notifiche chat più smart (menzioni, allegati), promemoria evento (N ore prima)
+- Conteggio numerico “non letti” per chat nella lista eventi (oggi è badge booleano “Nuovi”)
+- Regole Firestore più strette per chat e preferenze; pruning token FCM invalidi
+- Migrazione `firebase-functions` all’ultima major (breaking changes) e metriche consegna
+- Ottimizzazione bundle (code‑splitting manualChunks) per ridurre il chunk principale
+- Pagina mappa/assegnazione stanze in stile “piantina”
+- Modalità offline avanzata (draft queue, sync al ritorno rete)
 
-## 🤝 Contribuire
+## � Link utili
 
-1. Fork del progetto
-2. Crea un branch per la feature (\`git checkout -b feature/AmazingFeature\`)
-3. Commit delle modifiche (\`git commit -m 'Add some AmazingFeature'\`)
-4. Push al branch (\`git push origin feature/AmazingFeature\`)
-5. Apri una Pull Request
+- React: https://react.dev
+- Vite: https://vitejs.dev
+- Tailwind: https://tailwindcss.com
+- Firebase: https://firebase.google.com/docs
+- Zustand: https://docs.pmnd.rs/zustand
 
-## 📄 Licenza
+—
 
-Questo progetto è sotto licenza MIT. Vedi il file \`LICENSE\` per dettagli.
-
-## 🔗 Link Utili
-
-- [React Documentation](https://react.dev/)
-- [Vite Guide](https://vitejs.dev/guide/)
-- [Tailwind CSS](https://tailwindcss.com/)
-- [Firebase Documentation](https://firebase.google.com/docs)
-- [Zustand Documentation](https://zustand-demo.pmnd.rs/)
-
----
-
-## implementazioni future: pagina con mappa della montagna per le stanze.
-**GVNApp 2.0** - Semplifica la vita sociale del tuo gruppo! 🎉
+GVNApp 2.0 — organizzare fra amici senza sbatti. 🎉

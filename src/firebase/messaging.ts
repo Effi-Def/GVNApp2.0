@@ -4,8 +4,24 @@ import { userService } from '../services/firestore'
 
 export async function initMessaging(userId: string) {
   try {
+    // Guard: avoid initializing when env still contains placeholder values
+    const senderId = import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID
+    const appId = import.meta.env.VITE_FIREBASE_APP_ID
+    const senderIdLooksPlaceholder = !senderId || /(^(123456789)$|your)/i.test(senderId)
+    const appIdLooksPlaceholder = !appId || /(abcdef123456|123456789:web)/i.test(appId)
+    if (senderIdLooksPlaceholder || appIdLooksPlaceholder) {
+      console.warn('[FCM] Skipping init: placeholder senderId/appId in .env.local', {
+        senderId,
+        appId,
+      })
+      return null
+    }
+
     const supported = await isSupported()
-    if (!supported) return null
+    if (!supported) {
+      console.warn('[FCM] Messaging not supported in this browser')
+      return null
+    }
 
     const messaging = getMessaging(app)
     // VAPID key from env
@@ -15,9 +31,30 @@ export async function initMessaging(userId: string) {
       return null
     }
 
-    const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: await navigator.serviceWorker.ready })
+    // Ensure notification permission
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      const res = await Notification.requestPermission().catch(() => 'denied')
+      if (res !== 'granted') {
+        console.warn('Push permission denied by user')
+        return null
+      }
+    }
+
+    // Use the existing PWA service worker (sw.js) registration
+    let reg: ServiceWorkerRegistration | undefined
+    if ('serviceWorker' in navigator) {
+      try {
+        reg = await navigator.serviceWorker.ready
+        console.info('[FCM] Using existing SW registration for messaging')
+      } catch (swErr) {
+        console.warn('[FCM] navigator.serviceWorker.ready failed, proceeding without explicit reg:', swErr)
+      }
+    }
+
+    const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: reg })
     if (token) {
       await userService.addFcmToken(userId, token)
+      console.info('[FCM] Token obtained and stored for user:', userId)
     }
 
     onMessage(messaging, (payload) => {

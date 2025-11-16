@@ -3,13 +3,14 @@ import { useAppStore } from '../stores/AppStore'
 import { useAuthStore } from '../stores/useAuthStore'
 import { useUserSettingsStore } from '../stores/UserSettingsStore'
 import { useNavigate } from 'react-router-dom'
-import { eventService } from '../services/firestore'
+import { eventService, listService } from '../services/firestore'
 import MonthCalendar from '../components/Calendar/MonthCalendar'
+import { isAnnouncementUnread, openAnnouncementModal } from '../components/AnnouncementModal'
 
 const HomePage = () => {
   const { user } = useAuthStore()
   const { profile } = useUserSettingsStore()
-  const { events, expenses, setEvents } = useAppStore()
+  const { events, expenses, lists, setEvents, setLists } = useAppStore()
   const navigate = useNavigate()
   
   const [isLoading, setIsLoading] = useState(false)
@@ -30,16 +31,21 @@ const HomePage = () => {
 
   // Assicurati che se lo store è vuoto proviamo un caricamento centralizzato una sola volta
   useEffect(() => {
-    if (events.length === 0) {
+    if (events.length === 0 && !isLoading) {
       // Prova prima la funzione centralizzata se disponibile
       const { loadUserData } = useAuthStore.getState() as any
       if (typeof loadUserData === 'function') {
-        loadUserData().catch(() => {})
+        console.log('🔄 HomePage: Loading user data...')
+        loadUserData().catch((e: any) => {
+          console.warn('⚠️ HomePage: loadUserData failed:', e)
+        })
       } else {
         // Fallback diretto: carica eventi da Firestore
+        console.log('🔄 HomePage: Loading events directly...')
         ;(async () => {
           try {
             const eventsData = await eventService.getAll()
+            console.log('✅ HomePage: Loaded events:', eventsData.length)
             setEvents(eventsData)
           } catch (e) {
             console.warn('⚠️ Impossibile caricare eventi (fallback HomePage):', e)
@@ -47,24 +53,29 @@ const HomePage = () => {
         })()
       }
     }
-  }, [events.length, expenses.length])
+  }, [events.length, isLoading])
 
   // Prendi i prossimi 3-5 eventi
   const today = new Date()
   today.setHours(0, 0, 0, 0)
+  // Id utente corrente usato in più sezioni; definirlo PRIMA di usarlo
+  const currentUserId = user?.id || user?.email || 'mock-user'
   
   const upcomingEvents = events
     .filter(event => {
       const eventDate = new Date(event.date)
       eventDate.setHours(0, 0, 0, 0)
-      return eventDate >= today
+      if (eventDate < today) return false
+      // Nascondi eventi a cui ho risposto "no"
+      const mine = (event.participants || []).find(p => p.userId === currentUserId)
+      if (mine && mine.status === 'no') return false
+      return true
     })
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
   
   const nextUpcomingEvents = upcomingEvents.slice(0, 5)
 
   // Calcola il bilancio delle spese per l'utente corrente (stesso algoritmo di ExpensesPage-hybrid)
-  const currentUserId = user?.id || user?.email || 'mock-user'
   
   const userBalance = expenses.reduce((balance, expense) => {
     const userParticipation = expense.participants.find(p => p.userId === currentUserId)
@@ -96,8 +107,77 @@ const HomePage = () => {
     }))
   })
 
+  // ===== I miei To-do =====
+  const meName = (profile?.displayName && profile.displayName.trim().length > 0)
+    ? profile.displayName.trim()
+    : ((user?.displayName && user.displayName !== 'Utente') ? user.displayName : (user?.email ? user.email.split('@')[0] : ''))
+
+  type TodoEntry = {
+    listId: string
+    listTitle: string
+    eventId?: string
+    itemId: string
+    text: string
+    status?: 'todo' | 'in-progress' | 'done'
+    dueDate?: Date
+    addedAt?: Date
+  }
+
+  const myTodos: TodoEntry[] = (lists || [])
+    .filter(l => (l.type || 'shopping') === 'todo')
+    .flatMap(l => (l.items || []).filter(it => !it.completed).map(it => ({
+      listId: l.id,
+      listTitle: l.title,
+      eventId: l.eventId,
+      itemId: it.id,
+      text: it.text,
+      status: it.status,
+      dueDate: it.dueDate,
+      addedAt: it.addedAt,
+      assignees: it.assignees || [],
+      addedBy: it.addedBy,
+    } as any)))
+    .filter((e: any) => {
+      // Match per assegnatari o autore come fallback
+      const assigned = Array.isArray(e.assignees) && e.assignees.some((a: any) =>
+        (a.userId && a.userId === currentUserId) || (a.userName && meName && a.userName.toLowerCase() === meName.toLowerCase())
+      )
+      return assigned || e.addedBy === currentUserId
+    })
+    .sort((a, b) => {
+      const ad = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER
+      const bd = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER
+      if (ad !== bd) return ad - bd
+      const order = (s?: string) => s === 'todo' ? 0 : s === 'in-progress' ? 1 : 2
+      const so = order(a.status) - order(b.status)
+      if (so !== 0) return so
+      const aa = a.addedAt ? new Date(a.addedAt).getTime() : 0
+      const ba = b.addedAt ? new Date(b.addedAt).getTime() : 0
+      return aa - ba
+    })
+    .slice(0, 4)
+
+  const toggleTodoFromHome = async (entry: TodoEntry) => {
+    const list = lists.find(l => l.id === entry.listId)
+    if (!list) return
+    const updatedItems = list.items.map(it => {
+      if (it.id !== entry.itemId) return it
+      const nowCompleted = !it.completed
+      return {
+        ...it,
+        completed: nowCompleted,
+        completedBy: nowCompleted ? (user?.id || currentUserId) : undefined,
+        completedAt: nowCompleted ? new Date() : undefined,
+        status: (list.type || 'shopping') === 'todo' ? (nowCompleted ? 'done' : 'todo') : it.status,
+      }
+    })
+    const updatedList = { ...list, items: updatedItems, updatedAt: new Date() }
+    await listService.update(list.id, updatedList)
+    setLists(lists.map(l => l.id === list.id ? updatedList : l))
+  }
+
   return (
-    <div className="space-y-6 sm:space-y-8 pb-6 sm:pb-8">
+    <div className="space-y-6 sm:space-y-8 pb-6 sm:pb-8 relative">
       {/* Loading state */}
       {isLoading && (
         <div className="gvn-card p-4 sm:p-6 bg-gradient-to-r from-primary-50 to-accent-50 border-primary-200">
@@ -124,6 +204,17 @@ const HomePage = () => {
                   : ((user?.displayName && user.displayName !== 'Utente') ? user.displayName : (user?.email ? user.email.split('@')[0] : 'Amico'))}!
               </h1>
               <span className="text-2xl animate-bounce">👋</span>
+              {/* Badge novità se annuncio non letto */}
+              {typeof window !== 'undefined' && isAnnouncementUnread() && (
+                <button
+                  onClick={openAnnouncementModal}
+                  className="ml-2 inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-pink-50 text-pink-700 border border-pink-200 hover:bg-pink-100"
+                  title="Novità dell'ultima versione"
+                >
+                  <span>🐷</span>
+                  <span>Novità</span>
+                </button>
+              )}
             </div>
             <p className="text-neutral-600 text-base sm:text-lg font-medium">
               Benvenuto nel tuo hub sociale del <span className="gvn-badge-pig">🐷 Gruppo GVN</span>
@@ -186,7 +277,58 @@ const HomePage = () => {
             </div>
           </div>
   </button>
+        {/* Chat quick link removed to keep Home clean as requested */}
         {/* Riepilogo Spese Totali rimosso su richiesta */}
+      </div>
+
+      {/* I miei To-do */}
+      <div className="gvn-card p-6 sm:p-8">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="gvn-title text-2xl flex items-center gap-2">
+            <span>✅</span>
+            <span>I miei To‑do</span>
+          </h2>
+          <button onClick={() => navigate('/lists')} className="text-sm text-primary-600 hover:underline">Apri liste</button>
+        </div>
+        {myTodos.length === 0 ? (
+          <p className="text-neutral-500">Nessun to‑do assegnato. Assegna elementi dalle liste To‑do.</p>
+        ) : (
+          <div className="space-y-3">
+            {myTodos.map(t => (
+              <div key={`${t.listId}:${t.itemId}`} className="flex items-center gap-3 p-3 rounded-lg border hover:bg-neutral-50">
+                <button
+                  onClick={() => toggleTodoFromHome(t)}
+                  className={`w-6 h-6 rounded-full border-2 ${t.status === 'done' ? 'bg-green-500 border-green-500' : 'border-neutral-300'}`}
+                  title="Completa"
+                >
+                  {t.status === 'done' && (
+                    <svg className="w-4 h-4 text-white mx-auto mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  )}
+                </button>
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-neutral-800 truncate">{t.text}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-600">
+                    <span className={`px-2 py-0.5 rounded-full border ${
+                      t.status === 'done' ? 'bg-green-50 text-green-700 border-green-200' :
+                      t.status === 'in-progress' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
+                      'bg-gray-50 text-gray-700 border-gray-200'
+                    }`}>{t.status || 'todo'}</span>
+                    {t.dueDate && (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">📅 {new Date(t.dueDate).toLocaleDateString('it-IT')}</span>
+                    )}
+                    <span className="px-2 py-0.5 rounded-full bg-neutral-50 text-neutral-600 border border-neutral-200">📝 {t.listTitle}</span>
+                    {t.eventId && (
+                      <button onClick={() => navigate(`/events/${t.eventId}/summary`)} className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:underline">Vai all'evento</button>
+                    )}
+                  </div>
+                </div>
+                <button onClick={() => navigate('/lists')} className="text-xs text-primary-600 hover:underline">Apri</button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Prossimi Eventi - redesigned */}
@@ -368,9 +510,13 @@ const HomePage = () => {
           )
         })()}
       </div>
+  {/* Floating chat launcher moved to global Layout for cross-page visibility */}
     </div>
   )
 }
 
 export { HomePage }
 export default HomePage
+// Floating chat launcher rendered specifically on Home
+// (Placed after export to avoid interfering with page DOM logic)
+

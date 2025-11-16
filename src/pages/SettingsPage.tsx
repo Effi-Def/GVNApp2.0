@@ -3,6 +3,8 @@ import { useUserSettingsStore } from '../stores/UserSettingsStore'
 import { useAuthStore } from '../stores/useAuthStore'
 import { PigAvatar, PigAvatarKey } from '../components/Avatar/PigAvatar'
 import { initMessaging } from '../firebase/messaging'
+import { useEffect, useState } from 'react'
+import { isSupported as fcmIsSupported } from 'firebase/messaging'
 import { storage } from '../firebase/config'
 import { getFunctions, httpsCallable } from 'firebase/functions'
 import { ref, getDownloadURL, listAll } from 'firebase/storage'
@@ -129,6 +131,22 @@ const SettingsPage: React.FC = () => {
               catch (e) { console.error(e); alert('Errore nel salvataggio profilo'); }
               finally { setSaving(false) }
             }}>{saving ? 'Salvataggio...' : 'Salva Profilo'}</button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!confirm('Sei sicuro di voler uscire?')) return
+                try {
+                  await (await import('../stores/useAuthStore')).useAuthStore.getState().logout()
+                } catch (e) {
+                  console.error('Errore logout:', e)
+                  alert('Errore durante il logout')
+                  return
+                }
+                try { sessionStorage.removeItem('postLoginRedirect') } catch {}
+                window.location.replace('/')
+              }}
+              className="ml-3 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+            >Logout</button>
           </div>
         </div>
       )}
@@ -149,15 +167,38 @@ const SettingsPage: React.FC = () => {
             <label htmlFor="push">Notifiche push su cellulare</label>
           </div>
           <div className="pt-4">
-            <div className="flex gap-2">
-              <button className="px-4 py-2 bg-blue-600 text-white rounded-lg" onClick={saveNotifications}>Salva Notifiche</button>
+            <div className="flex gap-2 flex-wrap">
+              <button className="px-4 py-2 bg-blue-600 text-white rounded-lg" onClick={async ()=>{
+                try { await saveNotifications(); alert('Preferenze notifiche salvate'); }
+                catch(e){ console.error(e); alert('Errore nel salvataggio preferenze') }
+              }}>Salva Notifiche</button>
+              <button className="px-4 py-2 bg-neutral-100 text-neutral-800 rounded-lg" onClick={()=>{
+                // Prova ad aprire impostazioni di notifica OS / browser
+                const origin = window.location.origin
+                const attempts = [
+                  // Chrome Android: pagina sito
+                  `intent://settings#Intent;action=android.settings.APP_NOTIFICATION_SETTINGS;end`,
+                  `chrome://settings/content/siteDetails?site=${encodeURIComponent(origin)}`,
+                  // iOS
+                  'app-settings://notifications',
+                  'App-Prefs:root=NOTIFICATIONS_ID',
+                ]
+                for (const url of attempts) {
+                  try { const w = window.open(url, '_blank'); if (w) return } catch {}
+                }
+                alert('Per abilitare le notifiche: apri Impostazioni di sistema > Notifiche > consenti per il browser/app. Su Android Chrome: premi ℹ️ nell\'URL > Notifiche. Su iOS: Impostazioni > Safari/Browser > Notifiche.')
+              }}>Apri impostazioni notifiche</button>
+              <button className="px-4 py-2 bg-white border rounded-lg" onClick={()=>{
+                // link rapido a pagina preferenze completa
+                window.location.href = '/notifications/settings'
+              }}>Preferenze dettagliate</button>
               <button className="px-4 py-2 bg-green-600 text-white rounded-lg" onClick={async () => {
                 try {
                   if (!user) return
                   const fns = getFunctions()
                   const call = httpsCallable(fns, 'sendTestPush')
                   await call({})
-                  alert('Richiesta inviata: controlla il dispositivo per la notifica push')
+                  alert('Richiesta inviata: controlla il dispositivo (se non vedi nulla, verifica le impostazioni notifiche)')
                 } catch (e) {
                   console.error('Errore test push:', e)
                   alert('Errore durante il test push')
@@ -165,6 +206,9 @@ const SettingsPage: React.FC = () => {
               }}>Test push</button>
             </div>
           </div>
+
+          {/* Push diagnostics */}
+          <PushDiagnostics userId={user?.id} />
         </div>
       )}
     </div>
@@ -172,3 +216,68 @@ const SettingsPage: React.FC = () => {
 }
 
 export default SettingsPage
+
+// Inline diagnostics component for push notifications
+function PushDiagnostics({ userId }: { userId?: string }) {
+  const [supported, setSupported] = useState<boolean | null>(null)
+  const [permission, setPermission] = useState<NotificationPermission | 'n/d'>('n/d')
+  const [swControlled, setSwControlled] = useState<boolean>(false)
+  const [swScript, setSwScript] = useState<string>('')
+  const [token, setToken] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [vapidOk] = useState<boolean>(!!import.meta.env.VITE_FIREBASE_VAPID_KEY)
+  const [platformNote, setPlatformNote] = useState<string | null>(null)
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const sup = await fcmIsSupported().catch(() => false)
+        setSupported(!!sup)
+      } catch { setSupported(false) }
+      try { setPermission(typeof Notification !== 'undefined' ? Notification.permission : 'n/d') } catch {}
+      try {
+        const ctrl = (navigator.serviceWorker && navigator.serviceWorker.controller) as any
+        setSwControlled(!!ctrl)
+        setSwScript(ctrl?.scriptURL || '')
+      } catch {}
+      // iOS web browsers currently do not support Firebase Web Messaging
+      const ua = navigator.userAgent
+      if (/iPhone|iPad|iPod/i.test(ua)) {
+        setPlatformNote('Su iOS i browser non supportano le push Web via Firebase. Le push funzionano su Android Chrome/Edge/Firefox. Su iOS usa notifiche in‑app o un wrapper nativo.')
+      }
+    })()
+  }, [])
+
+  const requestPermission = async () => {
+    try { await Notification.requestPermission(); setPermission(Notification.permission) } catch {}
+  }
+
+  const reinit = async () => {
+    if (!userId) return
+    setBusy(true)
+    try {
+      const t = await initMessaging(userId)
+      setToken(t)
+      alert(t ? 'Token ottenuto e salvato' : 'Nessun token (controlla supporto/permessi/VAPID)')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="mt-6 p-3 border rounded-lg bg-gray-50">
+      <div className="font-semibold mb-2">Diagnostica Push</div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
+        <div><span className="text-gray-600">Supporto FCM:</span> {supported == null ? 'n/d' : supported ? '✅' : '❌'}</div>
+        <div><span className="text-gray-600">Permesso:</span> {permission}</div>
+        <div><span className="text-gray-600">SW controlla la pagina:</span> {swControlled ? `sì (${swScript.split('/').pop()})` : 'no'}</div>
+        <div><span className="text-gray-600">VAPID key:</span> {vapidOk ? 'presente' : 'mancante'}</div>
+        <div className="col-span-1 sm:col-span-2 break-all"><span className="text-gray-600">Token (preview):</span> {token ? token.slice(0, 24) + '…' : 'non ottenuto'}</div>
+      </div>
+      {platformNote && <div className="mt-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded p-2">{platformNote}</div>}
+      <div className="mt-3 flex gap-2 flex-wrap">
+        <button className="px-3 py-2 border rounded" onClick={requestPermission}>Richiedi permesso</button>
+        <button className="px-3 py-2 bg-indigo-600 text-white rounded disabled:opacity-50" disabled={busy || !userId} onClick={reinit}>{busy ? 'Inizializzo…' : 'Re‑inizializza push'}</button>
+      </div>
+      <div className="text-xs text-gray-500 mt-2">Suggerimenti: abilita "Notifiche push" sopra, consenti il permesso, verifica che la VAPID key sia corretta in .env.local, e che la pagina sia controllata da un Service Worker.</div>
+    </div>
+  )
+}
