@@ -9,12 +9,14 @@ import {
   query,
   orderBy,
   where,
+  limit,
+  startAfter,
   Timestamp,
-  arrayUnion,
   onSnapshot
 } from 'firebase/firestore'
 import { db } from '../firebase/config'
-import { Event, Expense, Poll, ShoppingList, PaymentTransaction, ChatMessage, ChatAttachment, ChatReactionKey } from '../types'
+import { Event, Expense, Poll, ShoppingList, PaymentTransaction, ChatMessage, ChatAttachment, ChatReactionKey, EventParticipation, EventParticipationStatus } from '../types'
+import { APP_CONFIG } from '../constants'
 import { storage } from '../firebase/config'
 import { ref, getDownloadURL, uploadBytesResumable } from 'firebase/storage'
 
@@ -30,8 +32,31 @@ export const eventService = {
         Object.entries(eventData).filter(([_, value]) => value !== undefined)
       )
       
+      // Extract participant IDs for security rules (visibility does NOT imply participation)
+      const participantIds = (eventData.participants || []).map(p => p.userId)
+
+      // Ensure creator has an explicit participation entry (groundwork for [000])
+      const participation = (() => {
+        const createdBy = (eventData as any).createdBy
+        if (!createdBy) return (eventData as any).participation
+        const base = (eventData as any).participation && typeof (eventData as any).participation === 'object'
+          ? { ...(eventData as any).participation }
+          : {}
+        if (!base[createdBy]) {
+          base[createdBy] = {
+            status: 'yes',
+            accessLevel: 'full',
+            role: 'owner',
+            respondedAt: Timestamp.now(),
+          }
+        }
+        return base
+      })()
+      
       const docRef = await addDoc(collection(db, 'events'), {
         ...cleanEventData,
+        participantIds,
+        participation,
         publicShareEnabled: cleanEventData.publicShareEnabled !== false,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
@@ -40,6 +65,8 @@ export const eventService = {
       const newEvent: Event = {
         id: docRef.id,
         ...eventData,
+        participantIds,
+        participation: participation as any,
         createdAt: new Date(),
         updatedAt: new Date()
       }
@@ -48,7 +75,7 @@ export const eventService = {
       return newEvent
     } catch (error) {
       console.error('❌ Error creating event:', error)
-      throw new Error('Errore durante la creazione dell\'evento')
+      throw error
     }
   },
 
@@ -68,7 +95,11 @@ export const eventService = {
 
     try {
       console.log('📅 Fetching all events (ordered by date desc)')
-      const q = query(collection(db, 'events'), orderBy('date', 'desc'))
+      const q = query(
+        collection(db, 'events'), 
+        orderBy('date', 'desc'),
+        limit(APP_CONFIG.PAGINATION_LIMIT)
+      )
       const querySnapshot = await getDocs(q)
 
       const events: Event[] = querySnapshot.docs.map(d => {
@@ -80,10 +111,32 @@ export const eventService = {
               days: p?.days || undefined,
             }))
           : []
+
+        const participation: Record<string, EventParticipation> | undefined = (() => {
+          const raw = data.participation
+          if (!raw || typeof raw !== 'object') return undefined
+          const out: Record<string, EventParticipation> = {}
+          for (const [uid, entry] of Object.entries(raw)) {
+            const e: any = entry
+            if (!e || typeof e !== 'object') continue
+            const status = e.status as EventParticipationStatus | undefined
+            const accessLevel = e.accessLevel as any
+            if (!status || !accessLevel) continue
+            out[uid] = {
+              status,
+              accessLevel,
+              role: e.role,
+              respondedAt: toDate(e.respondedAt),
+            }
+          }
+          return Object.keys(out).length ? out : undefined
+        })()
+
         return {
           id: d.id,
           ...data,
           participants,
+          participation,
           publicShareEnabled: data.publicShareEnabled !== false,
           createdAt: toDate(data.createdAt) || new Date(),
           updatedAt: toDate(data.updatedAt) || new Date(),
@@ -110,10 +163,32 @@ export const eventService = {
                 days: p?.days || undefined,
               }))
             : []
+
+          const participation: Record<string, EventParticipation> | undefined = (() => {
+            const raw = data.participation
+            if (!raw || typeof raw !== 'object') return undefined
+            const out: Record<string, EventParticipation> = {}
+            for (const [uid, entry] of Object.entries(raw)) {
+              const e: any = entry
+              if (!e || typeof e !== 'object') continue
+              const status = e.status as EventParticipationStatus | undefined
+              const accessLevel = e.accessLevel as any
+              if (!status || !accessLevel) continue
+              out[uid] = {
+                status,
+                accessLevel,
+                role: e.role,
+                respondedAt: toDate(e.respondedAt),
+              }
+            }
+            return Object.keys(out).length ? out : undefined
+          })()
+
           return {
             id: d.id,
             ...data,
             participants,
+            participation,
             publicShareEnabled: data.publicShareEnabled !== false,
             createdAt: toDate(data.createdAt) || new Date(),
             updatedAt: toDate(data.updatedAt) || new Date(),
@@ -130,6 +205,59 @@ export const eventService = {
         console.error('❌ Error fetching events (fallback also failed):', e)
         throw new Error('Errore durante il caricamento degli eventi')
       }
+    }
+  },
+
+  // Get more events for pagination
+  async getMoreEvents(lastDate: Date): Promise<Event[]> {
+    const toDate = (v: any): Date | undefined => {
+      if (!v) return undefined
+      if (v instanceof Date) return v
+      if (typeof v?.toDate === 'function') return v.toDate()
+      if (typeof v === 'string' || typeof v === 'number') {
+        const d = new Date(v)
+        return isNaN(d.getTime()) ? undefined : d
+      }
+      return undefined
+    }
+
+    try {
+      console.log('📅 Fetching more events after:', lastDate)
+      const q = query(
+        collection(db, 'events'), 
+        orderBy('date', 'desc'),
+        startAfter(lastDate),
+        limit(APP_CONFIG.PAGINATION_LIMIT)
+      )
+      const querySnapshot = await getDocs(q)
+
+      const events: Event[] = querySnapshot.docs.map(d => {
+        const data: any = d.data()
+        const participants = Array.isArray(data.participants)
+          ? data.participants.map((p: any) => ({
+              ...p,
+              respondedAt: toDate(p?.respondedAt) || new Date(),
+              days: p?.days || undefined,
+            }))
+          : []
+        return {
+          id: d.id,
+          ...data,
+          participants,
+          publicShareEnabled: data.publicShareEnabled !== false,
+          createdAt: toDate(data.createdAt) || new Date(),
+          updatedAt: toDate(data.updatedAt) || new Date(),
+          date: toDate(data.date) || new Date(),
+          endDate: toDate(data.endDate),
+          chatLastActivityAt: toDate((data as any).chatLastActivityAt),
+        } as Event
+      })
+
+      console.log(`✅ Fetched ${events.length} more events`)
+      return events
+    } catch (error) {
+      console.error('❌ Error fetching more events:', error)
+      throw new Error('Errore durante il caricamento di altri eventi')
     }
   },
 
@@ -159,10 +287,32 @@ export const eventService = {
             days: p?.days || undefined,
           }))
         : []
+
+      const participation: Record<string, EventParticipation> | undefined = (() => {
+        const raw = data.participation
+        if (!raw || typeof raw !== 'object') return undefined
+        const out: Record<string, EventParticipation> = {}
+        for (const [uid, entry] of Object.entries(raw)) {
+          const e: any = entry
+          if (!e || typeof e !== 'object') continue
+          const status = e.status as EventParticipationStatus | undefined
+          const accessLevel = e.accessLevel as any
+          if (!status || !accessLevel) continue
+          out[uid] = {
+            status,
+            accessLevel,
+            role: e.role,
+            respondedAt: toDate(e.respondedAt),
+          }
+        }
+        return Object.keys(out).length ? out : undefined
+      })()
+
       const ev: Event = {
         id: snap.id,
         ...data,
         participants,
+        participation,
         publicShareEnabled: data.publicShareEnabled !== false,
         createdAt: toDate(data.createdAt) || new Date(),
         updatedAt: toDate(data.updatedAt) || new Date(),
@@ -247,8 +397,14 @@ export const eventService = {
         throw new Error('Evento non trovato')
       }
       
-      const event = eventDoc.data() as Event
-      const participants = event.participants || []
+      const event = eventDoc.data() as any
+      const participants = Array.isArray(event.participants) ? [...event.participants] : []
+
+      const participation: Record<string, any> = (() => {
+        const raw = event.participation
+        if (!raw || typeof raw !== 'object') return {}
+        return { ...raw }
+      })()
       
       // Trova la partecipazione esistente dell'utente
       const existingIndex = participants.findIndex(p => p.userId === userId)
@@ -271,17 +427,31 @@ export const eventService = {
           respondedAt: new Date()
         })
       }
+
+      // Dual-write: explicit participation map (does not imply visibility)
+      const accessLevel = status === 'no' ? 'readonly' : 'full'
+      participation[userId] = {
+        status,
+        accessLevel,
+        role: event.createdBy === userId ? 'owner' : 'member',
+        respondedAt: Timestamp.now(),
+      }
       
+      // Update participantIds for security rules
+      const participantIds = participants.map(p => p.userId)
+
       // Aggiorna il documento
       await updateDoc(eventRef, {
         participants,
+        participation,
+        participantIds,
         updatedAt: Timestamp.now()
       })
       
       console.log('✅ Participation updated successfully')
     } catch (error) {
       console.error('❌ Error updating participation:', error)
-      throw new Error('Errore durante l\'aggiornamento della partecipazione')
+      throw error
     }
   },
 
@@ -299,6 +469,15 @@ export const eventService = {
       const days: Record<string, boolean> = {}
       for (const k of daysKeys) days[k] = true
 
+      // Do not create participation implicitly. Daily presence is only allowed after explicit RSVP (status=yes).
+      const participationEntry = event.participation && typeof event.participation === 'object' ? event.participation[userId] : undefined
+      const statusFromParticipation = participationEntry?.status
+      const legacyStatus = existingIndex >= 0 ? (participants[existingIndex] as any)?.status : undefined
+      const effectiveStatus = statusFromParticipation || legacyStatus
+      if (effectiveStatus !== 'yes') {
+        throw new Error('Devi confermare la partecipazione (✅) prima di selezionare i giorni di presenza')
+      }
+
       if (existingIndex >= 0) {
         const existing = participants[existingIndex] as any
         participants[existingIndex] = {
@@ -310,13 +489,8 @@ export const eventService = {
           respondedAt: existing?.respondedAt || new Date()
         }
       } else {
-        participants.push({
-          userId,
-          name: userName,
-          status: 'maybe',
-          days,
-          respondedAt: new Date()
-        })
+        // If the legacy participant record is missing we prefer failing instead of implicitly creating it
+        throw new Error('Partecipazione non trovata: effettua RSVP prima di selezionare i giorni')
       }
 
       await updateDoc(eventRef, { participants, updatedAt: Timestamp.now() })
@@ -333,8 +507,17 @@ export const expenseService = {
   async create(expenseData: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>): Promise<Expense> {
     try {
       console.log('💰 Creating new expense:', expenseData.title)
+      
+      const participantIds = [
+        expenseData.paidBy,
+        ...expenseData.participants.map(p => p.userId)
+      ]
+      // Remove duplicates
+      const uniqueParticipantIds = [...new Set(participantIds)]
+
       const docRef = await addDoc(collection(db, 'expenses'), {
         ...expenseData,
+        participantIds: uniqueParticipantIds,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
       })
@@ -342,22 +525,38 @@ export const expenseService = {
       const newExpense: Expense = {
         id: docRef.id,
         ...expenseData,
+        participantIds: uniqueParticipantIds,
         createdAt: new Date(),
         updatedAt: new Date()
       }
       
+      // Send system message to chat
+      if (expenseData.eventId) {
+        chatService.sendSystemMessage(
+          expenseData.eventId,
+          'expense_created',
+          `ha aggiunto una spesa: ${expenseData.title}`,
+          { relatedId: newExpense.id, amount: expenseData.amount, title: expenseData.title },
+          expenseData.paidBy
+        ).catch(e => console.error('Failed to send system message:', e))
+      }
+
       console.log('✅ Expense created successfully:', newExpense.id)
       return newExpense
     } catch (error) {
       console.error('❌ Error creating expense:', error)
-      throw new Error('Errore durante la creazione della spesa')
+      throw error
     }
   },
 
   async getAll(): Promise<Expense[]> {
     try {
       console.log('💰 Fetching all expenses')
-      const q = query(collection(db, 'expenses'), orderBy('createdAt', 'desc'))
+      const q = query(
+        collection(db, 'expenses'), 
+        orderBy('createdAt', 'desc'),
+        limit(APP_CONFIG.PAGINATION_LIMIT)
+      )
       const querySnapshot = await getDocs(q)
       
       const expenses: Expense[] = querySnapshot.docs.map(doc => ({
@@ -517,6 +716,17 @@ export const pollService = {
         updatedAt: new Date()
       }
       
+      // Send system message to chat
+      if (pollData.eventId) {
+        chatService.sendSystemMessage(
+          pollData.eventId,
+          'poll_created',
+          `ha creato un sondaggio: ${pollData.title}`,
+          { relatedId: newPoll.id, title: pollData.title },
+          pollData.createdBy
+        ).catch(e => console.error('Failed to send system message:', e))
+      }
+
       console.log('✅ Poll created successfully:', newPoll.id)
       return newPoll
     } catch (error) {
@@ -527,7 +737,11 @@ export const pollService = {
 
   async getAll(): Promise<Poll[]> {
     try {
-      const q = query(collection(db, 'polls'), orderBy('createdAt', 'desc'))
+      const q = query(
+        collection(db, 'polls'), 
+        orderBy('createdAt', 'desc'),
+        limit(APP_CONFIG.PAGINATION_LIMIT)
+      )
       const querySnapshot = await getDocs(q)
       
       const polls: Poll[] = querySnapshot.docs.map(doc => {
@@ -656,6 +870,7 @@ export const listService = {
 
       const dataToWrite = cleanUndefinedDeep({
         ...listData,
+        sharedWith: listData.sharedWith || [listData.createdBy],
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
       })
@@ -665,26 +880,37 @@ export const listService = {
       const newList: ShoppingList = {
         id: docRef.id,
         ...listData,
+        sharedWith: listData.sharedWith || [listData.createdBy],
         createdAt: new Date(),
         updatedAt: new Date()
       }
       
+      // Send system message to chat
+      if (listData.eventId) {
+        chatService.sendSystemMessage(
+          listData.eventId,
+          'list_created',
+          `ha creato una lista: ${listData.title}`,
+          { relatedId: newList.id, title: listData.title },
+          listData.createdBy
+        ).catch(e => console.error('Failed to send system message:', e))
+      }
+
       console.log('✅ List created successfully:', newList.id)
       return newList
     } catch (error) {
       console.error('❌ Error creating list:', error)
-      const e: any = error
-      if (e && (e.code || e.name === 'FirebaseError')) {
-        // Preserve original Firebase error for accurate UI diagnostics
-        throw e
-      }
-      throw new Error(`Errore durante la creazione della lista: ${e?.message ?? ''}`)
+      throw error
     }
   },
 
   async getAll(): Promise<ShoppingList[]> {
     try {
-      const q = query(collection(db, 'lists'), orderBy('createdAt', 'desc'))
+      const q = query(
+        collection(db, 'lists'), 
+        orderBy('createdAt', 'desc'),
+        limit(APP_CONFIG.PAGINATION_LIMIT)
+      )
       const querySnapshot = await getDocs(q)
       
       const lists: ShoppingList[] = querySnapshot.docs.map(doc => {
@@ -775,7 +1001,7 @@ export const userService = {
       return snap.data() as any
     } catch (e) {
       console.error('❌ Error fetching user settings:', e)
-      return null
+      throw e
     }
   },
   async createOrUpdate(userId: string, data: any): Promise<void> {
@@ -792,7 +1018,25 @@ export const userService = {
   async updatePartial(userId: string, data: any): Promise<void> {
     try {
       const ref = doc(db, 'users', userId)
-      await updateDoc(ref, data)
+      const { setDoc } = await import('firebase/firestore')
+
+      const deepClean = (value: any): any => {
+        if (value === undefined) return undefined
+        if (value === null) return null
+        if (Array.isArray(value)) {
+          return value.map(deepClean)
+        }
+        if (typeof value === 'object') {
+          const entries = Object.entries(value)
+            .map(([k, v]) => [k, deepClean(v)] as const)
+            .filter(([_, v]) => v !== undefined)
+          return Object.fromEntries(entries)
+        }
+        return value
+      }
+
+      const sanitized = deepClean(data)
+      await setDoc(ref, sanitized, { merge: true })
     } catch (e) {
       console.error('❌ Error updating user settings:', e)
       throw e
@@ -800,19 +1044,53 @@ export const userService = {
   },
   async addFcmToken(userId: string, token: string): Promise<void> {
     try {
+      const { setDoc, arrayUnion } = await import('firebase/firestore')
       const ref = doc(db, 'users', userId)
-      await updateDoc(ref, { notifications: { fcmTokens: arrayUnion(token), pushEnabled: true } })
+      // Use setDoc with merge: true to safely update nested fields without overwriting the whole map
+      await setDoc(ref, { 
+        notifications: { 
+          fcmToken: token,
+          fcmTokens: arrayUnion(token), 
+          pushEnabled: true 
+        } 
+      }, { merge: true })
     } catch (e) {
-      // If user doc doesn't exist, create it
-      const { setDoc } = await import('firebase/firestore')
-      const ref = doc(db, 'users', userId)
-      await setDoc(ref, { notifications: { fcmTokens: [token], pushEnabled: true } }, { merge: true })
+      console.error('❌ Error adding FCM token:', e)
     }
   }
 }
 
 // 💬 Event Chat Service (v1)
 export const chatService = {
+  // Send a system message
+  async sendSystemMessage(
+    eventId: string,
+    systemType: 'expense_created' | 'poll_created' | 'list_created' | 'event_updated',
+    text: string,
+    metadata?: { relatedId?: string; amount?: number; title?: string },
+    userId: string = 'system'
+  ) {
+    const { addDoc, collection, Timestamp, updateDoc, doc } = await import('firebase/firestore')
+    const col = collection(db, 'events', eventId, 'messages')
+    
+    await addDoc(col, {
+      eventId,
+      userId,
+      userName: 'System', // UI will resolve name from userId if needed
+      text,
+      type: 'system',
+      systemType,
+      metadata,
+      createdAt: Timestamp.now(),
+      deleted: false
+    })
+
+    // Update event chat last activity
+    try {
+      await updateDoc(doc(db, 'events', eventId), { chatLastActivityAt: Timestamp.now(), updatedAt: Timestamp.now() })
+    } catch {}
+  },
+
   // Listen to messages for an event in real-time (ascending by createdAt)
   listen(eventId: string, cb: (messages: ChatMessage[]) => void, onError?: (e: any) => void) {
     const col = collection(db, 'events', eventId, 'messages')
@@ -830,8 +1108,12 @@ export const chatService = {
             userName: data.userName,
             userPhotoURL: data.userPhotoURL,
             text: data.text,
+            type: data.type || 'text',
+            systemType: data.systemType,
+            metadata: data.metadata,
             attachments: Array.isArray(data.attachments) ? data.attachments : undefined,
             reactions: data.reactions || undefined,
+            mentions: Array.isArray(data.mentions) ? data.mentions : undefined,
             createdAt: toDate(data.createdAt),
             editedAt: data.editedAt ? toDate(data.editedAt) : undefined,
             deleted: !!data.deleted,
@@ -850,18 +1132,26 @@ export const chatService = {
   // Send a message with optional attachments and quoted reply
   async sendMessage(
     eventId: string,
-    payload: { text?: string; files?: File[]; quoted?: { messageId: string; textPreview?: string; mediaThumbUrl?: string } },
+    payload: { text?: string; files?: File[]; quoted?: { messageId: string; textPreview?: string; mediaThumbUrl?: string }; mentions?: string[] },
     user: { id: string; displayName: string; photoURL?: string },
     onProgress?: (fileName: string, progress: number) => void
   ) {
+    // Clean undefined values from quoted to avoid Firestore errors
+    const cleanQuoted = payload.quoted ? {
+      messageId: payload.quoted.messageId,
+      ...(payload.quoted.textPreview && { textPreview: payload.quoted.textPreview }),
+      ...(payload.quoted.mediaThumbUrl && { mediaThumbUrl: payload.quoted.mediaThumbUrl }),
+    } : null
+    
     const base = {
       userId: user.id,
       userName: user.displayName || 'Utente',
       userPhotoURL: user.photoURL || null,
       text: payload.text || null,
+      mentions: payload.mentions && payload.mentions.length > 0 ? payload.mentions : null,
       attachments: [] as ChatAttachment[],
       reactions: { like: [], love: [], fun: [] } as Partial<Record<ChatReactionKey, string[]>>,
-      quoted: payload.quoted || null,
+      quoted: cleanQuoted,
       deleted: false,
       createdAt: Timestamp.now(),
     }
@@ -894,7 +1184,7 @@ export const chatService = {
           id: crypto.randomUUID(),
           url,
           name: f.name,
-          type: f.type.startsWith('image/') ? 'image' : 'file',
+          type: f.type.startsWith('image/') ? 'image' : f.type.startsWith('audio/') ? 'audio' : 'file',
           size: f.size,
           contentType: f.type,
         })

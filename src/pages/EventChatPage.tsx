@@ -2,16 +2,26 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import EventChat from '../components/Chat/EventChat'
 import { useAppStore } from '../stores/AppStore'
+import { useAuthStore } from '../stores/useAuthStore'
 import { eventService } from '../services/firestore'
 import { Event } from '../types'
+import { getUserKeys, getUserEventParticipation, userCanChat } from '../utils/events'
 
 const EventChatPage = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { events } = useAppStore()
+  const { user } = useAuthStore()
   const [event, setEvent] = useState<Event | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  const meKeys = getUserKeys(user)
+  const canChat = !!event && userCanChat(event, meKeys)
+  const myP = event ? getUserEventParticipation(event, meKeys) : { status: 'none', accessLevel: 'none' as const }
+  const canWrite = !!event && (
+    meKeys.includes(event.createdBy) || (myP.status === 'yes' && myP.accessLevel === 'full')
+  )
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' })
@@ -54,6 +64,20 @@ const EventChatPage = () => {
     )
   }
 
+  if (!canChat) {
+    return (
+      <div className="p-6 max-w-4xl mx-auto space-y-3">
+        <div className="bg-gray-50 border border-gray-200 text-gray-700 px-4 py-3 rounded-lg text-sm">
+          La chat è disponibile solo dopo aver confermato la partecipazione (✅).
+        </div>
+        <div className="flex items-center gap-3">
+          <button onClick={() => navigate(`/events/${event.id}/summary`)} className="text-sm text-primary-600 hover:underline">Vai al riepilogo evento</button>
+          <button onClick={() => navigate(-1)} className="text-sm text-neutral-600 hover:text-neutral-800">← Indietro</button>
+        </div>
+      </div>
+    )
+  }
+
   if (error) {
     return (
       <div className="p-6 max-w-4xl mx-auto space-y-3">
@@ -64,32 +88,14 @@ const EventChatPage = () => {
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <button onClick={() => navigate(-1)} className="text-sm text-neutral-600 hover:text-neutral-800">← Indietro</button>
-        </div>
-        <button
-          onClick={() => navigate(`/events/${event.id}/summary`)}
-          className="text-sm text-primary-600 hover:underline"
-        >Apri riepilogo evento</button>
-      </div>
-
-      <div className="bg-white rounded-xl border border-neutral-200 p-5 shadow-sm space-y-2">
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold text-neutral-900 flex items-center gap-2">{event.title} <span>💬</span></h1>
-          <span className="text-xs px-2 py-1 bg-primary-50 text-primary-700 rounded-full border border-primary-100">
-            {event.participants?.filter(p => p.status === 'yes').length || 0} confermati
-          </span>
-        </div>
-        <div className="text-sm text-neutral-600 flex flex-wrap items-center gap-3">
-          <span>📅 {new Date(event.date).toLocaleDateString('it-IT')}</span>
-          {event.time && <span>🕒 {event.time}</span>}
-          <span>📍 {event.location}</span>
-        </div>
-      </div>
-
-      <EventChat eventId={event.id} />
+    <div className="h-[100dvh] bg-white dark:bg-gray-900 max-w-screen-md mx-auto shadow-2xl flex flex-col">
+      <EventChat 
+        eventId={event.id} 
+        eventName={event.title}
+        onBack={() => navigate(-1)}
+        canWrite={canWrite}
+        className="flex-1 border-none rounded-none" 
+      />
     </div>
   )
 }

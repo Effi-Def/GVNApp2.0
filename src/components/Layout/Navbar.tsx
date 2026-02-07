@@ -4,12 +4,15 @@ import NotificationSystem from '../NotificationSystem'
 import { PigAvatar } from '../Avatar/PigAvatar'
 import { useUserSettingsStore } from '../../stores/UserSettingsStore'
 import { useNotificationsStore } from '../../stores/useNotificationsStore'
+import { markChatNotificationsAsRead } from '../../services/notifications'
+import { notificationService } from '../../services/notifications'
 
 const Navbar = () => {
   const location = useLocation()
   const { user } = useAuthStore()
   const { profile } = useUserSettingsStore()
-  const unread = useNotificationsStore(s => s.notifications.filter(n => !n.read).length)
+  const unread = useNotificationsStore(s => s.notifications.filter(n => !n.read && (n.type !== 'chat' || !!n.chatMention)).length)
+  const unreadChat = useNotificationsStore(s => s.notifications.filter(n => !n.read && n.type === 'chat').length)
   const navigate = useNavigate()
   const preferredName = (profile?.displayName && profile.displayName.trim().length > 0)
     ? profile.displayName
@@ -72,10 +75,24 @@ const Navbar = () => {
               className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
               title="Chat"
               aria-label="Chat"
+              onClick={async (e) => {
+                e.preventDefault()
+                // Clear only chat badges when user opens chats
+                try { useNotificationsStore.getState().markTypeAsRead('chat') } catch {}
+                try { if (user?.id) await markChatNotificationsAsRead(user.id) } catch {}
+                navigate('/chats')
+              }}
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <span className="relative inline-block">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 10h8M8 14h5m-9 7l2.5-2.5A9 9 0 1121 12a9 9 0 01-9 9H4z" />
-              </svg>
+                </svg>
+                {unreadChat > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-[16px] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[16px] text-center font-bold shadow">
+                    {unreadChat > 9 ? '9+' : unreadChat}
+                  </span>
+                )}
+              </span>
             </Link>
             {/* �🔔 Notifiche (pig) always visible on all sizes */}
             <Link
@@ -84,15 +101,26 @@ const Navbar = () => {
               title="Notifiche"
               onClick={(e) => {
                 e.preventDefault()
-                const { markAllAsRead } = useNotificationsStore.getState()
+                const { markAsRead } = useNotificationsStore.getState()
                 const isOnNotifications = location.pathname === '/notifications'
                 if (isOnNotifications) {
                   // Toggle back to the page that opened notifications
                   if (window.history.length > 1) navigate(-1)
                   else navigate('/')
                 } else {
-                  // Clear badge immediately when opening notifications
-                  try { markAllAsRead() } catch {}
+                  // If there is an unread @mention, open it directly (chat) instead of the notifications list.
+                  try {
+                    const all = useNotificationsStore.getState().notifications
+                    const mention = all
+                      .filter(n => !n.read && n.type === 'chat' && !!n.chatMention && !!n.actionUrl)
+                      .sort((a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0))[0]
+                    if (mention?.actionUrl) {
+                      try { markAsRead(mention.id) } catch {}
+                      try { if (user?.id) notificationService.markAsRead(user.id, mention.id) } catch {}
+                      navigate(mention.actionUrl)
+                      return
+                    }
+                  } catch {}
                   navigate('/notifications')
                 }
               }}

@@ -1,17 +1,22 @@
 import { useState, useEffect } from 'react'
 import { useNotificationsStore } from '../stores/useNotificationsStore'
 import { useUserSettingsStore } from '../stores/UserSettingsStore'
+import { notificationService } from '../services/notifications'
+import { useNavigate } from 'react-router-dom'
 
 
 interface NotificationSystemProps { userId: string }
 
-const NotificationSystem = ({ userId: _userId }: NotificationSystemProps) => {
+const NotificationSystem = ({ userId }: NotificationSystemProps) => {
+  const navigate = useNavigate()
   const notifications = useNotificationsStore(state => state.notifications)
   const unreadCount = useNotificationsStore(state => state.unreadCount())
   const markAsReadStore = useNotificationsStore(state => state.markAsRead)
   const markAllAsReadStore = useNotificationsStore(state => state.markAllAsRead)
   const { notifications: notifSettings } = useUserSettingsStore()
   const [isOpen, setIsOpen] = useState(false)
+
+  const unreadNotifications = notifications.filter(n => !n.read)
 
   // Request desktop notification permission if enabled
   useEffect(() => {
@@ -24,10 +29,12 @@ const NotificationSystem = ({ userId: _userId }: NotificationSystemProps) => {
 
   const markAsRead = (id: string) => {
     markAsReadStore(id)
+    if (userId) notificationService.markAsRead(userId, id)
   }
 
   const markAllAsRead = () => {
     markAllAsReadStore()
+    if (userId) notificationService.markAllAsRead(userId)
   }
 
   const getIcon = (type: string) => {
@@ -54,13 +61,6 @@ const NotificationSystem = ({ userId: _userId }: NotificationSystemProps) => {
     return date.toLocaleDateString('it-IT')
   }
 
-  // Auto mark all as read when opening the dropdown, and also when closing it
-  useEffect(() => {
-    if (isOpen) {
-      markAllAsReadStore()
-    }
-  }, [isOpen, markAllAsReadStore])
-
   return (
     <div className="relative">
       {/* Pulsante notifiche */}
@@ -84,7 +84,6 @@ const NotificationSystem = ({ userId: _userId }: NotificationSystemProps) => {
           <div
             className="fixed inset-0 z-10"
             onClick={() => {
-              markAllAsReadStore()
               setIsOpen(false)
             }}
           />
@@ -104,19 +103,25 @@ const NotificationSystem = ({ userId: _userId }: NotificationSystemProps) => {
 
             {/* Lista notifiche */}
             <div className="max-h-80 overflow-y-auto">
-              {notifications.length === 0 ? (
+              {unreadNotifications.length === 0 ? (
                 <div className="p-4 text-center text-gray-500">
                   <div className="text-4xl mb-2">🔕</div>
                   <p className="text-sm">Nessuna notifica</p>
                 </div>
               ) : (
-                notifications.map((notification) => (
+                unreadNotifications.map((notification) => (
                   <div
                     key={notification.id}
                     className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
                       !notification.read ? 'bg-blue-50' : ''
                     }`}
-                    onClick={() => markAsRead(notification.id)}
+                    onClick={() => {
+                      markAsRead(notification.id)
+                      if (notification.actionUrl) {
+                        setIsOpen(false)
+                        navigate(notification.actionUrl)
+                      }
+                    }}
                   >
                     <div className="flex items-start space-x-3">
                       <span className="text-lg">{getIcon(notification.type)}</span>
@@ -144,9 +149,26 @@ const NotificationSystem = ({ userId: _userId }: NotificationSystemProps) => {
 
             {/* Footer */}
             <div className="p-3 border-t border-gray-200 text-center">
-              <button className="text-sm text-blue-600 hover:text-blue-800">
-                Vedi tutte le notifiche
-              </button>
+              <div className="flex items-center justify-center gap-4">
+                <button
+                  className="text-sm text-blue-600 hover:text-blue-800"
+                  onClick={() => {
+                    setIsOpen(false)
+                    navigate('/notifications')
+                  }}
+                >
+                  Vedi tutte
+                </button>
+                <button
+                  className="text-sm text-gray-700 hover:text-gray-900"
+                  onClick={() => {
+                    setIsOpen(false)
+                    navigate('/settings/notifications')
+                  }}
+                >
+                  Preferenze
+                </button>
+              </div>
             </div>
           </div>
         </>

@@ -1,5 +1,6 @@
 import { Event } from '../types'
 import { useAuthStore } from '../stores/useAuthStore'
+import { getUserKeys, getUserEventParticipation } from '../utils/events'
 
 interface EventCardProps {
   event: Event
@@ -53,16 +54,17 @@ const EventCard = ({ event, onEdit, onDelete, onClick, onParticipate }: EventCar
     return time
   }
 
-  const isCreator = user?.id === event.createdBy
+  const meKeys = getUserKeys(user)
+  const myP = getUserEventParticipation(event, meKeys)
+  const isCreator = !!user && meKeys.includes(event.createdBy)
   const confirmedCount = event.participants.filter(p => p.status === 'yes').length
   const maybeCount = event.participants.filter(p => p.status === 'maybe').length
   
-  // Controlla lo stato di partecipazione dell'utente corrente
-  const userParticipation = event.participants.find(p => p.userId === user?.id)
-  const userStatus = userParticipation?.status
+  // Controlla lo stato di partecipazione dell'utente corrente (explicit participation preferred)
+  const userStatus = myP.status === 'none' ? undefined : myP.status
 
   return (
-    <div className="bg-white rounded-lg shadow border border-gray-200 p-6 hover:shadow-md transition-shadow">
+    <div className={`bg-white rounded-lg shadow border p-6 hover:shadow-md transition-shadow ${userStatus === 'no' ? 'border-gray-300 bg-gray-50/40' : 'border-gray-200'}`}>
       {/* Header */}
       <div className="flex justify-between items-start mb-4">
         <div>
@@ -161,7 +163,7 @@ const EventCard = ({ event, onEdit, onDelete, onClick, onParticipate }: EventCar
             ) : userStatus === 'maybe' ? (
               <span className="text-yellow-600 font-medium text-sm">❓ Forse</span>
             ) : userStatus === 'no' ? (
-              <span className="text-red-600 font-medium text-sm">❌ Non partecipi</span>
+              <span className="text-gray-600 font-medium text-sm">◻️ Readonly</span>
             ) : (
               <span className="text-gray-500 font-medium text-sm">Rispondi:</span>
             )}
@@ -193,8 +195,8 @@ const EventCard = ({ event, onEdit, onDelete, onClick, onParticipate }: EventCar
                 onClick={() => onParticipate?.(event.id, 'no')}
                 className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
                   userStatus === 'no'
-                    ? 'bg-red-100 text-red-700'
-                    : 'text-red-600 hover:bg-red-50'
+                    ? 'bg-gray-200 text-gray-700'
+                    : 'text-gray-600 hover:bg-gray-100'
                 }`}
                 title="Non parteciperò"
               >

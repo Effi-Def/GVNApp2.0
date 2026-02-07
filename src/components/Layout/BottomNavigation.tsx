@@ -1,11 +1,14 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import { useAuthStore } from '../../stores/useAuthStore'
+import { useNotificationsStore } from '../../stores/useNotificationsStore'
+import { markChatNotificationsAsRead } from '../../services/notifications'
 
 const BottomNavigation = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const { logout } = useAuthStore()
+  const unreadChat = useNotificationsStore(s => s.notifications.filter(n => !n.read && n.type === 'chat').length)
   const [moreOpen, setMoreOpen] = useState(false)
 
   const navigation = [
@@ -63,7 +66,22 @@ const BottomNavigation = () => {
           </button>
           {moreOpen && (
             <div className="absolute bottom-24 right-4 left-4 bg-white border border-neutral-200 rounded-2xl shadow-xl p-2">
-              <button onClick={() => { setMoreOpen(false); navigate('/chats') }} className="w-full text-left px-3 py-3 rounded-xl hover:bg-neutral-50">💬 Chat</button>
+              <button
+                onClick={async () => {
+                  setMoreOpen(false)
+                  try { useNotificationsStore.getState().markTypeAsRead('chat') } catch {}
+                  try { if (useAuthStore.getState().user?.id) await markChatNotificationsAsRead(useAuthStore.getState().user!.id) } catch {}
+                  navigate('/chats')
+                }}
+                className="w-full text-left px-3 py-3 rounded-xl hover:bg-neutral-50 flex items-center justify-between"
+              >
+                <span>💬 Chat</span>
+                {unreadChat > 0 && (
+                  <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] leading-[18px] text-center font-bold shadow">
+                    {unreadChat > 9 ? '9+' : unreadChat}
+                  </span>
+                )}
+              </button>
               <button onClick={() => { setMoreOpen(false); navigate('/notifications') }} className="w-full text-left px-3 py-3 rounded-xl hover:bg-neutral-50">🔔 Notifiche</button>
               <button onClick={() => { setMoreOpen(false); navigate('/settings') }} className="w-full text-left px-3 py-3 rounded-xl hover:bg-neutral-50">⚙️ Impostazioni</button>
               <button onClick={async () => { setMoreOpen(false); await logout() }} className="w-full text-left px-3 py-3 rounded-xl hover:bg-red-50 text-red-600">🚪 Esci</button>

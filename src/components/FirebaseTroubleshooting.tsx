@@ -34,12 +34,19 @@ const FirebaseTroubleshooting = () => {
     // Test 2: Firestore connection
     try {
       console.log('Testing Firestore connection...')
+      // Provo a leggere un documento che potrebbe non esistere (non è un errore)
       await getDoc(doc(db, 'test', 'connection'))
       setTests(prev => ({ ...prev, firestore: 'success' }))
       console.log('✅ Firestore connection OK')
-    } catch (error) {
-      console.error('❌ Firestore test failed:', error)
-      setTests(prev => ({ ...prev, firestore: 'error' }))
+    } catch (error: any) {
+      // Se l'errore è permission-denied, Firestore funziona comunque
+      if (error?.code === 'permission-denied') {
+        setTests(prev => ({ ...prev, firestore: 'success' }))
+        console.log('✅ Firestore connection OK (permission denied is expected for test collection)')
+      } else {
+        console.error('❌ Firestore test failed:', error)
+        setTests(prev => ({ ...prev, firestore: 'error' }))
+      }
     }
 
     // Test 3: Firestore rules (try to write)

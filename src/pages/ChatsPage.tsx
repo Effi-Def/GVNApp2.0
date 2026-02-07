@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { eventService, chatService } from '../services/firestore'
 import { useAuthStore } from '../stores/useAuthStore'
 import { Event } from '../types'
+import { getUserKeys, userCanChat } from '../utils/events'
 
 interface ChatSummary {
   event: Event
@@ -21,8 +22,8 @@ export default function ChatsPage() {
     // Fetch only events where the user is a participant or creator
     eventService.getAll().then(evts => {
       const mine = evts.filter(event => {
-        if (event.createdBy === meId) return true
-        return event.participants?.some?.(p => p.userId === meId)
+        const keys = getUserKeys(user)
+        return userCanChat(event, keys)
       })
       setEvents(mine)
     })

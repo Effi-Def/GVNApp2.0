@@ -51,8 +51,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           
           console.log('🎯 Setting user data:', userData)
           setUser(userData)
-        } catch (error) {
+        } catch (error: any) {
           console.error('❌ Error processing user:', error)
+          // Se è un errore di permessi, ignora (succede all'avvio prima dell'auth)
+          if (error?.code === 'permission-denied') {
+            console.log('⚠️ Permission denied (expected during initial load)')
+            setLoading(false)
+            return
+          }
           // Se c'è un errore con Firestore, crea un utente temporaneo
           const tempUserData: User = {
             id: firebaseUser.uid,

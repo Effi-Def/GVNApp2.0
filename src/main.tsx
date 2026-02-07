@@ -72,19 +72,34 @@ if (g.__gvn_sw_controllerchange_bound == null) g.__gvn_sw_controllerchange_bound
 
 // Register PWA and show a toast when a new version is available
 const updateSW = registerSW({
+  onRegisteredSW(_swUrl, registration) {
+    // In some mobile/PWA scenarios, updates can be slow to surface.
+    // Ask the browser to check for a newer SW shortly after startup.
+    if (!import.meta.env.DEV) {
+      try {
+        setTimeout(() => {
+          try { registration?.update() } catch {}
+        }, 1500)
+      } catch {}
+    }
+  },
   onNeedRefresh() {
+    console.log('🆕 Service Worker detected new version available!')
+    
     // CRITICAL: Prevent update loops during development
     if (import.meta.env.DEV) {
       console.log('🔧 DEV mode: skipping SW update prompt to prevent reload loops')
       return
     }
     
-    // Rate-limit prompts across reloads (increased from 15s to 5 minutes)
+    // Rate-limit prompts across reloads (30 seconds to allow quick testing)
     try {
       const last = Number(localStorage.getItem('gvn_last_update_prompt') || '0')
       const now = Date.now()
-      if (now - last < 300000) { // 5 minutes
-        console.log('⏭️ Skipping update prompt (too soon since last prompt)')
+      const timeSince = now - last
+      console.log(`⏱️ Time since last prompt: ${Math.round(timeSince / 1000)}s`)
+      if (timeSince < 30000) { // 30 seconds
+        console.log('⏭️ Skipping update prompt (too soon since last prompt, wait 30s)')
         return
       }
       localStorage.setItem('gvn_last_update_prompt', String(now))
@@ -137,6 +152,16 @@ const updateSW = registerSW({
     showToast('App disponibile offline')
   },
 })
+
+// In production, auto-reload once when a new SW takes control.
+// This helps installed Android PWAs pick up changes immediately.
+if (!import.meta.env.DEV && 'serviceWorker' in navigator) {
+  try {
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      try { location.reload() } catch {}
+    }, { once: true } as any)
+  } catch {}
+}
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

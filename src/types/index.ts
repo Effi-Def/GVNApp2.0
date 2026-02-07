@@ -16,6 +16,12 @@ export interface Event {
   time: string
   location: string
   createdBy: string
+
+  // Visibility vs participation (groundwork for [000])
+  visibility?: EventVisibility
+  // Explicit participation map keyed by userId (does not imply visibility)
+  participation?: Record<string, EventParticipation>
+
   participants: EventParticipant[]
   // Priorità evento per ordinamento/visibilità
   priority?: EventPriority
@@ -23,6 +29,8 @@ export interface Event {
   chatLastActivityAt?: Date
   // Flag per consentire la condivisione pubblica dell'evento
   publicShareEnabled?: boolean
+  // IDs dei partecipanti per regole di sicurezza
+  participantIds?: string[]
   createdAt: Date
   updatedAt: Date
 }
@@ -49,6 +57,25 @@ export interface EventParticipant {
   days?: Record<string, boolean>
 }
 
+export type EventVisibilityType = 'public' | 'restricted'
+
+export interface EventVisibility {
+  type: EventVisibilityType
+  farms?: string[]
+  users?: string[]
+}
+
+export type EventParticipationStatus = 'yes' | 'maybe' | 'no' | 'left'
+export type EventParticipationRole = 'owner' | 'member'
+export type EventParticipationAccessLevel = 'full' | 'readonly' | 'none'
+
+export interface EventParticipation {
+  status: EventParticipationStatus
+  role?: EventParticipationRole
+  accessLevel: EventParticipationAccessLevel
+  respondedAt?: Date
+}
+
 export interface Expense {
   id: string
   title: string
@@ -60,6 +87,8 @@ export interface Expense {
   splitType?: 'equal' | 'custom' | 'percentage' // 🎛️ Tipo di divisione
   attachments?: ExpenseAttachment[] // 📎 Allegati (scontrini, foto)
   comments?: ExpenseComment[] // 💬 Commenti e discussioni
+  // IDs dei partecipanti per regole di sicurezza
+  participantIds?: string[]
   createdAt: Date
   updatedAt: Date
 }
@@ -140,6 +169,7 @@ export interface ShoppingList {
   eventId?: string
   createdBy: string
   shared?: boolean  // Aggiungiamo flag condivisione
+  sharedWith?: string[] // IDs degli utenti con cui è condivisa la lista
   // Tipo lista: shopping (default), todo, transport, lodging
   type?: ListType
   createdAt: Date
@@ -185,7 +215,7 @@ export interface ChatAttachment {
   id: string
   url: string
   name: string
-  type: 'image' | 'file'
+  type: 'image' | 'file' | 'audio'
   size?: number
   contentType?: string
 }
@@ -197,6 +227,15 @@ export interface ChatMessage {
   userName: string
   userPhotoURL?: string
   text?: string
+  // Tagged users (by uid) extracted from @ mentions
+  mentions?: string[]
+  type?: 'text' | 'system' // Default 'text'
+  systemType?: 'expense_created' | 'poll_created' | 'list_created' | 'event_updated'
+  metadata?: {
+    relatedId?: string // ID of the expense/poll/list
+    amount?: number // For expenses
+    title?: string // For titles
+  }
   attachments?: ChatAttachment[]
   reactions?: Partial<Record<ChatReactionKey, string[]>>
   quoted?: {

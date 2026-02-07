@@ -1,6 +1,38 @@
-import { useState, useEffect } from 'react'
+import { useEffect } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import * as z from 'zod'
 import { Event, EventCategory } from '../types'
 import { useAuthStore } from '../stores/useAuthStore'
+import { EVENT_CATEGORIES, DEFAULT_EVENT_CATEGORY } from '../constants'
+
+const eventSchema = z.object({
+  title: z.string().min(1, 'Il titolo è obbligatorio'),
+  description: z.string().optional(),
+  category: z.enum(Object.keys(EVENT_CATEGORIES) as [string, ...string[]]),
+  date: z.string().min(1, 'La data è obbligatoria'),
+  time: z.string().min(1, 'L\'orario è obbligatorio'),
+  location: z.string().min(1, 'Il luogo è obbligatorio'),
+  endDate: z.string().optional(),
+}).refine((data) => {
+  if (data.category === 'viaggio') {
+    return !!data.endDate
+  }
+  return true
+}, {
+  message: "La data di fine è obbligatoria per i viaggi",
+  path: ["endDate"],
+}).refine((data) => {
+  if (data.category === 'viaggio' && data.endDate && data.date) {
+    return new Date(data.endDate) >= new Date(data.date)
+  }
+  return true
+}, {
+  message: "La data di fine deve essere successiva alla data di inizio",
+  path: ["endDate"],
+})
+
+type EventFormData = z.infer<typeof eventSchema>
 
 interface EventFormProps {
   onSubmit: (eventData: Omit<Event, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
@@ -10,67 +42,43 @@ interface EventFormProps {
 
 const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => {
   const { user } = useAuthStore()
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    category: 'cena' as EventCategory,
-    date: '',
-    endDate: '',
-    time: '',
-    location: ''
+  
+  const {
+    register,
+    handleSubmit,
+    watch,
+    formState: { errors }
+  } = useForm<EventFormData>({
+    resolver: zodResolver(eventSchema),
+    defaultValues: {
+      title: '',
+      description: '',
+      category: DEFAULT_EVENT_CATEGORY,
+      date: '',
+      time: '',
+      location: '',
+      endDate: ''
+    }
   })
-  const [errors, setErrors] = useState<Record<string, string>>({})
 
-  const validateForm = (): boolean => {
-    const newErrors: Record<string, string> = {}
+  const selectedCategory = watch('category')
 
-    if (!formData.title.trim()) {
-      newErrors.title = 'Il titolo è obbligatorio'
-    }
-
-    if (!formData.date) {
-      newErrors.date = 'La data è obbligatoria'
-    }
-
-    if (!formData.time) {
-      newErrors.time = 'L\'orario è obbligatorio'
-    }
-
-    if (!formData.location.trim()) {
-      newErrors.location = 'Il luogo è obbligatorio'
-    }
-
-    // Validazione specifica per viaggi
-    if (formData.category === 'viaggio') {
-      if (!formData.endDate) {
-        newErrors.endDate = 'La data di fine è obbligatoria per i viaggi'
-      } else if (formData.date && formData.endDate && new Date(formData.endDate) < new Date(formData.date)) {
-        newErrors.endDate = 'La data di fine deve essere successiva alla data di inizio'
-      }
-    }
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    
-    if (!validateForm() || !user) return
+  const onFormSubmit = async (data: EventFormData) => {
+    if (!user) return
 
     try {
-      const eventDate = new Date(`${formData.date}T${formData.time}`)
+      const eventDate = new Date(`${data.date}T${data.time}`)
       
       const eventData: Omit<Event, 'id' | 'createdAt' | 'updatedAt'> = {
-        title: formData.title.trim(),
-        description: formData.description.trim(),
-        category: formData.category,
+        title: data.title.trim(),
+        description: data.description?.trim() || '',
+        category: data.category as EventCategory,
         date: eventDate,
-        endDate: formData.category === 'viaggio' && formData.endDate 
-          ? new Date(`${formData.endDate}T${formData.time}`) 
+        endDate: data.category === 'viaggio' && data.endDate 
+          ? new Date(`${data.endDate}T${data.time}`) 
           : undefined,
-        time: formData.time,
-        location: formData.location.trim(),
+        time: data.time,
+        location: data.location.trim(),
         createdBy: user.id,
         participants: [{
           userId: user.id,
@@ -88,15 +96,7 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
     }
   }
 
-  const handleChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-    // Clear error when user starts typing
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: '' }))
-    }
-  }
-
-  // Prevent background scroll when modal is open
+  // Prevent background scroll
   useEffect(() => {
     const original = document.body.style.overflow
     document.body.style.overflow = 'hidden'
@@ -118,7 +118,7 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
             {/* Title */}
             <div>
               <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
@@ -127,8 +127,7 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
               <input
                 type="text"
                 id="title"
-                value={formData.title}
-                onChange={(e) => handleChange('title', e.target.value)}
+                {...register('title')}
                 className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                   errors.title ? 'border-red-300' : 'border-gray-300'
                 }`}
@@ -136,7 +135,7 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                 disabled={isLoading}
               />
               {errors.title && (
-                <p className="mt-1 text-sm text-red-600">{errors.title}</p>
+                <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>
               )}
             </div>
 
@@ -148,8 +147,7 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
               <textarea
                 id="description"
                 rows={3}
-                value={formData.description}
-                onChange={(e) => handleChange('description', e.target.value)}
+                {...register('description')}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 placeholder="Descrizione dell'evento..."
                 disabled={isLoading}
@@ -163,25 +161,20 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
               </label>
               <select
                 id="category"
-                value={formData.category}
-                onChange={(e) => handleChange('category', e.target.value as any)}
+                {...register('category')}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 disabled={isLoading}
               >
-                <option value="cena">🍽️ Cena</option>
-                <option value="aperitivo">🍻 Aperitivo</option>
-                <option value="viaggio">✈️ Viaggio</option>
-                <option value="sport">⚽ Sport</option>
-                <option value="festa">🎉 Festa</option>
-                <option value="cinema">🎬 Cinema</option>
-                <option value="shopping">🛍️ Shopping</option>
-                <option value="altro">📌 Altro</option>
+                {Object.entries(EVENT_CATEGORIES).map(([key, { label, emoji }]) => (
+                  <option key={key} value={key}>
+                    {emoji} {label}
+                  </option>
+                ))}
               </select>
             </div>
 
             {/* Date and Time */}
-            {formData.category === 'viaggio' ? (
-              // Layout per viaggi con data di inizio e fine
+            {selectedCategory === 'viaggio' ? (
               <>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -191,16 +184,14 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                     <input
                       type="date"
                       id="date"
-                      value={formData.date}
-                      onChange={(e) => handleChange('date', e.target.value)}
-
+                      {...register('date')}
                       className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                         errors.date ? 'border-red-300' : 'border-gray-300'
                       }`}
                       disabled={isLoading}
                     />
                     {errors.date && (
-                      <p className="mt-1 text-sm text-red-600">{errors.date}</p>
+                      <p className="mt-1 text-sm text-red-600">{errors.date.message}</p>
                     )}
                   </div>
 
@@ -211,16 +202,15 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                     <input
                       type="date"
                       id="endDate"
-                      value={formData.endDate}
-                      onChange={(e) => handleChange('endDate', e.target.value)}
-                      min={formData.date || undefined}
+                      {...register('endDate')}
+                      min={watch('date')}
                       className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                         errors.endDate ? 'border-red-300' : 'border-gray-300'
                       }`}
                       disabled={isLoading}
                     />
                     {errors.endDate && (
-                      <p className="mt-1 text-sm text-red-600">{errors.endDate}</p>
+                      <p className="mt-1 text-sm text-red-600">{errors.endDate.message}</p>
                     )}
                   </div>
                 </div>
@@ -232,20 +222,18 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                   <input
                     type="time"
                     id="time"
-                    value={formData.time}
-                    onChange={(e) => handleChange('time', e.target.value)}
+                    {...register('time')}
                     className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                       errors.time ? 'border-red-300' : 'border-gray-300'
                     }`}
                     disabled={isLoading}
                   />
                   {errors.time && (
-                    <p className="mt-1 text-sm text-red-600">{errors.time}</p>
+                    <p className="mt-1 text-sm text-red-600">{errors.time.message}</p>
                   )}
                 </div>
               </>
             ) : (
-              // Layout normale per altri eventi
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label htmlFor="date" className="block text-sm font-medium text-gray-700 mb-1">
@@ -254,16 +242,14 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                   <input
                     type="date"
                     id="date"
-                    value={formData.date}
-                    onChange={(e) => handleChange('date', e.target.value)}
-
+                    {...register('date')}
                     className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                       errors.date ? 'border-red-300' : 'border-gray-300'
                     }`}
                     disabled={isLoading}
                   />
                   {errors.date && (
-                    <p className="mt-1 text-sm text-red-600">{errors.date}</p>
+                    <p className="mt-1 text-sm text-red-600">{errors.date.message}</p>
                   )}
                 </div>
 
@@ -274,15 +260,14 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                   <input
                     type="time"
                     id="time"
-                    value={formData.time}
-                    onChange={(e) => handleChange('time', e.target.value)}
+                    {...register('time')}
                     className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                       errors.time ? 'border-red-300' : 'border-gray-300'
                     }`}
                     disabled={isLoading}
                   />
                   {errors.time && (
-                    <p className="mt-1 text-sm text-red-600">{errors.time}</p>
+                    <p className="mt-1 text-sm text-red-600">{errors.time.message}</p>
                   )}
                 </div>
               </div>
@@ -296,8 +281,7 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
               <input
                 type="text"
                 id="location"
-                value={formData.location}
-                onChange={(e) => handleChange('location', e.target.value)}
+                {...register('location')}
                 className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                   errors.location ? 'border-red-300' : 'border-gray-300'
                 }`}
@@ -305,7 +289,7 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                 disabled={isLoading}
               />
               {errors.location && (
-                <p className="mt-1 text-sm text-red-600">{errors.location}</p>
+                <p className="mt-1 text-sm text-red-600">{errors.location.message}</p>
               )}
             </div>
 

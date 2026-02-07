@@ -1,10 +1,13 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useNotificationsStore } from '../../stores/useNotificationsStore'
+import { useAuthStore } from '../../stores/useAuthStore'
+import { notificationService } from '../../services/notifications'
 
 const MobileTopActions = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const unread = useNotificationsStore(s => s.notifications.filter(n => !n.read).length)
+  const { user } = useAuthStore()
+  const unread = useNotificationsStore(s => s.notifications.filter(n => !n.read && (n.type !== 'chat' || !!n.chatMention)).length)
   return (
     <div className="md:hidden fixed top-3 right-3 z-50 flex items-center gap-2">
       {/* Notifications (pig) */}
@@ -20,7 +23,21 @@ const MobileTopActions = () => {
             if (window.history.length > 1) navigate(-1)
             else navigate('/')
           } else {
-            try { useNotificationsStore.getState().markAllAsRead() } catch {}
+            // Prefer opening latest unread chat mention directly
+            try {
+              const { notifications, markAsRead } = useNotificationsStore.getState()
+              const mention = notifications
+                .filter(n => !n.read && n.type === 'chat' && !!n.chatMention && !!n.actionUrl)
+                .sort((a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0))[0]
+              if (mention?.actionUrl) {
+                try { markAsRead(mention.id) } catch {}
+                try { if (user?.id) notificationService.markAsRead(user.id, mention.id) } catch {}
+                navigate(mention.actionUrl)
+                return
+              }
+            } catch {
+              // no-op
+            }
             navigate('/notifications')
           }
         }}

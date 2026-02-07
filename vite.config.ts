@@ -11,12 +11,16 @@ export default defineConfig({
     react(),
     VitePWA({
       disable: process.env.NODE_ENV === 'development', // CRITICAL: Disable SW in dev to prevent loops
-      registerType: 'prompt',
+      // On Android/installed PWAs, `prompt` can leave users stuck on an old SW
+      // until they manually refresh/accept the update. Prefer automatic updates.
+      registerType: 'autoUpdate',
       // Ensure our messaging handlers are included in the generated SW,
       // so we only have ONE service worker at scope '/'
       workbox: {
         importScripts: ['firebase-messaging-sw.js'],
+        skipWaiting: true,
         clientsClaim: true,
+        cleanupOutdatedCaches: true,
       },
       includeAssets: [
         'icons/pig-maskable.svg',

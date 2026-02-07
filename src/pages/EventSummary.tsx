@@ -4,6 +4,7 @@ import { useAppStore } from '../stores/AppStore'
 import { useAuthStore } from '../stores/useAuthStore'
 import { expenseService, pollService, listService, eventService } from '../services/firestore'
 import { Event, Expense, Poll, ShoppingList, EventParticipant } from '../types'
+import { getUserKeys, getUserEventParticipation } from '../utils/events'
 
 const EventSummary = () => {
   const { id } = useParams<{ id: string }>()
@@ -98,8 +99,10 @@ const EventSummary = () => {
   // Stato partecipazione utente corrente
   const currentUserId = user?.id || user?.email || ''
   const currentUserName = user?.displayName || user?.email || 'Utente'
-  const myParticipation = participants.find(p => p.userId === currentUserId)
-  const myStatus: 'yes' | 'no' | 'maybe' | 'none' = (myParticipation?.status as any) || 'none'
+  const meKeys = useMemo(() => getUserKeys(user), [user?.id, user?.email])
+  const myP = useMemo(() => (event ? getUserEventParticipation(event, meKeys) : { status: 'none', accessLevel: 'none' as const }), [event, meKeys])
+  const myStatus: 'yes' | 'no' | 'maybe' | 'none' = (myP.status as any) || 'none'
+  const canChat = !!event && (meKeys.includes(event.createdBy) || myStatus === 'yes')
   const [myDays, setMyDays] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -117,6 +120,10 @@ const EventSummary = () => {
 
   const updatePresence = async (newSet: Set<string>) => {
     if (!event || !currentUserId) return
+    if (myStatus !== 'yes') {
+      alert('Conferma la partecipazione (✅) per selezionare i giorni di presenza')
+      return
+    }
     try {
       await eventService.updateDailyPresence(event.id, currentUserId, currentUserName, Array.from(newSet))
       // update local state
@@ -126,7 +133,6 @@ const EventSummary = () => {
         const days: Record<string, boolean> = {}
         Array.from(newSet).forEach(k => { days[k] = true })
         if (idx >= 0) arr[idx] = { ...arr[idx], days }
-        else arr.push({ userId: currentUserId, name: currentUserName, status: 'maybe', respondedAt: new Date(), days })
         return arr
       })()
       const updated = { ...event, participants: updatedParticipants, updatedAt: new Date() }
@@ -162,9 +168,20 @@ const EventSummary = () => {
         return arr
       })()
 
-      const updated = { ...event, participants: updatedParticipants, updatedAt: new Date() }
+      const updatedParticipation = (() => {
+        const base = (event.participation && typeof event.participation === 'object') ? { ...event.participation } : {}
+        base[currentUserId] = {
+          status,
+          accessLevel: status === 'no' ? 'readonly' : 'full',
+          role: event.createdBy === currentUserId ? 'owner' : 'member',
+          respondedAt: new Date(),
+        }
+        return base
+      })()
+
+      const updated = { ...event, participants: updatedParticipants, participation: updatedParticipation as any, updatedAt: new Date() }
       setEvent(updated)
-      updateEvent(event.id, { participants: updatedParticipants, updatedAt: new Date() })
+      updateEvent(event.id, { participants: updatedParticipants, participation: updatedParticipation as any, updatedAt: new Date() })
     } catch (err) {
       console.error('❌ Error updating participation from summary:', err)
       alert('Errore durante l\'aggiornamento della partecipazione')
@@ -391,6 +408,9 @@ const EventSummary = () => {
         <div>
           <h2 className="text-lg font-semibold flex items-center gap-2">💬 Chat evento</h2>
           <p className="text-sm text-white/80">Coordina il gruppo in tempo reale e tieni vivo l'entusiasmo del team.</p>
+          {!canChat && (
+            <p className="text-xs text-white/80 mt-1">Disponibile dopo aver confermato la partecipazione (✅).</p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -398,8 +418,13 @@ const EventSummary = () => {
             className="px-3 py-2 rounded-lg border border-white/30 text-sm hover:bg-white/10 transition"
           >Apri elenco chat</button>
           <button
-            onClick={() => navigate(`/events/${event.id}/chat`)}
-            className="px-4 py-2 rounded-lg bg-white text-primary-600 text-sm font-semibold shadow"
+            onClick={() => { if (canChat) navigate(`/events/${event.id}/chat`) }}
+            disabled={!canChat}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold shadow transition ${
+              canChat
+                ? 'bg-white text-primary-600'
+                : 'bg-white/70 text-primary-700/60 cursor-not-allowed'
+            }`}
           >Vai alla chat evento</button>
         </div>
       </div>
@@ -605,7 +630,18 @@ const EventSummary = () => {
 
       {/* Expenses */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h2 className="text-lg font-semibold mb-3">Spese</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Spese</h2>
+          <button
+            type="button"
+            onClick={() => { if (event?.id) navigate('/expenses', { state: { openForm: true, eventId: event.id } }) }}
+            className="w-7 h-7 flex items-center justify-center rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+            title="Aggiungi spesa"
+            aria-label="Aggiungi spesa"
+          >
+            +
+          </button>
+        </div>
         {expenses.length === 0 ? (
           <p className="text-sm text-gray-600">Nessuna spesa</p>
         ) : (
@@ -625,7 +661,18 @@ const EventSummary = () => {
 
       {/* Polls */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h2 className="text-lg font-semibold mb-3">Sondaggi</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Sondaggi</h2>
+          <button
+            type="button"
+            onClick={() => { if (event?.id) navigate('/polls', { state: { openForm: true, eventId: event.id } }) }}
+            className="w-7 h-7 flex items-center justify-center rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+            title="Aggiungi sondaggio"
+            aria-label="Aggiungi sondaggio"
+          >
+            +
+          </button>
+        </div>
         {polls.length === 0 ? (
           <p className="text-sm text-gray-600">Nessun sondaggio</p>
         ) : (
@@ -641,7 +688,18 @@ const EventSummary = () => {
 
       {/* Lists */}
       <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h2 className="text-lg font-semibold mb-3">Liste</h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold">Liste</h2>
+          <button
+            type="button"
+            onClick={() => { if (event?.id) navigate('/lists', { state: { openForm: true, eventId: event.id } }) }}
+            className="w-7 h-7 flex items-center justify-center rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+            title="Aggiungi lista"
+            aria-label="Aggiungi lista"
+          >
+            +
+          </button>
+        </div>
         {lists.length === 0 ? (
           <p className="text-sm text-gray-600">Nessuna lista</p>
         ) : (

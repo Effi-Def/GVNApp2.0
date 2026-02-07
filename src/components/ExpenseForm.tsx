@@ -1,7 +1,25 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import * as z from 'zod'
 import { Expense } from '../types'
 import { useAuthStore } from '../stores/useAuthStore'
 import { useAppStore } from '../stores/AppStore'
+import { filterSelectableEvents, getUserKeys } from '../utils/events'
+
+const expenseSchema = z.object({
+  title: z.string().min(1, 'Il titolo è obbligatorio'),
+  amount: z.coerce.number().min(0.01, 'Inserisci un importo valido'),
+  eventId: z.string().optional(),
+  participants: z.array(z.object({
+    userId: z.string(),
+    name: z.string(),
+    amount: z.number(),
+    settled: z.boolean()
+  })).min(1, 'Seleziona almeno un partecipante')
+})
+
+type ExpenseFormData = z.infer<typeof expenseSchema>
 
 interface ExpenseFormProps {
   expense?: Expense // Per la modifica
@@ -13,21 +31,36 @@ interface ExpenseFormProps {
 const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseFormProps) => {
   const { user } = useAuthStore()
   const { events } = useAppStore()
-  
-  const [formData, setFormData] = useState({
-    title: expense?.title || '',
-    amount: expense?.amount?.toString() || '',
-    eventId: expense?.eventId || '',
-    participants: expense?.participants || []
-  })
-  
   const [availableParticipants, setAvailableParticipants] = useState<{ userId: string, name: string }[]>([])
-  const [errors, setErrors] = useState<Record<string, string>>({})
+
+  const selectableEvents = useMemo(() => {
+    return filterSelectableEvents(events, getUserKeys(user))
+  }, [events, user])
+
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors }
+  } = useForm<ExpenseFormData>({
+    resolver: zodResolver(expenseSchema) as any,
+    defaultValues: {
+      title: expense?.title || '',
+      amount: expense?.amount || 0,
+      eventId: expense?.eventId || '',
+      participants: expense?.participants || []
+    }
+  })
+
+  const selectedEventId = watch('eventId')
+  const currentAmount = watch('amount')
+  const currentParticipants = watch('participants')
 
   // Quando si seleziona un evento, aggiorna i partecipanti disponibili
   useEffect(() => {
-    if (formData.eventId) {
-      const event = events.find(e => e.id === formData.eventId)
+    if (selectedEventId) {
+      const event = events.find(e => e.id === selectedEventId)
       if (event) {
         const participants = event.participants.map(p => ({
           userId: p.userId,
@@ -35,133 +68,99 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
         }))
         setAvailableParticipants(participants)
         
-        // Se è una nuova spesa, seleziona automaticamente tutti i partecipanti all'evento
-        if (!expense) {
-          const amount = parseFloat(formData.amount) || 0
+        // Se è una nuova spesa (o se la lista partecipanti è vuota), seleziona automaticamente tutti
+        if (!expense && currentParticipants.length === 0) {
+          const amount = currentAmount || 0
           const splitAmount = participants.length > 0 ? amount / participants.length : 0
-          setFormData(prev => ({
-            ...prev,
-            participants: participants.map(p => ({
-              userId: p.userId,
-              name: p.name,
-              amount: splitAmount,
-              settled: false
-            }))
-          }))
+          setValue('participants', participants.map(p => ({
+            userId: p.userId,
+            name: p.name,
+            amount: splitAmount,
+            settled: false
+          })))
         }
       }
     } else {
       setAvailableParticipants([])
     }
-  }, [formData.eventId, events, expense])
+  }, [selectedEventId, events, expense, setValue])
 
   // Quando cambia l'importo, ricalcola gli split
   useEffect(() => {
-    if (formData.amount && formData.participants.length > 0) {
-      const totalAmount = parseFloat(formData.amount) || 0
-      const splitAmount = totalAmount / formData.participants.length
-      setFormData(prev => ({
-        ...prev,
-        participants: prev.participants.map(p => ({
+    if (currentParticipants.length > 0) {
+      const amount = currentAmount || 0
+      const splitAmount = amount / currentParticipants.length
+      
+      // Evita loop infinito se i valori sono già corretti (con tolleranza per float)
+      const needsUpdate = currentParticipants.some(p => Math.abs(p.amount - splitAmount) > 0.01)
+      
+      if (needsUpdate) {
+        setValue('participants', currentParticipants.map(p => ({
           ...p,
           amount: splitAmount
-        }))
-      }))
+        })))
+      }
     }
-  }, [formData.amount])
+  }, [currentAmount]) // Rimosso currentParticipants dalle dipendenze per evitare loop
 
   // Funzioni per gestire la selezione dei partecipanti
   const selectAllParticipants = () => {
-    const amount = parseFloat(formData.amount) || 0
+    const amount = currentAmount || 0
     const splitAmount = availableParticipants.length > 0 ? amount / availableParticipants.length : 0
-    setFormData(prev => ({
-      ...prev,
-      participants: availableParticipants.map(p => ({
-        userId: p.userId,
-        name: p.name,
-        amount: splitAmount,
-        settled: false
-      }))
-    }))
+    setValue('participants', availableParticipants.map(p => ({
+      userId: p.userId,
+      name: p.name,
+      amount: splitAmount,
+      settled: false
+    })))
   }
 
   const deselectAllParticipants = () => {
-    setFormData(prev => ({ ...prev, participants: [] }))
+    setValue('participants', [])
   }
 
   const toggleParticipant = (participantData: { userId: string, name: string }) => {
-    const isSelected = formData.participants.some(p => p.userId === participantData.userId)
-    
+    const isSelected = currentParticipants.some(p => p.userId === participantData.userId)
+    let newParticipants
+
     if (isSelected) {
       // Rimuovi partecipante
-      const newParticipants = formData.participants.filter(p => p.userId !== participantData.userId)
-      const amount = parseFloat(formData.amount) || 0
-      const splitAmount = newParticipants.length > 0 ? amount / newParticipants.length : 0
-      
-      setFormData(prev => ({
-        ...prev,
-        participants: newParticipants.map(p => ({ ...p, amount: splitAmount }))
-      }))
+      newParticipants = currentParticipants.filter(p => p.userId !== participantData.userId)
     } else {
       // Aggiungi partecipante
-      const currentParticipants = [...formData.participants]
-      const amount = parseFloat(formData.amount) || 0
-      const newCount = currentParticipants.length + 1
-      const splitAmount = amount / newCount
-      
-      setFormData(prev => ({
-        ...prev,
-        participants: [
-          ...currentParticipants.map(p => ({ ...p, amount: splitAmount })),
-          {
-            userId: participantData.userId,
-            name: participantData.name,
-            amount: splitAmount,
-            settled: false
-          }
-        ]
-      }))
-    }
-  }
-
-  const handleChange = (field: string, value: string) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-    if (errors[field]) {
-      setErrors(prev => ({ ...prev, [field]: '' }))
-    }
-  }
-
-  const validateForm = (): boolean => {
-    const newErrors: Record<string, string> = {}
-
-    if (!formData.title.trim()) {
-      newErrors.title = 'Il titolo è obbligatorio'
+      newParticipants = [
+        ...currentParticipants,
+        {
+          userId: participantData.userId,
+          name: participantData.name,
+          amount: 0, // Sarà ricalcolato
+          settled: false
+        }
+      ]
     }
 
-    if (!formData.amount || parseFloat(formData.amount) <= 0) {
-      newErrors.amount = 'Inserisci un importo valido'
-    }
-
-    if (formData.participants.length === 0) {
-      newErrors.participants = 'Seleziona almeno un partecipante'
-    }
-
-    setErrors(newErrors)
-    return Object.keys(newErrors).length === 0
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+    // Ricalcola split
+    const amount = currentAmount || 0
+    const splitAmount = newParticipants.length > 0 ? amount / newParticipants.length : 0
     
-    if (!validateForm() || !user) return
+    setValue('participants', newParticipants.map(p => ({
+      ...p,
+      amount: splitAmount
+    })))
+  }
+
+  const onFormSubmit = async (data: ExpenseFormData) => {
+    if (!user) return
 
     try {
       const expenseData: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'> = {
-        title: formData.title.trim(),
-        amount: parseFloat(formData.amount),
+        title: data.title.trim(),
+        amount: data.amount,
         paidBy: user.id,
-        participants: formData.participants,
-        eventId: formData.eventId || undefined
+        participants: data.participants,
+        eventId: data.eventId || undefined,
+        // Popola participantIds per le regole di sicurezza
+        participantIds: [user.id, ...data.participants.map(p => p.userId)]
       }
 
       await onSubmit(expenseData)
@@ -195,7 +194,7 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
             </button>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+          <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-6">
             {/* Title */}
             <div>
               <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
@@ -204,8 +203,7 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
               <input
                 type="text"
                 id="title"
-                value={formData.title}
-                onChange={(e) => handleChange('title', e.target.value)}
+                {...register('title')}
                 className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                   errors.title ? 'border-red-300' : 'border-gray-300'
                 }`}
@@ -213,7 +211,7 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                 disabled={isLoading}
               />
               {errors.title && (
-                <p className="mt-1 text-sm text-red-600">{errors.title}</p>
+                <p className="mt-1 text-sm text-red-600">{errors.title.message}</p>
               )}
             </div>
 
@@ -227,8 +225,7 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                   type="number"
                   step="0.01"
                   id="amount"
-                  value={formData.amount}
-                  onChange={(e) => handleChange('amount', e.target.value)}
+                  {...register('amount')}
                   className={`w-full px-3 py-2 pr-8 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
                     errors.amount ? 'border-red-300' : 'border-gray-300'
                   }`}
@@ -238,7 +235,7 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                 <span className="absolute right-3 top-2 text-gray-500">€</span>
               </div>
               {errors.amount && (
-                <p className="mt-1 text-sm text-red-600">{errors.amount}</p>
+                <p className="mt-1 text-sm text-red-600">{errors.amount.message}</p>
               )}
             </div>
 
@@ -249,13 +246,12 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
               </label>
               <select
                 id="eventId"
-                value={formData.eventId}
-                onChange={(e) => handleChange('eventId', e.target.value)}
+                {...register('eventId')}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
                 disabled={isLoading}
               >
                 <option value="">Nessun evento specifico</option>
-                {events.map(event => (
+                {selectableEvents.map(event => (
                   <option key={event.id} value={event.id}>
                     {event.title} - {new Date(event.date).toLocaleDateString('it-IT')}
                   </option>
@@ -290,8 +286,8 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                 
                 <div className="space-y-2 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2">
                   {availableParticipants.map(participant => {
-                    const isSelected = formData.participants.some(p => p.userId === participant.userId)
-                    const selectedParticipant = formData.participants.find(p => p.userId === participant.userId)
+                    const isSelected = currentParticipants.some(p => p.userId === participant.userId)
+                    const selectedParticipant = currentParticipants.find(p => p.userId === participant.userId)
                     
                     return (
                       <div key={participant.userId} className="flex items-center justify-between">
@@ -314,14 +310,14 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                   })}
                 </div>
                 
-                {formData.participants.length > 0 && (
+                {currentParticipants.length > 0 && (
                   <div className="mt-2 text-xs text-gray-600">
-                    Totale: {formData.participants.length} persone × {formData.participants.length > 0 ? (parseFloat(formData.amount || '0') / formData.participants.length).toFixed(2) : '0.00'}€ ciascuno
+                    Totale: {currentParticipants.length} persone × {currentParticipants.length > 0 ? (currentAmount / currentParticipants.length).toFixed(2) : '0.00'}€ ciascuno
                   </div>
                 )}
                 
                 {errors.participants && (
-                  <p className="mt-1 text-sm text-red-600">{errors.participants}</p>
+                  <p className="mt-1 text-sm text-red-600">{errors.participants.message}</p>
                 )}
               </div>
             )}
@@ -349,7 +345,7 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                 <button
                   type="submit"
                   className="flex-1 px-4 py-2 text-sm font-medium text-white bg-primary-600 border border-transparent rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
-                  disabled={isLoading || formData.participants.length === 0}
+                  disabled={isLoading}
                 >
                   {isLoading ? 'Salvando...' : (expense ? 'Aggiorna' : 'Crea')} Spesa
                 </button>

@@ -1,14 +1,17 @@
 import { BrowserRouter as Router, Routes, Route, useLocation, useNavigate } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import Layout from './components/Layout/Layout'
 import { checkFirebaseConfig, debugFirebaseConfig } from './firebase/utils'
 import HomePage from './pages/HomePage'
-import EventsPage from './pages/EventsPage-complete'
-import ExpensesPage from './pages/ExpensesPage-firebase'
-import PollsPage from './pages/PollsPage-firebase'
-import ListsPage from './pages/ListsPage-firebase'
+import EventsPage from './pages/EventsPage'
+import ExpensesPage from './pages/ExpensesPage'
+import PollsPage from './pages/PollsPage'
+import ListsPage from './pages/ListsPage'
 import LoginPage from './pages/LoginPage'
-import { useAuthStore } from './stores/useAuthStore'
+import { loadUserData, useAuthStore } from './stores/useAuthStore'
+import { useUserSettingsStore } from './stores/UserSettingsStore'
+import { initMessaging } from './firebase/messaging'
+import { startNotificationsListeners } from './services/notifications'
 import EventSummary from './pages/EventSummary'
 import SettingsPage from './pages/SettingsPage'
 import NotificationsPage from './pages/NotificationsPage'
@@ -35,6 +38,7 @@ function AppContent() {
   const { user, loading } = useAuthStore()
   const location = useLocation()
   const navigate = useNavigate()
+  const lastResumeRefreshAt = useRef(0)
 
   // Allow public share routes without requiring authentication
   const isPublicShare = location.pathname.startsWith('/share/e/')
@@ -56,6 +60,75 @@ function AppContent() {
       }
     }
   }, [user, loading, navigate])
+
+  // Initialize notifications and user settings on login
+  useEffect(() => {
+    if (user) {
+      const initUser = async () => {
+        try {
+          // 1. Load user settings (notifications, profile)
+          await useUserSettingsStore.getState().loadFromFirestore(user.id)
+          
+          // 2. Check if push is enabled and init messaging
+          const { notifications } = useUserSettingsStore.getState()
+          if (notifications.pushEnabled) {
+            console.log('🔔 Push enabled in settings, initializing messaging...')
+            await initMessaging(user.id)
+          }
+        } catch (e) {
+          console.error('❌ Error initializing user settings:', e)
+        }
+      }
+      initUser()
+    }
+  }, [user])
+
+  // Start realtime listener for in-app notifications (users/{uid}/notifications)
+  useEffect(() => {
+    if (!user?.id) return
+    const unsubscribe = startNotificationsListeners(user.id)
+    return () => {
+      try { unsubscribe?.() } catch {}
+    }
+  }, [user?.id])
+
+  // Refresh app data when returning to the app (Android often suspends background PWAs).
+  useEffect(() => {
+    if (!user?.id) return
+
+    const maybeRefresh = async (reason: string) => {
+      // Throttle to avoid repeated reloads on rapid focus/visibility changes
+      const now = Date.now()
+      if (now - lastResumeRefreshAt.current < 15000) return
+      lastResumeRefreshAt.current = now
+      try {
+        console.log(`🔄 Resume refresh (${reason})...`)
+        await loadUserData()
+      } catch (e) {
+        console.warn('⚠️ Resume refresh failed:', e)
+      }
+    }
+
+    const onVisibility = () => {
+      if (!document.hidden) {
+        void maybeRefresh('visibility')
+      }
+    }
+    const onFocus = () => {
+      void maybeRefresh('focus')
+    }
+
+    document.addEventListener('visibilitychange', onVisibility)
+    window.addEventListener('focus', onFocus)
+
+    // Also refresh once shortly after initial render when logged in
+    void maybeRefresh('initial')
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [user?.id])
 
   if (loading) {
     console.log('⏳ Showing loading spinner...')
@@ -94,7 +167,9 @@ function AppContent() {
         <Route path="/lists" element={<ListsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
-  <Route path="/notifications/settings" element={<NotificationPreferencesPage />} />
+          <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
+          {/* Backward compatible alias */}
+          <Route path="/notifications/settings" element={<NotificationPreferencesPage />} />
         <Route path="/chats" element={<ChatsPage />} />
         {/* Also accept share route here to support direct navigation when authenticated */}
         <Route path="/share/e/:id" element={<PublicEvent />} />

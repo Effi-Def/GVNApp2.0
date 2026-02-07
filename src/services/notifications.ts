@@ -1,4 +1,4 @@
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore'
+import { collection, onSnapshot, query, orderBy, limit, doc, updateDoc, writeBatch, where, getDocs } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { useNotificationsStore } from '../stores/useNotificationsStore'
 import { useUserSettingsStore } from '../stores/UserSettingsStore'
@@ -13,55 +13,120 @@ function showDesktopNotification(title: string, body: string) {
 
 export function startNotificationsListeners(currentUserId: string) {
   const add = useNotificationsStore.getState().add
+  const setAll = useNotificationsStore.getState().setAll
   const settings = useUserSettingsStore.getState().notifications
 
-  // Create a handler that skips the initial snapshot (to avoid duplicates on app open)
-  const makeHandler = (type: 'event' | 'expense' | 'poll' | 'list') => {
-    let initialized = false
-    return (snapshot: any) => {
-      if (!initialized) {
-        initialized = true
-        return
-      }
-      snapshot.docChanges().forEach((change: any) => {
-        if (change.type === 'added') {
-          const data = change.doc.data()
-          const id = change.doc.id
-          // skip self-authored
-          if (data.createdBy && data.createdBy === currentUserId) return
+  // Listen to the user's private notifications collection (populated by Cloud Functions)
+  const q = query(
+    collection(db, 'users', currentUserId, 'notifications'),
+    orderBy('createdAt', 'desc'),
+    limit(50)
+  )
 
-          const titleMap: Record<string, string> = {
-            event: 'Nuovo evento',
-            expense: 'Nuova spesa',
-            poll: 'Nuovo sondaggio',
-            list: 'Nuova lista',
-          }
-          const title = titleMap[type]
-          const message = data.title || data.description || 'Nuovo elemento creato'
-
-          // Build navigation target when possible
-          let actionUrl: string | undefined
-          if (type === 'event') actionUrl = `/events/${id}/summary`
-          else if (data.eventId) actionUrl = `/events/${data.eventId}/summary`
-
-          add({ type, title, message, createdAt: new Date(), actionUrl })
-          if (settings.desktopEnabled) {
-            showDesktopNotification(title, message)
-          }
-        }
-      })
-    }
+  const normalizeType = (raw: unknown) => {
+    const t = typeof raw === 'string' ? raw : ''
+    if (t === 'event' || t === 'expense' || t === 'poll' || t === 'list' || t === 'chat' || t === 'payment' || t === 'comment' || t === 'reminder') return t
+    return 'comment'
   }
 
-  const unsubEvents = onSnapshot(query(collection(db, 'events'), orderBy('createdAt', 'desc')), makeHandler('event'))
-  const unsubExpenses = onSnapshot(query(collection(db, 'expenses'), orderBy('createdAt', 'desc')), makeHandler('expense'))
-  const unsubPolls = onSnapshot(query(collection(db, 'polls'), orderBy('createdAt', 'desc')), makeHandler('poll'))
-  const unsubLists = onSnapshot(query(collection(db, 'lists'), orderBy('createdAt', 'desc')), makeHandler('list'))
+  const unsubscribe = onSnapshot(q, (snapshot) => {
+    // 1) Reconcile local store with server snapshot (prevents phantom persisted unread badge)
+    const next = snapshot.docs.map((d) => {
+      const data = d.data() as any
+      const createdAt = data?.createdAt?.toDate ? data.createdAt.toDate() : new Date()
+      return {
+        id: d.id,
+        type: normalizeType(data?.type) as any,
+        title: data?.title,
+        message: data?.message,
+        createdAt,
+        actionUrl: data?.actionUrl,
+        read: !!data?.read,
+        chatMention: !!data?.chatMention,
+      }
+    })
+    setAll(next)
 
-  return () => {
-    unsubEvents()
-    unsubExpenses()
-    unsubPolls()
-    unsubLists()
+    // 2) Desktop notifications for newly added unread items
+    snapshot.docChanges().forEach((change) => {
+      if (change.type !== 'added') return
+      const data = change.doc.data() as any
+      const createdAt = data?.createdAt?.toDate ? data.createdAt.toDate() : new Date()
+      if (!data?.read && settings.desktopEnabled) {
+        if (Date.now() - createdAt.getTime() < 60000) {
+          showDesktopNotification(data.title, data.message)
+        }
+      }
+
+      // Also ensure the added doc is present immediately even if setAll is delayed
+      add({
+        id: change.doc.id,
+        type: normalizeType(data?.type) as any,
+        title: data?.title,
+        message: data?.message,
+        createdAt,
+        actionUrl: data?.actionUrl,
+        read: !!data?.read,
+        chatMention: !!data?.chatMention,
+      })
+    })
+  })
+
+  return unsubscribe
+}
+
+export async function markChatNotificationsAsRead(userId: string) {
+  try {
+    const q = query(
+      collection(db, 'users', userId, 'notifications'),
+      where('read', '==', false),
+      limit(500)
+    )
+    const snapshot = await getDocs(q)
+    if (snapshot.empty) return
+
+    const batch = writeBatch(db)
+    let updates = 0
+    snapshot.docs.forEach(d => {
+      const data: any = d.data()
+      if (data?.type === 'chat') {
+        batch.update(d.ref, { read: true })
+        updates++
+      }
+    })
+    if (updates > 0) await batch.commit()
+  } catch (e) {
+    console.error('Error marking chat notifications as read:', e)
+  }
+}
+
+export const notificationService = {
+  async markAsRead(userId: string, notificationId: string) {
+    try {
+      const ref = doc(db, 'users', userId, 'notifications', notificationId)
+      await updateDoc(ref, { read: true })
+    } catch (e) {
+      console.error('Error marking notification as read:', e)
+    }
+  },
+  
+  async markAllAsRead(userId: string) {
+    try {
+      const q = query(
+        collection(db, 'users', userId, 'notifications'), 
+        where('read', '==', false),
+        limit(500)
+      )
+      const snapshot = await getDocs(q)
+      if (snapshot.empty) return
+
+      const batch = writeBatch(db)
+      snapshot.docs.forEach(d => {
+        batch.update(d.ref, { read: true })
+      })
+      await batch.commit()
+    } catch (e) {
+      console.error('Error marking all notifications as read:', e)
+    }
   }
 }

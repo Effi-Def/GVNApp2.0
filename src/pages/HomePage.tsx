@@ -66,9 +66,6 @@ const HomePage = () => {
       const eventDate = new Date(event.date)
       eventDate.setHours(0, 0, 0, 0)
       if (eventDate < today) return false
-      // Nascondi eventi a cui ho risposto "no"
-      const mine = (event.participants || []).find(p => p.userId === currentUserId)
-      if (mine && mine.status === 'no') return false
       return true
     })
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
@@ -406,10 +403,10 @@ const HomePage = () => {
         {(() => {
           // Helper: safe date
           const toDate = (d: any) => d instanceof Date ? d : new Date(d)
-          // Event IDs dove partecipo (yes/maybe) o che ho creato
+          // Event IDs dove partecipo (escludendo solo 'no') o che ho creato
           const myEventIds = new Set(
             events
-              .filter(ev => ev.createdBy === currentUserId || (ev.participants || []).some(p => p.userId === currentUserId && (p.status === 'yes' || p.status === 'maybe')))
+              .filter(ev => ev.createdBy === currentUserId || (ev.participants || []).some(p => p.userId === currentUserId && p.status !== 'no'))
               .map(ev => ev.id)
           )
 

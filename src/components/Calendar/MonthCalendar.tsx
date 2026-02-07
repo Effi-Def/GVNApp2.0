@@ -113,11 +113,6 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
   const eventsByDay = useMemo(() => {
     const map = new Map<string, Event[]>()
     for (const ev of events) {
-      // Determine user's participation status
-      const me = ev.participants?.find(p => p.userId === currentUserId)
-      const status = me?.status || 'none'
-      if (status === 'no') continue // do not show events the user declined
-
       const start = startOfDay(new Date(ev.date))
       const end = ev.endDate ? startOfDay(new Date(ev.endDate)) : start
       // iterate days from start to end inclusive
@@ -140,15 +135,18 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
   const isCurrentMonth = (d: Date) => d.getMonth() === firstDayOfMonth.getMonth()
 
   const getEventStyleClasses = (ev: Event) => {
-    const me = ev.participants?.find(p => p.userId === currentUserId)
-    const status = me?.status || 'none' // none = non ha ancora risposto → nuovo
-    switch (status) {
+    const fromParticipation = (ev as any).participation && typeof (ev as any).participation === 'object'
+      ? (ev as any).participation[currentUserId]
+      : undefined
+    const legacy = ev.participants?.find(p => p.userId === currentUserId)
+    switch ((fromParticipation?.status || legacy?.status || 'none') as 'yes' | 'maybe' | 'no' | 'none') {
       case 'yes':
         // Stronger green for better visibility
         return { label: 'bg-green-100 text-green-800 hover:bg-green-200', dot: 'bg-green-600 hover:bg-green-700' }
       case 'maybe':
         return { label: 'bg-gray-50 text-gray-700 hover:bg-gray-100', dot: 'bg-gray-400 hover:bg-gray-500' }
-      // 'no' viene escluso a monte, quindi non serve gestirlo qui
+      case 'no':
+        return { label: 'bg-gray-100 text-gray-700 hover:bg-gray-200', dot: 'bg-gray-500 hover:bg-gray-600' }
       default: // none → nuovo
         return { label: 'bg-red-50 text-red-700 hover:bg-red-100', dot: 'bg-red-500 hover:bg-red-600' }
     }
@@ -236,7 +234,12 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
           // Aggregate day status: red if any 'none', else green if any 'yes'
           let dayColor: 'red' | 'green' | null = null
           if (dayEvents.length > 0) {
-            const statuses = dayEvents.map(ev => (ev.participants?.find(p => p.userId === currentUserId)?.status || 'none'))
+            const statuses = dayEvents.map(ev => {
+              const fromParticipation = (ev as any).participation && typeof (ev as any).participation === 'object'
+                ? (ev as any).participation[currentUserId]
+                : undefined
+              return (fromParticipation?.status || ev.participants?.find(p => p.userId === currentUserId)?.status || 'none')
+            })
             if (statuses.includes('none')) dayColor = 'red'
             else if (statuses.includes('yes')) dayColor = 'green'
           }

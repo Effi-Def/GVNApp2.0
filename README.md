@@ -8,7 +8,7 @@ Hosting: https://gvnapp-e3e7d.web.app
 
 Ridurre l’attrito dell’organizzazione fra amici. In pratica: fissare una data (“stasera si gioca?”), vedere chi c’è, gestire quote e cose da portare, e parlare al volo con una chat per evento. Il tutto con notifiche leggere e “umane”.
 
-## � Funzionalità principali (oggi in produzione)
+## ✅ Funzionalità principali (oggi in produzione)
 
 - Eventi
    - Creazione/modifica con categorie, luogo, orari, priorità (low/medium/high)
@@ -47,7 +47,7 @@ Ridurre l’attrito dell’organizzazione fra amici. In pratica: fissare una dat
 - Firebase: Auth, Firestore, Storage, Functions (Node 20), Hosting
 - PWA: vite‑plugin‑pwa, Workbox
 
-## �️ Struttura (ridotta)
+## 🗂️ Struttura (ridotta)
 
 ```
 src/
@@ -85,7 +85,35 @@ Dove trovarli:
 
 Dopo aver aggiornato `.env.local`, riavvia il dev server o rifai la build.
 
-## 🔔 Notifiche: come funzionano
+## 🔔 Notifiche: Guida all'attivazione
+
+Per ricevere le notifiche push (messaggi, eventi, spese, ecc.) è necessario installare l'app come PWA. Ecco come fare:
+
+### 🤖 Android
+1. Apri **Chrome** e vai su `https://gvnapp-e3e7d.web.app`
+2. Tocca il menu (tre puntini in alto a destra)
+3. Seleziona **"Installa app"** o **"Aggiungi a schermata Home"**
+4. Apri l'app appena installata dalla schermata Home
+5. Al primo avvio (o andando in Impostazioni), accetta la richiesta di permessi per le notifiche
+
+### 🍎 iOS (iPhone/iPad)
+*Nota: Su iOS le notifiche web funzionano solo dalla versione 16.4 in poi e SOLO se l'app è aggiunta alla Home.*
+
+1. Apri **Safari** (obbligatorio, altri browser potrebbero non funzionare)
+2. Vai su `https://gvnapp-e3e7d.web.app`
+3. Tocca il tasto **Condividi** (quadrato con freccia in basso al centro)
+4. Scorri e seleziona **"Aggiungi alla schermata Home"**
+5. Apri l'app "GVNApp" che è apparsa sulla tua Home
+6. Vai in **Impostazioni** nell'app e assicurati che le notifiche siano attive. Quando richiesto da iOS, tocca **"Consenti"**
+
+### ⚠️ Risoluzione problemi
+Se non ricevi le notifiche:
+1. Vai in **Impostazioni** nell'app
+2. Clicca su **"Reset Service Worker ⚠️"**
+3. Ricarica l'app
+4. Clicca su **"Test push"** per verificare il funzionamento
+
+## 🔔 Notifiche: come funzionano (Tecnico)
 
 - SW dedicato `public/firebase-messaging-sw.js` gestisce `push` e `notificationclick` (background)
 - In app, `initMessaging()` chiede permesso e salva il token FCM nel documento utente (`users/{id}`)
@@ -108,7 +136,65 @@ Dopo aver aggiornato `.env.local`, riavvia il dev server o rifai la build.
 - Pagina mappa/assegnazione stanze in stile “piantina”
 - Modalità offline avanzata (draft queue, sync al ritorno rete)
 
-## � Link utili
+## 🧯 Bug backlog / Fix plan (work items)
+
+> Serve per allineare riproduzione + file target + “done”.  
+> Per procedere coi fix: condividi i file indicati (o conferma i path esatti nel repo).
+
+### (1) Duplicazioni form
+- **Sintomo:** lo stesso form esiste in più varianti/route/modal con logiche duplicate; bugfix non propagano.
+- **Ipotesi:** componenti “-complete/-firebase” divergenti o state duplicato tra modal/page.
+- **File target (probabili):** `src/components/**/**Form*.tsx`, `src/pages/**/*Form*.tsx`, `src/App.tsx` (routing), eventuali hook.
+- **Done:** un solo componente sorgente (o wrapper) + props tipizzate; rimosse duplicazioni o consolidate.
+
+### (2) Date miste (Timestamp/Date/string)
+- **Sintomo:** sorting/filtri incoerenti; UI che mostra date “sballate” o crash su `.toDate()`.
+- **Ipotesi:** conversione non centralizzata; write non normalizzati; campi opzionali non sanitizzati.
+- **File target (obbligatorio):** `src/services/firestore.ts` (helper `toDate`/sanitizzazione), `src/types/index.ts`.
+- **Done:** servizi convertono sempre in `Date` in lettura e scrivono `Timestamp` in scrittura; niente `undefined` verso Firestore.
+
+### (3) Spese senza evento invisibili
+- **Sintomo:** spese “globali”/senza `eventId` non compaiono in lista o non sono raggiungibili.
+- **Ipotesi:** query filtra solo per `eventId`/route richiede sempre id evento; UI non gestisce `null`.
+- **File target (probabili):** `src/services/firestore.ts` (expenseService query), `src/pages/Expenses*.tsx`, eventuale store spese.
+- **Done:** una vista/section “Senza evento” oppure supporto esplicito a `eventId: null|undefined` con query dedicata.
+
+### (4) iOS push incoerente
+- **Sintomo:** permessi/subscribe instabili; token non salvato; notifiche arrivano “a volte”.
+- **Ipotesi:** iOS richiede PWA installata + Safari; race tra SW registration e `getToken`; gestione errata di `Notification.permission`.
+- **File target (probabili):** `src/firebase/messaging.ts`, `public/firebase-messaging-sw.js`, eventuale UI settings notifiche.
+- **Done:** flow deterministico: registra SW → richiedi permesso (solo se installabile/standalone su iOS) → ottieni token → salva su `users/{id}`; retry + messaggi chiari.
+
+### (5) `as any` nello store
+- **Sintomo:** buchi di typing, possibili runtime error mascherati.
+- **Ipotesi:** stato iniziale o setter non tipizzati; payload Firestore “unknown”.
+- **File target (probabili):** `src/stores/*.ts`, `src/types/index.ts`.
+- **Done:** eliminati `as any`; typing esplicito e narrowing su dati esterni.
+
+### (6) Rounding importi (spese)
+- **Sintomo:** centesimi “fantasma”/somma quote != totale; UI mostra 9.999999 o 10.000001.
+- **Ipotesi:** uso di float senza normalizzazione; split quote senza arrotondamento coerente.
+- **File target (probabili):** calcolo bilanci (page/service/util), tipi importo.
+- **Done:** importi gestiti in **centesimi interi** o rounding centralizzato (es. `roundTo2` + invarianti); test su split e saldi.
+
+### (7) Errore durante l’iscrizione ad un evento (RSVP / join)
+- **Sintomo:** clic su “Partecipo / Forse / No” (o iscrizione) → errore e stato non salvato.
+- **Da incollare qui (fondamentale):**
+  - Messaggio completo in **console** (stacktrace) e eventuale `FirebaseError: ... (permission-denied|failed-precondition|invalid-argument|unauthenticated)`
+  - Payload minimo: `eventId`, azione scelta (yes/no/maybe), se l’utente è loggato, e se l’evento è pubblico/condiviso.
+- **Checklist debug veloce:**
+  - Verifica `auth.currentUser` presente al click (niente sessione scaduta).
+  - Se errore `permission-denied`: controlla **Firestore rules** su update di `events/{id}` (partecipanti / presence multi-day).
+  - Se errore `invalid-argument`: probabile write con `undefined` o tipo data non valido → sanitizzazione nel service.
+  - Se UI resta “ottimistica” ma poi rollback: gestire `catch` e mostrare errore + ripristino stato.
+- **File target (probabili):**
+  - `src/services/firestore.ts` (eventService: metodo RSVP/join/update partecipazione; sanitizzazione `undefined`; Timestamp/Date)
+  - `src/pages/EventsPage-*.tsx` / `src/pages/EventSummary*.tsx` (handler click + UI error)
+  - `firestore.rules` (permessi update campi partecipazione)
+  - eventuale store eventi (`src/stores/*.ts`)
+- **Done:** iscrizione affidabile (online), errore mostrato in modo chiaro, nessun write con `undefined`, regole allineate al modello dati.
+
+## 🔗 Link utili
 
 - React: https://react.dev
 - Vite: https://vitejs.dev

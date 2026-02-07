@@ -9,6 +9,51 @@ service cloud.firestore {
     function isOwner(userId) {
       return request.auth.uid == userId;
     }
+
+    function isParticipant(data) {
+      return ('participantIds' in data) && (request.auth.uid in data.participantIds);
+    }
+
+    function isVisibleByVisibility(data) {
+      return ('visibility' in data) && (
+        (data.visibility.type == 'public') ||
+        (data.visibility.type == 'restricted' && ('users' in data.visibility) && (request.auth.uid in data.visibility.users))
+      );
+    }
+
+    function canChatEvent(eventData) {
+      // Chat only after explicit confirmation (status=yes) when participation map exists.
+      return (
+        // creator
+        eventData.createdBy == request.auth.uid ||
+        // participation map (preferred)
+        (
+          ('participation' in eventData)
+            ? ((request.auth.uid in eventData.participation) && (eventData.participation[request.auth.uid].status == 'yes'))
+            : ((('participantIds' in eventData) && (request.auth.uid in eventData.participantIds)) || !('participantIds' in eventData))
+        )
+      );
+    }
+
+    function isSharedWith(data) {
+      return ('sharedWith' in data) && (request.auth.uid in data.sharedWith);
+    }
+
+    // Allow a signed-in user to join an event by adding themselves to participantIds/participants.
+    // This enables first-time participation updates without opening full write access.
+    function canJoinEvent() {
+      return isSignedIn() &&
+        // Must include participantIds in the incoming write
+        ('participantIds' in request.resource.data) &&
+        // User must be included in the new participantIds
+        (request.auth.uid in request.resource.data.participantIds) &&
+        // Must not remove existing participantIds
+        (!('participantIds' in resource.data) || request.resource.data.participantIds.hasAll(resource.data.participantIds)) &&
+        // If participantIds existed, only one new id can be added (the caller)
+        (!('participantIds' in resource.data) || request.resource.data.participantIds.size() == resource.data.participantIds.size() + 1) &&
+        // Non-participants may only touch these fields while joining
+        request.resource.data.diff(resource.data).changedKeys().hasOnly(['participants', 'participantIds', 'participation', 'updatedAt']);
+    }
     
     // Users collection
     match /users/{userId} {
@@ -16,18 +61,38 @@ service cloud.firestore {
       allow read: if isSignedIn();
       // Users can only write their own profile
       allow write: if isSignedIn() && isOwner(userId);
+
+      // In-app notifications subcollection (written by Cloud Functions, read by the owner)
+      match /notifications/{notificationId} {
+        allow read: if isSignedIn() && isOwner(userId);
+        // Client should not create notifications; they are generated server-side
+        allow create: if false;
+        // Owner can mark as read / delete
+        allow update, delete: if isSignedIn() && isOwner(userId);
+      }
     }
     
     // Events collection
     match /events/{eventId} {
-      // Anyone authenticated can read events
-      allow read: if isSignedIn();
+      // Allow read if public, participant, or creator
+      // BACKWARD COMPATIBILITY: Allow read if participantIds is missing (legacy events)
+      allow read: if isSignedIn() && (
+        resource.data.publicShareEnabled == true || 
+        isVisibleByVisibility(resource.data) ||
+        isParticipant(resource.data) ||
+        resource.data.createdBy == request.auth.uid ||
+        !('participantIds' in resource.data)
+      );
       // Anyone authenticated can create events
       allow create: if isSignedIn();
-      // Only the creator can update/delete
-      allow update, delete: if isSignedIn() && 
-        (resource.data.createdBy == request.auth.uid || 
-         request.auth.uid in resource.data.participants);
+      // Creator can do anything, participants can update their participation
+      allow update: if isSignedIn() && 
+        (
+          resource.data.createdBy == request.auth.uid || 
+          isParticipant(resource.data) ||
+          canJoinEvent()
+        );
+      allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
     }
     
     // Event participants subcollection
@@ -36,16 +101,23 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
     
-    // Chats collection
-    match /chats/{chatId} {
-      allow read: if isSignedIn() && 
-        request.auth.uid in resource.data.participants;
-      allow create: if isSignedIn();
-      allow update: if isSignedIn() && 
-        request.auth.uid in resource.data.participants;
+    // Event messages subcollection (chat)
+    match /events/{eventId}/messages/{messageId} {
+      allow read, create: if isSignedIn() && canChatEvent(get(/databases/$(database)/documents/events/$(eventId)).data);
+      
+      allow update, delete: if isSignedIn() && 
+        resource.data.userId == request.auth.uid &&
+        request.time < resource.data.createdAt + duration.value(15, 'm');
     }
     
-    // Chat messages subcollection
+    // Chats collection (if used elsewhere)
+    match /chats/{chatId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+    }
+    
+    // Chat messages subcollection (if used elsewhere)
     match /chats/{chatId}/messages/{messageId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
@@ -53,20 +125,27 @@ service cloud.firestore {
     
     // Expenses collection
     match /expenses/{expenseId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (
+        isParticipant(resource.data) || 
+        resource.data.paidBy == request.auth.uid ||
+        !('participantIds' in resource.data)
+      );
       allow create: if isSignedIn();
       allow update, delete: if isSignedIn() && 
         (resource.data.paidBy == request.auth.uid || 
-         request.auth.uid in resource.data.splitBetween);
+         isParticipant(resource.data));
     }
     
     // Lists collection
     match /lists/{listId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() && (
+        resource.data.createdBy == request.auth.uid ||
+        isSharedWith(resource.data)
+      );
       allow create: if isSignedIn();
       allow update, delete: if isSignedIn() && 
         (resource.data.createdBy == request.auth.uid ||
-         request.auth.uid in get(/databases/$(database)/documents/lists/$(listId)).data.sharedWith);
+         isSharedWith(resource.data));
     }
     
     // List items subcollection

@@ -91,6 +91,9 @@ public
 tmp/
 temp/
 
+# Local backups
+backups/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

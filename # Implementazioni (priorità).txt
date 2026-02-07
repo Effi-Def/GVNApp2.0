@@ -1,0 +1,395 @@
+# Implementazioni (priorità)
+
+Questo file serve come backlog ordinato per priorità per le **future implementazioni**.
+
+> Revisione: allineata a scelte architetturali su **Fattorie (maiali)**, visibilità vs partecipazione, spese/eventi, date, chat e notifiche.
+>
+> Tema narrativo mantenuto: **La fattoria degli animali** (maiali, Re Maiale, ecc.).
+
+---
+
+## Convenzioni
+
+- **P0** = urgente/bloccante, **P1** = alta, **P2** = media, **P3** = bassa.
+- **Status**: `todo` | `in-progress` | `blocked` | `done`.
+- Per ogni item: descrizione breve, note tecniche, file coinvolti, checklist.
+
+## Workflow (triage)
+
+- **Ready** = Obiettivo + Note tecniche minime + File coinvolti + Acceptance criteria + Test plan
+- **WIP limit**: max 2 item `in-progress` per volta (soprattutto su P0/P1)
+- **Done** = acceptance criteria spuntati + test plan eseguito + note deploy (se applicabile)
+
+---
+
+## Backlog (ordinato e rivisto)
+
+| ID | Priorità | Status | Tipo | Area | Effort | Titolo | Owner | Link |
+|---:|:--------:|:------:|:----:|:----:|:------:|--------|-------|------|
+| 000 | P0 | in-progress | refactor | core | L | Separazione Visibilità vs Partecipazione Evento |  |  |
+| 001 | P1 | todo | feature | groups | L | Fattorie (Maiali) + Visibilità eventi |  |  |
+| 002 | P1 | todo | refactor | data | M | Normalizzazione Date / Timestamp |  |  |
+| 003 | P1 | todo | decision | expenses | S | Decisione: Spese sempre legate a Evento |  |  |
+| 004 | P1 | done | refactor | chat | M | Refactor Chat: Thread vs Composer |  |  |
+| 005 | P0 | done | bug | chat | S | Chat popup Home: manca input messaggio |  |  |
+| 006 | P2 | todo | refactor | ux | M | Pulizia UX: spese/sondaggi dentro Summary/Home |  |  |
+| 007 | P1 | todo | refactor | shared | M | Coerenza select eventi + nascondi eventi finiti |  |  |
+| 008 | P1 | done | bug | notifications | S | Notifiche: sparire dopo lettura |  |  |
+
+---
+
+## Template item
+
+### [ID] Titolo (P?)
+- **Status:** todo
+- **Tipo/Area/Effort:** bug | area | S/M/L
+- **Obiettivo:**
+- **UX / Copy:**
+- **Note tecniche:**
+- **File coinvolti:**
+  - 
+- **Acceptance criteria:**
+  - [ ] 
+- **Rischi / Edge cases:**
+- **Test plan:**
+  - [ ] 
+- **Note deploy:**
+  - 
+
+---
+
+## Item di base (fondazionali)
+
+### [000] Separazione Visibilità vs Partecipazione Evento (P0)
+- **Status:** in-progress
+- **Tipo/Area/Effort:** refactor | core | L
+
+- **Progress (groundwork):**
+  - Stato: implementazione completata lato codice; in attesa di smoke test manuale per chiudere `done`
+  - Tipi aggiornati: `visibility` / `participation` (backward-compatible)
+  - Service layer: lettura `participation` + dual-write in `updateParticipation()` (mantiene anche `participants[]` e `participantIds`)
+  - Presence per-giorno: bloccata se non hai RSVP `yes` (niente creazioni implicite)
+  - Chat: accesso solo dopo RSVP `yes` (UI + rules)
+  - Regole Firestore: lettura evento anche via `visibility` (`public` / `restricted.users`)
+  - Verifica: `npm run build` OK
+
+- **Obiettivo:**
+  - Separare in modo esplicito:
+    - **Chi può vedere un evento** (visibilità)
+    - **Chi e come partecipa** (partecipazione)
+
+- **Decisioni UX:**
+  - Un evento visibile tramite Fattoria:
+    - appare in lista eventi e calendario
+    - NON crea automaticamente una partecipazione
+    - stato iniziale implicito: "irrisolto"
+
+- **Dominio (modello dati evento - bozza):**
+  - Nota: questa è una bozza di riferimento. Va tradotta poi nei tipi reali in `src/types` e nei servizi Firestore.
+
+  visibility:
+    - type: public | restricted
+    - farms: FarmId[]
+    - users: UserId[]
+
+  participation:
+    - [userId]:
+        - status: yes | maybe | no | left
+        - role: owner | member
+        - accessLevel: full | readonly | none
+
+- **Regole partecipazione:**
+  - La partecipazione viene creata solo su interazione (es. clic RSVP).
+  - `status = no` => `accessLevel = readonly`
+  - `status = left` o ban => `accessLevel = none`
+
+- **File coinvolti:**
+  - `src/types/*` (event model)
+  - `src/services/firestore.ts` (eventService)
+  - `firestore.rules`
+
+- **Acceptance criteria:**
+  - [x] Evento visibile senza creare partecipazione (via `visibility.type` + `visibility.users`; “farms” arriva con [001])
+  - [x] Partecipazione creata solo su interazione (RSVP)
+  - [x] Nessuna logica implicita visibility => participation
+
+- **Test plan:**
+  - [x] `npm run build`
+  - [ ] Utente in fattoria vede evento, ma non risulta partecipante finché non clicca RSVP
+  - [ ] Utente con status=no vede evento in readonly (grigio) e non può scrivere
+
+---
+
+## Feature principali
+
+### [001] Fattorie (Maiali) + Visibilità eventi (P1)
+- **Status:** todo
+- **Tipo/Area/Effort:** feature | groups | L
+
+- **Obiettivo:**
+  - Introdurre le **Fattorie** come gruppi tematici.
+  - Ogni utente può appartenere a più fattorie.
+  - Il creatore dell’evento (**Re Maiale**) sceglie la visibilità:
+    - Pubblico
+    - Solo Fattorie selezionate
+    - Fattorie + Maiali invitati (one-shot)
+
+- **Creazione fattoria:**
+  - Chiunque può creare fattorie (nessun limite iniziale).
+  - Nota futura: introdurre piano a pagamento per “più di X fattorie”.
+
+- **Membership fattorie (decisione):**
+  - Meccanismo: **link/codice di invito** che genera una **richiesta pendente** (non ingresso automatico).
+  - Il Re Maiale approva/nega.
+  - Nessuna directory globale utenti.
+
+- **Dominio / Ruoli:**
+  - **Owner = Re Maiale**
+    - gestisce fattoria, membri, eventi, richieste di ingresso
+  - **Member = Maiale**
+    - può creare spese/liste/sondaggi se `accessLevel = full`
+  - Visibilità evento ≠ partecipazione evento (vedi [000]).
+
+- **Uscita/ban:**
+  - Uscita/ban da fattoria:
+    - perde visibilità degli eventi passati: Sì
+    - può vedere spese/sondaggi creati in passato: No
+
+- **UX / Copy:**
+  - Pagina dedicata “Fattorie”
+  - Creazione fattoria: nome (es. “Fattoria di ...”)
+  - Invito: bottone “Invita maiali” => copia link
+  - Richieste pendenti visibili solo al Re Maiale
+  - Badge evento: `Pubblico` / `Riservato`
+  - Mostrare solo nomi delle Fattorie e/o conteggi, mai elenco membri (privacy)
+
+- **Punti aperti (da definire):**
+  - [ ] UI e regole per evento multi-fattoria (filtri, badge, notifiche)
+  - [ ] Trasferimento ownership in caso di ban dell’Owner (vedi “Decisioni finali”)
+
+- **Acceptance criteria:**
+  - [ ] Creazione fattoria libera
+  - [ ] Ingresso solo previa approvazione Re Maiale (richiesta pendente)
+  - [ ] Nessuna lista globale utenti
+  - [ ] Evento riservato visibile solo se matcha `visibility` (fattorie e/o utenti one-shot)
+  - [ ] Member con `status=no` => evento grigio/readonly solo per quel member
+  - [ ] Member può creare spese/liste/sondaggi solo con `accessLevel=full`
+
+- **Test plan:**
+  - [ ] Join via link => richiesta pendente
+  - [ ] Approva => utente vede eventi futuri (vedi “Decisioni finali”)
+  - [ ] Decline partecipazione => readonly per quel member
+
+---
+
+## Refactor e decisioni chiave
+
+### [002] Normalizzazione Date / Timestamp (P1)
+- **Status:** todo
+- **Tipo/Area/Effort:** refactor | data | M
+
+- **Obiettivo:**
+  - Eliminare `Date`/`Timestamp`/string mischiate.
+  - Regola ferrea:
+    - UI => `Date`
+    - Firestore => `Timestamp`
+    - Conversione solo in un mapper centrale (nei services).
+
+- **Note tecniche:**
+  - Implementare (o rinforzare) mapper centralizzato in service layer:
+    - `fromFirestore`: Timestamp => Date
+    - `toFirestore`: Date => Timestamp + rimozione `undefined`
+
+- **File coinvolti:**
+  - `src/services/firestore.ts` (mappers/cleaners)
+  - `src/types/*`
+
+- **Acceptance criteria:**
+  - [ ] Nessun `.toDate()` sparso nel codice UI
+  - [ ] Nessun `undefined` scritto su Firestore
+  - [ ] Date coerenti in eventi/spese/sondaggi/liste
+
+- **Test plan:**
+  - [ ] Creazione e lettura eventi con date: nessun crash, date coerenti
+  - [ ] Audit grep: `.toDate()` solo nel service layer
+
+---
+
+### [003] Decisione: Spese sempre legate a Evento (P1)
+- **Status:** todo
+- **Tipo/Area/Effort:** decision | expenses | S
+
+- **Decisione:**
+  - Ogni spesa deve appartenere a un evento.
+  - Nessuna spesa “globale”.
+
+- **Conseguenze UX:**
+  - Se l’utente tenta di creare una spesa senza evento:
+    - suggerire creazione evento (anche senza data) oppure selezione evento obbligatoria.
+
+- **Acceptance criteria:**
+  - [ ] Nessuna spesa senza `eventId`
+  - [ ] UI impedisce creazione spesa senza selezionare evento
+
+---
+
+### [004] Refactor Chat: Thread vs Composer (P1)
+- **Status:** done
+- **Tipo/Area/Effort:** refactor | chat | M
+
+- **Obiettivo:**
+  - Separare visualizzazione messaggi e input:
+    - ChatThread (lista messaggi)
+    - ChatComposer (input + invio)
+
+- **Permessi chat:**
+  - `accessLevel = full` => leggere + scrivere
+  - `accessLevel = readonly` => solo lettura
+  - `accessLevel = none` => chat non visibile
+
+- **Note:**
+  - I messaggi restano visibili anche se un maiale esce dopo (policy da confermare quando si definiscono regole e retention).
+
+- **Acceptance criteria:**
+  - [x] Separata visualizzazione messaggi e input (Thread vs Composer)
+  - [x] Chat popup Home mostra input se permesso
+
+- **Note tecniche (implementato):**
+  - Refactor eseguito in `src/components/Chat/EventChat.tsx` introducendo componenti interni `ChatThread` e `ChatComposer`.
+  - Aggiunta prop `canWrite?: boolean` su `EventChat` (override) + calcolo default basato su creator/partecipanti.
+
+- **Test plan:**
+  - [x] `npm run build` (tsc + vite build)
+  - [ ] Smoke test manuale: aprire chat evento e inviare messaggio (desktop + mobile emulation)
+
+---
+
+## Bug / UX
+
+> Naming UI: usare solo “Fattoria” / “Maiali” (niente alias “Gruppo”).
+
+### [005] Chat popup Home: manca input messaggio (P0)
+- **Status:** done
+- **Tipo/Area/Effort:** bug | chat | S
+- **Dipende da:** [004]
+
+- **Obiettivo:**
+  - Ripristinare input + invio nel popup chat, rispettando i permessi (`accessLevel`).
+
+- **Acceptance criteria:**
+  - [x] Popup chat mostra input se permesso (creator o partecipante con status != `no`)
+  - [x] Input non visibile se non permesso
+  - [x] Build ok (nessun errore TS)
+
+- **Note tecniche (fix):**
+  - In `src/components/Chat/ChatFloatingLauncher.tsx`: render `EventChat` in container `flex-1 min-h-0` per garantire visibilità del composer nel popup.
+  - Passata prop `canWrite` al popup e alla pagina chat.
+
+- **Test plan:**
+  - [x] `npm run build`
+  - [ ] Verifica manuale: da Home → popup chat → seleziona evento → invio ok (desktop + mobile)
+
+---
+
+### [006] Pulizia UX: spese/sondaggi dentro Summary/Home (P2)
+- **Status:** todo
+- **Tipo/Area/Effort:** refactor | ux | M
+
+- **Obiettivo:**
+  - Centralizzare la creazione contenuti nel contesto evento (Event Summary) e ridurre la creazione “sparsa” su pagine globali.
+
+- **Acceptance criteria:**
+  - [ ] Spese e sondaggi creati principalmente da Summary evento (minimo)
+  - [ ] Pagine globali diventano consultazione (o vengono ridotte) senza regressioni
+
+---
+
+### [007] Coerenza select eventi + nascondi eventi finiti (P1)
+- **Status:** todo
+- **Tipo/Area/Effort:** refactor | shared | M
+
+- **Problema attuale:**
+  - Eventi non compaiono in select per Spese e Liste.
+  - Per Sondaggi vengono mostrati tutti.
+  - Serve una policy per rimuovere eventi finiti dopo N giorni o con opzione “Mostra finiti”.
+
+- **Obiettivo:**
+  - Un’unica funzione `getSelectableEvents()` condivisa da Spese/Liste/Sondaggi.
+  - Policy su eventi finiti (grace period) applicata ovunque.
+
+- **Acceptance criteria:**
+  - [ ] Spese, Liste, Sondaggi usano stessa logica select
+  - [ ] Eventi finiti non mostrati dopo N giorni (o toggle “Mostra finiti”)
+
+- **Progress (parziale):**
+  - Fix immediato: eventi ora ricompaiono nelle select (Spese/Liste/Sondaggi) usando `filterSelectableEvents()` basato su `userCanViewEvent` (non più solo `accessLevel=full`)
+  - Hardening: Spese/Liste ora caricano eventi anche se fallisce il fetch di spese/liste/pagamenti (evita select vuota se una collection ha permessi/rules diverse)
+  - Deploy: hosting aggiornato
+
+
+---
+
+### [008] Notifiche: sparire dopo lettura (P1)
+- **Status:** done
+- **Tipo/Area/Effort:** bug | notifications | S
+
+- **Problema attuale:**
+  - Le notifiche non spariscono una volta lette.
+
+- **Obiettivo:**
+  - Stato di lettura persistente + UI reattiva (vista “Non lette”).
+
+- **Progress:**
+  - Persistenza lettura: la pagina Notifiche ora scrive `read=true` su Firestore quando apri una notifica o usi “Segna tutte come lette”
+  - UI: risolto mismatch badge/lista dovuto a rehydration persist (migrazione) + reconcile store con snapshot Firestore (evita notifiche “fantasma”)
+  - Fix impostazioni: merge dei default quando si caricano le preferenze da Firestore (evita toggle che tornano “spenti” se il documento è parziale)
+  - Fix badge che ricompare: rimosso “mark-all-read” implicito (solo locale) quando apri il maialino su mobile/navbar (prima svuotava la lista ma non salvava su Firestore)
+  - Verifica: `npm run build` OK
+  - File: `src/pages/NotificationsPage.tsx`, `src/services/notifications.ts`, `src/stores/useNotificationsStore.ts`
+
+- **Acceptance criteria:**
+  - [x] Marcando una notifica come letta, sparisce dalla vista “Non lette” senza refresh
+  - [x] Stato persistito (reload pagina: non torna non-letta)
+
+- **Note deploy:**
+  - Hosting aggiornato: https://gvnapp-e3e7d.web.app
+
+---
+
+## Decisioni Finali (confermate)
+
+### 1) Richieste di ingresso in Fattoria
+- Meccanismo: link di invito
+- Stato: richiesta pendente
+- Scadenza: la richiesta decade se il link viene rigenerato (opzione “rigenera link”)
+- Nessuna scadenza temporale automatica
+
+### 2) Visibilità eventi per nuovi membri
+- Un maiale che entra vede solo gli eventi futuri
+- Eventi passati: non visibili
+- Eventi senza data ma creati prima dell’ingresso: non visibili
+
+### 3) Creazione della partecipazione a un evento
+- La partecipazione viene creata solo quando il maiale clicca:
+  - Partecipo / Forse / Non partecipo
+- Non creano partecipazione:
+  - apertura del dettaglio evento (solo descrizione/info generali)
+  - lettura passiva
+  - visualizzazione calendario
+- La chat evento diventa accessibile solo dopo “Partecipo” (status=yes)
+
+### 4) Notifiche ed engagement
+- Evento nuovo nella Fattoria: notifica inviata anche ai non partecipanti
+- Stato iniziale evento per il maiale: “irrisolto”
+- Nessuna notifica successiva finché non interagisce
+
+### 5) Ban e ownership
+- Quando un maiale viene bannato dalla Fattoria:
+  - perde accesso a tutti gli eventi e contenuti della Fattoria
+  - ownership degli eventi creati viene trasferita (Re Maiale o sistema) (TBD: definire regola precisa)
+  - storico preservato
+
+### 6) Naming e dominio
+- Entità principali: Fattoria / Maiali
+- Nessun alias “Gruppo” in UI
+- Naming ispirato a La fattoria degli animali mantenuto come riferimento concettuale
