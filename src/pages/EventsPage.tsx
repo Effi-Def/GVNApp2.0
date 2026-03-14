@@ -13,7 +13,7 @@ const EventsPage = () => {
   const navigate = useNavigate()
   const location = useLocation()
   // Usa lo store centrale per avere eventi sincronizzati in tutta l'app
-  const { events, setEvents, addEvent, updateEvent, deleteEvent, expenses, polls, lists, setExpenses, setPolls, setLists } = useAppStore() as any
+  const { events, setEvents, addEvent, updateEvent, deleteEvent, expenses, polls, lists, setExpenses, setPolls, setLists } = useAppStore()
   const { notifications } = useUserSettingsStore()
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)

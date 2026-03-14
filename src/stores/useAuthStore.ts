@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { User } from '../types'
 import { auth, storage } from '../firebase/config'
 import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth'
+import { toDate } from '../utils/dates'
 
 interface AuthState {
   user: User | null
@@ -25,14 +26,24 @@ export const useAuthStore = create<AuthState>((set) => ({
       const result = await signInWithPopup(auth, provider)
       const firebaseUser = result.user
       
+      // Try to read the real createdAt from the user's Firestore document
+      let firestoreCreatedAt: Date = new Date()
+      try {
+        const { userService } = await import('../services/firestore')
+        const userData = await userService.get(firebaseUser.uid)
+        firestoreCreatedAt = toDate(userData?.profile?.createdAt) ?? new Date()
+      } catch {
+        // Non-blocking: fallback to now if Firestore is unreachable
+      }
+
       const user: User = {
         id: firebaseUser.uid,
         email: firebaseUser.email || '',
         displayName: firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'Utente'),
         photoURL: firebaseUser.photoURL || undefined,
-        createdAt: new Date()
+        createdAt: firestoreCreatedAt
       }
-      
+
       set({ user, loading: false })
       // Prefetch shared avatars right after first sign-in for instant Settings load
       try {

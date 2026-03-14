@@ -74,14 +74,13 @@ service cloud.firestore {
     
     // Events collection
     match /events/{eventId} {
-      // Allow read if public, participant, or creator
-      // BACKWARD COMPATIBILITY: Allow read if participantIds is missing (legacy events)
+      // Allow read if: publicly shared, visible by visibility settings, participant, or creator.
+      // Legacy events without participantIds: only creator can read (backdoor rimossa).
       allow read: if isSignedIn() && (
-        resource.data.publicShareEnabled == true || 
+        resource.data.publicShareEnabled == true ||
         isVisibleByVisibility(resource.data) ||
         isParticipant(resource.data) ||
-        resource.data.createdBy == request.auth.uid ||
-        !('participantIds' in resource.data)
+        resource.data.createdBy == request.auth.uid
       );
       // Anyone authenticated can create events
       allow create: if isSignedIn();

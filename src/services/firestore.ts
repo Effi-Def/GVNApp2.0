@@ -16,9 +16,56 @@ import {
 } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import { Event, Expense, Poll, ShoppingList, PaymentTransaction, ChatMessage, ChatAttachment, ChatReactionKey, EventParticipation, EventParticipationStatus } from '../types'
+import { toDate } from '../utils/dates'
 import { APP_CONFIG } from '../constants'
 import { storage } from '../firebase/config'
 import { ref, getDownloadURL, uploadBytesResumable } from 'firebase/storage'
+
+// ─── Shared event mapping helper ────────────────────────────────────────────
+// Maps a raw Firestore document to a typed Event, handling all date coercions.
+function mapEventDoc(id: string, data: any): Event {
+  const participants = Array.isArray(data.participants)
+    ? data.participants.map((p: any) => ({
+        ...p,
+        respondedAt: toDate(p?.respondedAt) ?? new Date(),
+        days: p?.days ?? undefined,
+      }))
+    : []
+
+  const participation: Record<string, EventParticipation> | undefined = (() => {
+    const raw = data.participation
+    if (!raw || typeof raw !== 'object') return undefined
+    const out: Record<string, EventParticipation> = {}
+    for (const [uid, entry] of Object.entries(raw)) {
+      const e: any = entry
+      if (!e || typeof e !== 'object') continue
+      const status = e.status as EventParticipationStatus | undefined
+      const accessLevel = e.accessLevel as EventParticipation['accessLevel'] | undefined
+      if (!status || !accessLevel) continue
+      out[uid] = {
+        status,
+        accessLevel,
+        role: e.role,
+        respondedAt: toDate(e.respondedAt),
+      }
+    }
+    return Object.keys(out).length ? out : undefined
+  })()
+
+  return {
+    id,
+    ...data,
+    participants,
+    participation,
+    publicShareEnabled: data.publicShareEnabled !== false,
+    createdAt: toDate(data.createdAt) ?? new Date(),
+    updatedAt: toDate(data.updatedAt) ?? new Date(),
+    date: toDate(data.date) ?? new Date(),
+    endDate: toDate(data.endDate),
+    chatLastActivityAt: toDate(data.chatLastActivityAt),
+  } as Event
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 // Events Service
 export const eventService = {
@@ -35,24 +82,23 @@ export const eventService = {
       // Extract participant IDs for security rules (visibility does NOT imply participation)
       const participantIds = (eventData.participants || []).map(p => p.userId)
 
-      // Ensure creator has an explicit participation entry (groundwork for [000])
-      const participation = (() => {
-        const createdBy = (eventData as any).createdBy
-        if (!createdBy) return (eventData as any).participation
-        const base = (eventData as any).participation && typeof (eventData as any).participation === 'object'
-          ? { ...(eventData as any).participation }
-          : {}
-        if (!base[createdBy]) {
-          base[createdBy] = {
+      // Ensure creator has an explicit participation entry
+      const participation: Record<string, EventParticipation> = (() => {
+        const base: Record<string, EventParticipation> =
+          eventData.participation && typeof eventData.participation === 'object'
+            ? { ...eventData.participation }
+            : {}
+        if (eventData.createdBy && !base[eventData.createdBy]) {
+          base[eventData.createdBy] = {
             status: 'yes',
             accessLevel: 'full',
             role: 'owner',
-            respondedAt: Timestamp.now(),
+            respondedAt: new Date(),
           }
         }
         return base
       })()
-      
+
       const docRef = await addDoc(collection(db, 'events'), {
         ...cleanEventData,
         participantIds,
@@ -61,12 +107,12 @@ export const eventService = {
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now()
       })
-      
+
       const newEvent: Event = {
         id: docRef.id,
         ...eventData,
         participantIds,
-        participation: participation as any,
+        participation,
         createdAt: new Date(),
         updatedAt: new Date()
       }
@@ -81,124 +127,23 @@ export const eventService = {
 
   // Get all events
   async getAll(): Promise<Event[]> {
-    // Helper to coerce various date shapes to Date safely
-    const toDate = (v: any): Date | undefined => {
-      if (!v) return undefined
-      if (v instanceof Date) return v
-      if (typeof v?.toDate === 'function') return v.toDate()
-      if (typeof v === 'string' || typeof v === 'number') {
-        const d = new Date(v)
-        return isNaN(d.getTime()) ? undefined : d
-      }
-      return undefined
-    }
-
     try {
       console.log('📅 Fetching all events (ordered by date desc)')
       const q = query(
-        collection(db, 'events'), 
+        collection(db, 'events'),
         orderBy('date', 'desc'),
         limit(APP_CONFIG.PAGINATION_LIMIT)
       )
       const querySnapshot = await getDocs(q)
-
-      const events: Event[] = querySnapshot.docs.map(d => {
-        const data: any = d.data()
-        const participants = Array.isArray(data.participants)
-          ? data.participants.map((p: any) => ({
-              ...p,
-              respondedAt: toDate(p?.respondedAt) || new Date(),
-              days: p?.days || undefined,
-            }))
-          : []
-
-        const participation: Record<string, EventParticipation> | undefined = (() => {
-          const raw = data.participation
-          if (!raw || typeof raw !== 'object') return undefined
-          const out: Record<string, EventParticipation> = {}
-          for (const [uid, entry] of Object.entries(raw)) {
-            const e: any = entry
-            if (!e || typeof e !== 'object') continue
-            const status = e.status as EventParticipationStatus | undefined
-            const accessLevel = e.accessLevel as any
-            if (!status || !accessLevel) continue
-            out[uid] = {
-              status,
-              accessLevel,
-              role: e.role,
-              respondedAt: toDate(e.respondedAt),
-            }
-          }
-          return Object.keys(out).length ? out : undefined
-        })()
-
-        return {
-          id: d.id,
-          ...data,
-          participants,
-          participation,
-          publicShareEnabled: data.publicShareEnabled !== false,
-          createdAt: toDate(data.createdAt) || new Date(),
-          updatedAt: toDate(data.updatedAt) || new Date(),
-          date: toDate(data.date) || new Date(),
-          endDate: toDate(data.endDate),
-          chatLastActivityAt: toDate((data as any).chatLastActivityAt),
-        } as Event
-      })
-
+      const events = querySnapshot.docs.map(d => mapEventDoc(d.id, d.data()))
       console.log(`✅ Fetched ${events.length} events`)
       return events
     } catch (error) {
       console.warn('⚠️ Ordered query failed, falling back to unordered fetch:', error)
-      // Fallback: fetch without order and sort client-side
       try {
-        const col = collection(db, 'events')
-        const snap = await getDocs(col)
-        const events: Event[] = snap.docs.map(d => {
-          const data: any = d.data()
-          const participants = Array.isArray(data.participants)
-            ? data.participants.map((p: any) => ({
-                ...p,
-                respondedAt: toDate(p?.respondedAt) || new Date(),
-                days: p?.days || undefined,
-              }))
-            : []
-
-          const participation: Record<string, EventParticipation> | undefined = (() => {
-            const raw = data.participation
-            if (!raw || typeof raw !== 'object') return undefined
-            const out: Record<string, EventParticipation> = {}
-            for (const [uid, entry] of Object.entries(raw)) {
-              const e: any = entry
-              if (!e || typeof e !== 'object') continue
-              const status = e.status as EventParticipationStatus | undefined
-              const accessLevel = e.accessLevel as any
-              if (!status || !accessLevel) continue
-              out[uid] = {
-                status,
-                accessLevel,
-                role: e.role,
-                respondedAt: toDate(e.respondedAt),
-              }
-            }
-            return Object.keys(out).length ? out : undefined
-          })()
-
-          return {
-            id: d.id,
-            ...data,
-            participants,
-            participation,
-            publicShareEnabled: data.publicShareEnabled !== false,
-            createdAt: toDate(data.createdAt) || new Date(),
-            updatedAt: toDate(data.updatedAt) || new Date(),
-            date: toDate(data.date) || new Date(),
-            endDate: toDate(data.endDate),
-            chatLastActivityAt: toDate((data as any).chatLastActivityAt),
-          } as Event
-        })
-        // Sort by date desc to mimic original
-        events.sort((a, b) => (b.date?.getTime?.() || 0) - (a.date?.getTime?.() || 0))
+        const snap = await getDocs(collection(db, 'events'))
+        const events = snap.docs.map(d => mapEventDoc(d.id, d.data()))
+        events.sort((a, b) => (b.date?.getTime() || 0) - (a.date?.getTime() || 0))
         console.log(`✅ Fallback fetched ${events.length} events`)
         return events
       } catch (e) {
@@ -210,49 +155,16 @@ export const eventService = {
 
   // Get more events for pagination
   async getMoreEvents(lastDate: Date): Promise<Event[]> {
-    const toDate = (v: any): Date | undefined => {
-      if (!v) return undefined
-      if (v instanceof Date) return v
-      if (typeof v?.toDate === 'function') return v.toDate()
-      if (typeof v === 'string' || typeof v === 'number') {
-        const d = new Date(v)
-        return isNaN(d.getTime()) ? undefined : d
-      }
-      return undefined
-    }
-
     try {
       console.log('📅 Fetching more events after:', lastDate)
       const q = query(
-        collection(db, 'events'), 
+        collection(db, 'events'),
         orderBy('date', 'desc'),
         startAfter(lastDate),
         limit(APP_CONFIG.PAGINATION_LIMIT)
       )
       const querySnapshot = await getDocs(q)
-
-      const events: Event[] = querySnapshot.docs.map(d => {
-        const data: any = d.data()
-        const participants = Array.isArray(data.participants)
-          ? data.participants.map((p: any) => ({
-              ...p,
-              respondedAt: toDate(p?.respondedAt) || new Date(),
-              days: p?.days || undefined,
-            }))
-          : []
-        return {
-          id: d.id,
-          ...data,
-          participants,
-          publicShareEnabled: data.publicShareEnabled !== false,
-          createdAt: toDate(data.createdAt) || new Date(),
-          updatedAt: toDate(data.updatedAt) || new Date(),
-          date: toDate(data.date) || new Date(),
-          endDate: toDate(data.endDate),
-          chatLastActivityAt: toDate((data as any).chatLastActivityAt),
-        } as Event
-      })
-
+      const events = querySnapshot.docs.map(d => mapEventDoc(d.id, d.data()))
       console.log(`✅ Fetched ${events.length} more events`)
       return events
     } catch (error) {
@@ -263,64 +175,10 @@ export const eventService = {
 
   // Get a single event by ID
   async getById(id: string): Promise<Event | null> {
-    // Same date coercion helper as getAll
-    const toDate = (v: any): Date | undefined => {
-      if (!v) return undefined
-      if (v instanceof Date) return v
-      if (typeof v?.toDate === 'function') return v.toDate()
-      if (typeof v === 'string' || typeof v === 'number') {
-        const d = new Date(v)
-        return isNaN(d.getTime()) ? undefined : d
-      }
-      return undefined
-    }
-
     try {
-      const ref = doc(db, 'events', id)
-      const snap = await getDoc(ref)
+      const snap = await getDoc(doc(db, 'events', id))
       if (!snap.exists()) return null
-      const data: any = snap.data()
-      const participants = Array.isArray(data.participants)
-        ? data.participants.map((p: any) => ({
-            ...p,
-            respondedAt: toDate(p?.respondedAt) || new Date(),
-            days: p?.days || undefined,
-          }))
-        : []
-
-      const participation: Record<string, EventParticipation> | undefined = (() => {
-        const raw = data.participation
-        if (!raw || typeof raw !== 'object') return undefined
-        const out: Record<string, EventParticipation> = {}
-        for (const [uid, entry] of Object.entries(raw)) {
-          const e: any = entry
-          if (!e || typeof e !== 'object') continue
-          const status = e.status as EventParticipationStatus | undefined
-          const accessLevel = e.accessLevel as any
-          if (!status || !accessLevel) continue
-          out[uid] = {
-            status,
-            accessLevel,
-            role: e.role,
-            respondedAt: toDate(e.respondedAt),
-          }
-        }
-        return Object.keys(out).length ? out : undefined
-      })()
-
-      const ev: Event = {
-        id: snap.id,
-        ...data,
-        participants,
-        participation,
-        publicShareEnabled: data.publicShareEnabled !== false,
-        createdAt: toDate(data.createdAt) || new Date(),
-        updatedAt: toDate(data.updatedAt) || new Date(),
-        date: toDate(data.date) || new Date(),
-        endDate: toDate(data.endDate),
-        chatLastActivityAt: toDate((data as any).chatLastActivityAt),
-      }
-      return ev
+      return mapEventDoc(snap.id, snap.data())
     } catch (e) {
       console.error('❌ Error fetching event by id:', e)
       return null
@@ -562,8 +420,8 @@ export const expenseService = {
       const expenses: Expense[] = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate() || new Date(),
-        updatedAt: doc.data().updatedAt?.toDate() || new Date()
+        createdAt: toDate(doc.data().createdAt) ?? new Date(),
+        updatedAt: toDate(doc.data().updatedAt) ?? new Date()
       })) as Expense[]
       
       console.log(`✅ Fetched ${expenses.length} expenses`)
@@ -584,8 +442,8 @@ export const expenseService = {
       const allExpenses: Expense[] = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate() || new Date(),
-        updatedAt: doc.data().updatedAt?.toDate() || new Date()
+        createdAt: toDate(doc.data().createdAt) ?? new Date(),
+        updatedAt: toDate(doc.data().updatedAt) ?? new Date()
       })) as Expense[]
       
       // Filtra le spese in base alla partecipazione dell'utente
@@ -663,7 +521,7 @@ export const paymentService = {
       const payments: PaymentTransaction[] = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate() || new Date()
+        createdAt: toDate(doc.data().createdAt) ?? new Date()
       })) as PaymentTransaction[]
       
       return payments
@@ -685,7 +543,7 @@ export const paymentService = {
       const payments: PaymentTransaction[] = querySnapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate() || new Date()
+        createdAt: toDate(doc.data().createdAt) ?? new Date()
       })) as PaymentTransaction[]
       
       return payments
@@ -749,9 +607,9 @@ export const pollService = {
         return {
           id: doc.id,
           ...data,
-          createdAt: data.createdAt?.toDate() || new Date(),
-          updatedAt: data.updatedAt?.toDate() || new Date(),
-          votingEndsAt: data.votingEndsAt?.toDate() || undefined
+          createdAt: toDate(data.createdAt) ?? new Date(),
+          updatedAt: toDate(data.updatedAt) ?? new Date(),
+          votingEndsAt: toDate(data.votingEndsAt)
         }
       }) as Poll[]
       
@@ -782,9 +640,9 @@ export const pollService = {
         return {
           id: doc.id,
           ...data,
-          createdAt: data.createdAt?.toDate() || new Date(),
-          updatedAt: data.updatedAt?.toDate() || new Date(),
-          votingEndsAt: data.votingEndsAt?.toDate() || undefined
+          createdAt: toDate(data.createdAt) ?? new Date(),
+          updatedAt: toDate(data.updatedAt) ?? new Date(),
+          votingEndsAt: toDate(data.votingEndsAt)
         }
       }) as Poll[]
       
@@ -1098,7 +956,6 @@ export const chatService = {
     const unsub = onSnapshot(
       qy,
       (snap) => {
-        const toDate = (v: any): Date => v?.toDate ? v.toDate() : (v instanceof Date ? v : new Date())
         const msgs: ChatMessage[] = snap.docs.map(d => {
           const data: any = d.data()
           return {
@@ -1229,7 +1086,6 @@ export const chatService = {
     const unsub = onSnapshot(colRef, (snap) => {
       const list = snap.docs.map(d => {
         const data: any = d.data()
-        const toDate = (v: any): Date | undefined => v?.toDate ? v.toDate() : (v instanceof Date ? v : undefined)
         return {
           uid: d.id,
           lastReadAt: toDate(data.lastReadAt),
@@ -1240,6 +1096,22 @@ export const chatService = {
       cb(list)
     })
     return unsub
+  },
+
+  // Count unread messages for a user in an event (messages created after lastReadAt)
+  async getUnreadCount(eventId: string, lastReadAt: Date): Promise<number> {
+    try {
+      const { getCountFromServer } = await import('firebase/firestore')
+      const q = query(
+        collection(db, 'events', eventId, 'messages'),
+        where('createdAt', '>', Timestamp.fromDate(lastReadAt)),
+        where('deleted', '==', false)
+      )
+      const snap = await getCountFromServer(q)
+      return snap.data().count
+    } catch {
+      return 0
+    }
   },
 
   // Typing indicator
@@ -1253,8 +1125,7 @@ export const chatService = {
     const unsub = onSnapshot(colRef, (snap) => {
       const list = snap.docs.map(d => {
         const data: any = d.data()
-        const toDate = (v: any): Date => v?.toDate ? v.toDate() : (v instanceof Date ? v : new Date())
-        return { uid: d.id, updatedAt: toDate(data.updatedAt), typing: !!data.typing }
+        return { uid: d.id, updatedAt: toDate(data.updatedAt) ?? new Date(), typing: !!data.typing }
       })
       cb(list)
     })

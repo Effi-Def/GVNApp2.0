@@ -1,5 +1,28 @@
 import { Expense, PaymentTransaction } from '../types'
 
+/**
+ * Round a floating-point euro amount to exactly 2 decimal places.
+ * Use this for ALL money arithmetic to avoid 9.999999 / 10.000001 artefacts.
+ *
+ * Internally works in integer cents to avoid IEEE 754 drift.
+ */
+export function roundCents(amount: number): number {
+  return Math.round(amount * 100) / 100
+}
+
+/**
+ * Split a total amount equally among n participants, returning amounts that
+ * sum exactly to the total (adjusts the last participant for rounding remainder).
+ */
+export function splitEqually(total: number, n: number): number[] {
+  if (n <= 0) return []
+  const base = Math.floor((total * 100) / n)
+  const remainder = Math.round(total * 100) - base * n
+  return Array.from({ length: n }, (_, i) =>
+    (i < remainder ? base + 1 : base) / 100
+  )
+}
+
 export interface Balance {
   userId: string
   amount: number // Positive: owed to them, Negative: they owe
@@ -23,25 +46,22 @@ export const calculateBalances = (expenses: Expense[], payments: PaymentTransact
     if (!participants || participants.length === 0) return
 
     // Payer gets credit for the full amount
-    balances[payerId] = (balances[payerId] || 0) + amount
+    balances[payerId] = roundCents((balances[payerId] || 0) + amount)
 
-    // Each participant (including payer if they are one) gets debit for their share
-    // Note: We assume equal split for now based on current app logic, 
-    // but we should respect expense.participants[i].amount if available/reliable
+    // Each participant gets debit for their share (use per-participant amount if set)
     participants.forEach(p => {
-      // Use the specific amount if calculated, otherwise split equally
-      const share = p.amount || (amount / participants.length)
-      balances[p.userId] = (balances[p.userId] || 0) - share
+      const share = roundCents(p.amount || (amount / participants.length))
+      balances[p.userId] = roundCents((balances[p.userId] || 0) - share)
     })
   })
 
   // Process payments (settlements)
   payments.forEach(payment => {
     // Payer of the debt (fromUserId) gets credit (debt reduced)
-    balances[payment.fromUserId] = (balances[payment.fromUserId] || 0) + payment.amount
-    
+    balances[payment.fromUserId] = roundCents((balances[payment.fromUserId] || 0) + payment.amount)
+
     // Receiver of the debt payment (toUserId) gets debit (credit reduced)
-    balances[payment.toUserId] = (balances[payment.toUserId] || 0) - payment.amount
+    balances[payment.toUserId] = roundCents((balances[payment.toUserId] || 0) - payment.amount)
   })
 
   return balances

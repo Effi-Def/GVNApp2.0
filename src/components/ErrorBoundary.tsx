@@ -1,20 +1,22 @@
 import React from 'react'
 
-type Props = { children: React.ReactNode }
-type State = { hasError: boolean; error?: any }
+// ─── Global ErrorBoundary ────────────────────────────────────────────────────
+// Wraps the whole app. Shows full-screen reset UI on catastrophic failure.
 
-export class ErrorBoundary extends React.Component<Props, State> {
-  constructor(props: Props) {
+type GlobalProps = { children: React.ReactNode }
+type State = { hasError: boolean; error?: unknown }
+
+export class ErrorBoundary extends React.Component<GlobalProps, State> {
+  constructor(props: GlobalProps) {
     super(props)
     this.state = { hasError: false }
   }
 
-  static getDerivedStateFromError(error: any): State {
+  static getDerivedStateFromError(error: unknown): State {
     return { hasError: true, error }
   }
 
-  componentDidCatch(error: any, info: any) {
-    // eslint-disable-next-line no-console
+  componentDidCatch(error: unknown, info: React.ErrorInfo) {
     console.error('Global render error captured:', error, info)
   }
 
@@ -43,20 +45,67 @@ export class ErrorBoundary extends React.Component<Props, State> {
             <h2 className="text-xl font-semibold">Si è verificato un errore</h2>
             <p className="text-sm text-gray-600">Prova ad aggiornare la pagina. Se il problema persiste, reimposta la cache dell'app.</p>
             <div className="flex gap-2 justify-center">
-              <button className="px-4 py-2 rounded-lg bg-blue-600 text-white" onClick={()=>window.location.reload()}>Ricarica</button>
-              <button className="px-4 py-2 rounded-lg bg-neutral-100" onClick={()=>this.resetAppCachesAndReload()}>Reimposta cache</button>
+              <button className="px-4 py-2 rounded-lg bg-blue-600 text-white" onClick={() => window.location.reload()}>Ricarica</button>
+              <button className="px-4 py-2 rounded-lg bg-neutral-100" onClick={() => this.resetAppCachesAndReload()}>Reimposta cache</button>
             </div>
             <details className="text-left text-xs text-gray-500 whitespace-pre-wrap break-words">
               <summary>Dettagli</summary>
               {String(this.state.error || '')}
               {'\n'}
-              {this.state.error?.stack || ''}
+              {(this.state.error as Error | undefined)?.stack || ''}
             </details>
           </div>
         </div>
       )
     }
-    return this.props.children as any
+    return this.props.children
+  }
+}
+
+// ─── RouteErrorBoundary ──────────────────────────────────────────────────────
+// Lightweight boundary for individual routes.
+// A crash in one page does NOT take down the whole app.
+
+type RouteProps = { children: React.ReactNode }
+type RouteState = { hasError: boolean; error: Error | null }
+
+export class RouteErrorBoundary extends React.Component<RouteProps, RouteState> {
+  constructor(props: RouteProps) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error: Error): RouteState {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    console.error('❌ RouteErrorBoundary:', error, info.componentStack)
+  }
+
+  handleRetry = () => {
+    this.setState({ hasError: false, error: null })
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center">
+          <div className="text-4xl mb-4">😵</div>
+          <h2 className="text-lg font-semibold text-gray-800 mb-2">Qualcosa è andato storto</h2>
+          <p className="text-sm text-gray-500 mb-6 max-w-xs">
+            {this.state.error?.message || 'Errore imprevisto in questa sezione.'}
+          </p>
+          <button
+            onClick={this.handleRetry}
+            className="px-4 py-2 bg-primary-600 text-white text-sm rounded-lg hover:bg-primary-700 transition-colors"
+          >
+            Riprova
+          </button>
+        </div>
+      )
+    }
+    return this.props.children
   }
 }
 

@@ -9,28 +9,25 @@ interface ChatSummary {
   event: Event
   hasNew: boolean
   lastActivity: number
+  unreadCount: number
 }
 
 export default function ChatsPage() {
   const { user } = useAuthStore()
   const [events, setEvents] = useState<Event[]>([])
   const [myReads, setMyReads] = useState<Record<string, Date | undefined>>({})
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
   const meId = user?.id || user?.email || ''
 
   useEffect(() => {
     if (!meId) return
-    // Fetch only events where the user is a participant or creator
     eventService.getAll().then(evts => {
-      const mine = evts.filter(event => {
-        const keys = getUserKeys(user)
-        return userCanChat(event, keys)
-      })
+      const mine = evts.filter(event => userCanChat(event, getUserKeys(user)))
       setEvents(mine)
     })
   }, [meId])
 
   useEffect(() => {
-    // Listen to my lastReadAt per event via participants snapshot
     if (!events.length || !meId) return
     const unsubs = events.map(e => chatService.listenParticipants(e.id, parts => {
       const me = parts.find(p => p.uid === meId)
@@ -39,12 +36,29 @@ export default function ChatsPage() {
     return () => { unsubs.forEach(u => u()) }
   }, [events, meId])
 
+  // Fetch numeric unread counts for events that have new activity
+  useEffect(() => {
+    if (!events.length) return
+    events.forEach(e => {
+      const lastActivity = e.chatLastActivityAt?.getTime() || 0
+      const lastRead = myReads[e.id]?.getTime() || 0
+      if (lastActivity > lastRead) {
+        const since = myReads[e.id] ?? new Date(0)
+        chatService.getUnreadCount(e.id, since).then(count => {
+          setUnreadCounts(prev => ({ ...prev, [e.id]: count }))
+        })
+      } else {
+        setUnreadCounts(prev => ({ ...prev, [e.id]: 0 }))
+      }
+    })
+  }, [events, myReads])
+
   const summaries: ChatSummary[] = useMemo(() => {
     const mapped = events.map(e => {
       const lastActivity = e.chatLastActivityAt?.getTime?.() || 0
       const lastRead = myReads[e.id]?.getTime?.() || 0
       const hasNew = lastActivity > 0 && lastActivity > lastRead
-      return { event: e, hasNew, lastActivity }
+      return { event: e, hasNew, lastActivity, unreadCount: unreadCounts[e.id] ?? 0 }
     })
 
     mapped.sort((a, b) => {
@@ -56,7 +70,7 @@ export default function ChatsPage() {
     })
 
     return mapped
-  }, [events, myReads])
+  }, [events, myReads, unreadCounts])
 
   return (
     <div className="max-w-3xl mx-auto p-4">
@@ -73,7 +87,11 @@ export default function ChatsPage() {
             <div className="flex-1 text-left">
               <div className="font-semibold text-neutral-900 flex items-center gap-2">
                 <span className="truncate max-w-[60vw]">{s.event.title}</span>
-                {s.hasNew && <span className="text-xs px-2 py-0.5 rounded-full bg-primary-100 text-primary-700">Nuovi</span>}
+                {s.hasNew && (
+                  <span className="min-w-[1.25rem] h-5 px-1.5 text-xs font-bold rounded-full bg-primary-600 text-white flex items-center justify-center">
+                    {s.unreadCount > 0 ? (s.unreadCount > 99 ? '99+' : s.unreadCount) : '•'}
+                  </span>
+                )}
               </div>
               <div className="text-xs text-neutral-500">
                 {s.event.chatLastActivityAt

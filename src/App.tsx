@@ -19,6 +19,7 @@ import NotificationPreferencesPage from './pages/NotificationPreferencesPage'
 import PublicEvent from './pages/PublicEvent'
 import ChatsPage from './pages/ChatsPage'
 import EventChatPage from './pages/EventChatPage'
+import { RouteErrorBoundary } from './components/ErrorBoundary'
 
 function App() {
   // Check Firebase configuration in development
@@ -158,21 +159,21 @@ function AppContent() {
   return (
     <Layout>
       <Routes>
-        <Route path="/" element={<HomePage />} />
-        <Route path="/events" element={<EventsPage />} />
-        <Route path="/events/:id/summary" element={<EventSummary />} />
-  <Route path="/events/:id/chat" element={<EventChatPage />} />
-        <Route path="/expenses" element={<ExpensesPage />} />
-        <Route path="/polls" element={<PollsPage />} />
-        <Route path="/lists" element={<ListsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/notifications" element={<NotificationsPage />} />
-          <Route path="/settings/notifications" element={<NotificationPreferencesPage />} />
-          {/* Backward compatible alias */}
-          <Route path="/notifications/settings" element={<NotificationPreferencesPage />} />
-        <Route path="/chats" element={<ChatsPage />} />
+        <Route path="/" element={<RouteErrorBoundary><HomePage /></RouteErrorBoundary>} />
+        <Route path="/events" element={<RouteErrorBoundary><EventsPage /></RouteErrorBoundary>} />
+        <Route path="/events/:id/summary" element={<RouteErrorBoundary><EventSummary /></RouteErrorBoundary>} />
+        <Route path="/events/:id/chat" element={<RouteErrorBoundary><EventChatPage /></RouteErrorBoundary>} />
+        <Route path="/expenses" element={<RouteErrorBoundary><ExpensesPage /></RouteErrorBoundary>} />
+        <Route path="/polls" element={<RouteErrorBoundary><PollsPage /></RouteErrorBoundary>} />
+        <Route path="/lists" element={<RouteErrorBoundary><ListsPage /></RouteErrorBoundary>} />
+        <Route path="/settings" element={<RouteErrorBoundary><SettingsPage /></RouteErrorBoundary>} />
+        <Route path="/notifications" element={<RouteErrorBoundary><NotificationsPage /></RouteErrorBoundary>} />
+        <Route path="/settings/notifications" element={<RouteErrorBoundary><NotificationPreferencesPage /></RouteErrorBoundary>} />
+        {/* Backward compatible alias */}
+        <Route path="/notifications/settings" element={<RouteErrorBoundary><NotificationPreferencesPage /></RouteErrorBoundary>} />
+        <Route path="/chats" element={<RouteErrorBoundary><ChatsPage /></RouteErrorBoundary>} />
         {/* Also accept share route here to support direct navigation when authenticated */}
-        <Route path="/share/e/:id" element={<PublicEvent />} />
+        <Route path="/share/e/:id" element={<RouteErrorBoundary><PublicEvent /></RouteErrorBoundary>} />
       </Routes>
     </Layout>
   )

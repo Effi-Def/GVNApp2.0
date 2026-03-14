@@ -6,6 +6,23 @@ import { VitePWA } from 'vite-plugin-pwa'
 export default defineConfig({
   build: {
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Firebase SDK (largest single dependency)
+          'firebase-app': ['firebase/app'],
+          'firebase-auth': ['firebase/auth'],
+          'firebase-firestore': ['firebase/firestore'],
+          'firebase-storage': ['firebase/storage'],
+          'firebase-messaging': ['firebase/messaging'],
+          // React ecosystem
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          // UI utilities
+          'vendor-forms': ['react-hook-form', '@hookform/resolvers', 'zod'],
+          'vendor-state': ['zustand'],
+        }
+      }
+    }
   },
   plugins: [
     react(),

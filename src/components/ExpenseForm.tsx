@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -42,6 +42,7 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
     handleSubmit,
     watch,
     setValue,
+    getValues,
     formState: { errors }
   } = useForm<ExpenseFormData>({
     resolver: zodResolver(expenseSchema) as any,
@@ -85,28 +86,29 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
     }
   }, [selectedEventId, events, expense, setValue])
 
-  // Quando cambia l'importo, ricalcola gli split
-  useEffect(() => {
-    if (currentParticipants.length > 0) {
-      const amount = currentAmount || 0
-      const splitAmount = amount / currentParticipants.length
-      
-      // Evita loop infinito se i valori sono già corretti (con tolleranza per float)
-      const needsUpdate = currentParticipants.some(p => Math.abs(p.amount - splitAmount) > 0.01)
-      
-      if (needsUpdate) {
-        setValue('participants', currentParticipants.map(p => ({
-          ...p,
-          amount: splitAmount
-        })))
-      }
+  // Ricalcola lo split quando cambia l'importo.
+  // Leggiamo i partecipanti via getValues() (non watch) per non creare una
+  // dipendenza sull'array che cambierebbe ad ogni setValue e causerebbe un loop.
+  const recalculateSplit = useCallback((amount: number) => {
+    const parts = getValues('participants')
+    if (parts.length === 0) return
+    const splitAmount = Math.round((amount / parts.length) * 100) / 100
+    const needsUpdate = parts.some(p => Math.abs(p.amount - splitAmount) > 0.005)
+    if (needsUpdate) {
+      setValue('participants', parts.map(p => ({ ...p, amount: splitAmount })))
     }
-  }, [currentAmount]) // Rimosso currentParticipants dalle dipendenze per evitare loop
+  }, [getValues, setValue])
+
+  useEffect(() => {
+    recalculateSplit(currentAmount || 0)
+  }, [currentAmount, recalculateSplit])
 
   // Funzioni per gestire la selezione dei partecipanti
   const selectAllParticipants = () => {
     const amount = currentAmount || 0
-    const splitAmount = availableParticipants.length > 0 ? amount / availableParticipants.length : 0
+    const splitAmount = availableParticipants.length > 0
+      ? Math.round((amount / availableParticipants.length) * 100) / 100
+      : 0
     setValue('participants', availableParticipants.map(p => ({
       userId: p.userId,
       name: p.name,
@@ -139,9 +141,11 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
       ]
     }
 
-    // Ricalcola split
+    // Ricalcola split (arrotondato a centesimi)
     const amount = currentAmount || 0
-    const splitAmount = newParticipants.length > 0 ? amount / newParticipants.length : 0
+    const splitAmount = newParticipants.length > 0
+      ? Math.round((amount / newParticipants.length) * 100) / 100
+      : 0
     
     setValue('participants', newParticipants.map(p => ({
       ...p,
