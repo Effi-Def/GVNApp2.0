@@ -1,8 +1,17 @@
 import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging'
 import app from './config'
 import { userService } from '../services/firestore'
+import { useUserSettingsStore } from '../stores/UserSettingsStore'
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+// --- Singleton guards ---
+// Tracks the userId for which the messaging/onMessage handler has already been
+// initialized so that re-renders / resume events don't register a second
+// (or third…) listener and cause duplicate in-app notifications.
+let _messagingInitializedForUser: string | null = null
+// Promise reference when an init is already in progress (avoids parallel inits)
+let _messagingInitPromise: Promise<string | null> | null = null
 
 async function getPwaServiceWorkerRegistration(log: (msg: string) => void, timeoutMs = 30000): Promise<ServiceWorkerRegistration> {
   if (!('serviceWorker' in navigator)) {
@@ -54,12 +63,36 @@ async function getPwaServiceWorkerRegistration(log: (msg: string) => void, timeo
   throw new Error(`Service Worker not ready for push within ${Math.round(timeoutMs / 1000)}s${lastError ? ` (${String((lastError as any)?.message || lastError)})` : ''}`)
 }
 
-export async function initMessaging(userId: string, onLog?: (msg: string) => void) {
+export async function initMessaging(userId: string, onLog?: (msg: string) => void, force?: boolean) {
   const log = (msg: string) => {
     console.log(msg)
     if (onLog) onLog(msg)
   }
 
+  // If already initialized for this user, return unless a force re-init is requested.
+  // force=true is used when the user explicitly re-enables push notifications in the
+  // same session (e.g. toggles pushEnabled on -> off -> on).
+  if (_messagingInitializedForUser === userId && !onLog && !force) {
+    log('[FCM] Already initialized for this user, skipping re-init')
+    return null
+  }
+
+  // If a parallel init is already running for the same user (and not forced), wait for it.
+  if (_messagingInitPromise && _messagingInitializedForUser === userId && !onLog && !force) {
+    log('[FCM] Init already in progress, waiting...')
+    return _messagingInitPromise
+  }
+
+  _messagingInitPromise = _doInitMessaging(userId, log)
+  try {
+    const token = await _messagingInitPromise
+    return token
+  } finally {
+    _messagingInitPromise = null
+  }
+}
+
+async function _doInitMessaging(userId: string, log: (msg: string) => void) {
   try {
     // Guard: avoid initializing when env still contains placeholder values
     const senderId = import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID
@@ -107,7 +140,6 @@ export async function initMessaging(userId: string, onLog?: (msg: string) => voi
 
       // Update local settings store too (prevents later saves from wiping tokens)
       try {
-        const { useUserSettingsStore } = await import('../stores/UserSettingsStore')
         const current = useUserSettingsStore.getState().notifications
         const existing = current.fcmTokens || (current.fcmToken ? [current.fcmToken] : [])
         const merged = Array.from(new Set([...existing, token]))
@@ -119,70 +151,25 @@ export async function initMessaging(userId: string, onLog?: (msg: string) => voi
       } catch {}
     }
 
-    onMessage(messaging, async (payload) => {
-      console.log('[FCM] Foreground message received:', payload)
-      // Optional: surface foreground messages
-      const title = (payload.notification && payload.notification.title) || 'Notifica'
-      const body = (payload.notification && payload.notification.body) || ''
-      const click_action = (payload.fcmOptions as any)?.link || (payload.data && (payload.data as any).click_action)
-      
-      // Salva la notifica nello store
-      try {
-        // Use dynamic import instead of require for Vite compatibility
-        const { useNotificationsStore } = await import('../stores/useNotificationsStore')
-        const store = useNotificationsStore.getState()
-        
-        // Estrai eventId dall'URL se presente
-        let eventId: string | undefined
-        if (click_action && typeof click_action === 'string') {
-          const match = click_action.match(/\/events\/([^\/]+)/)
-          if (match) eventId = match[1]
-        }
-        
-        store.add({
-          id: `fcm_${Date.now()}`,
-          type: 'comment',
-          title,
-          message: body,
-          createdAt: new Date(),
-          read: false,
-          actionUrl: click_action
-        })
-        
-        console.log('🔔 FCM notification saved to store:', { title, body, eventId, click_action })
-      } catch (e) {
-        console.warn('Failed to save FCM notification to store:', e)
-      }
-      
-      // Show system notification even in foreground
-      if ('Notification' in window && Notification.permission === 'granted') {
-        try {
-          // Try Service Worker first for better PWA integration
-          if ('serviceWorker' in navigator) {
-            const reg = await navigator.serviceWorker.ready
-            await reg.showNotification(title, {
-              body,
-              icon: '/icons/pig-192.png',
-              data: { click_action }
-            })
-          } else {
-            // Fallback to standard API
-            const n = new Notification(title, { body, icon: '/icons/pig-192.png' })
-            n.onclick = () => {
-              if (click_action) window.open(click_action, '_blank')
-            }
-          }
-        } catch (err) {
-          console.error('Error showing notification:', err)
-          // Last resort fallback
-          new Notification(title, { body })
-        }
-      }
-    })
+    // Register the foreground message handler only once per user session.
+    // If we've already set it up for this user, skip to avoid duplicate handlers
+    // that would cause multiple in-app notifications for a single push message.
+    if (_messagingInitializedForUser !== userId) {
+      onMessage(messaging, async (payload) => {
+        console.log('[FCM] Foreground message received:', payload)
+        // NOTE: Non salviamo la notifica nello store qui.
+        // L'onSnapshot in notifications.ts (setAll) sincronizerà automaticamente
+        // entro pochi ms dalla scrittura Firestore fatta dalla Cloud Function.
+        // Aggiungere un add() ottimistico con id temporaneo causerebbe una
+        // notifica fantasma che setAll() cancella immediatamente dopo.
+      })
+      _messagingInitializedForUser = userId
+      log(`[FCM] onMessage handler registered for user: ${userId}`)
+    }
 
     return token
   } catch (e) {
     console.error('Error initializing messaging:', e)
-    throw e // Rethrow to allow UI to handle/display error
+    throw e
   }
 }

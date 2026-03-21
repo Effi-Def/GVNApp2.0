@@ -1,7 +1,31 @@
 import { create } from 'zustand'
 import { userService } from '../services/firestore'
+import { useAuthStore } from './useAuthStore'
+import { useNotificationsStore } from './useNotificationsStore'
 
 const LOCAL_LAST_READ_KEY = 'gvn-chat-lastread'
+const LOCAL_NOTIF_KEY_PREFIX = 'gvn-notification-settings:'
+
+const loadLocalNotifications = (userId: string): Partial<NotificationSettings> | null => {
+  if (typeof window === 'undefined') return null
+  if (!userId) return null
+  try {
+    const raw = window.localStorage.getItem(LOCAL_NOTIF_KEY_PREFIX + userId)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' ? (parsed as any) : null
+  } catch {
+    return null
+  }
+}
+
+const saveLocalNotifications = (userId: string, settings: NotificationSettings) => {
+  if (typeof window === 'undefined') return
+  if (!userId) return
+  try {
+    window.localStorage.setItem(LOCAL_NOTIF_KEY_PREFIX + userId, JSON.stringify(settings))
+  } catch {}
+}
 
 const loadLocalLastRead = (): Record<string, number> => {
   if (typeof window === 'undefined') return {}
@@ -20,11 +44,11 @@ const saveLocalLastRead = (map: Record<string, number>) => {
 }
 
 const createDefaultNotifications = (): NotificationSettings => ({
-  desktopEnabled: false,
-  pushEnabled: false,
+  desktopEnabled: true,
+  pushEnabled: true,
   mutedEventIds: [],
   lastReadByEvent: loadLocalLastRead(),
-  types: { event: true, expense: true, poll: true, list: true, chat: false },
+  types: { event: true, expense: true, poll: true, list: true, chat: true },
 })
 
 export interface UserProfileSettings {
@@ -105,7 +129,6 @@ export const useUserSettingsStore = create<UserSettingsState>((set, get) => ({
     
     // Rimuovi le notifiche di chat per questo evento dall'app store
     try {
-      const { useNotificationsStore } = await import('./useNotificationsStore')
       const store = useNotificationsStore.getState()
       
       // Trova e rimuovi notifiche che puntano a questo evento
@@ -124,6 +147,20 @@ export const useUserSettingsStore = create<UserSettingsState>((set, get) => ({
   loadFromFirestore: async (userId: string) => {
     set({ loading: true })
     try {
+      // Fast local fallback (helps when Firestore is slow/offline)
+      const local = loadLocalNotifications(userId)
+      if (local) {
+        const defaults = createDefaultNotifications()
+        set(state => ({
+          notifications: {
+            ...defaults,
+            ...state.notifications,
+            ...local,
+            types: { ...(defaults.types || {}), ...((state.notifications.types || {}) as any), ...((local as any).types || {}) },
+          }
+        }))
+      }
+
       const data = await userService.get(userId)
       if (data) {
         const { profile, notifications } = data
@@ -145,10 +182,22 @@ export const useUserSettingsStore = create<UserSettingsState>((set, get) => ({
           ...((notifications?.types || {}) as any),
         }
 
+        // Only apply stored enabled flags if the user explicitly saved them.
+        // If Firestore has no notifications sub-doc (new user), keep defaults (true).
+        const hasStoredSettings = notifications && typeof notifications === 'object' && Object.keys(notifications).length > 0
+        const desktopEnabled = hasStoredSettings && 'desktopEnabled' in notifications
+          ? (notifications as any).desktopEnabled
+          : defaults.desktopEnabled
+        const pushEnabled = hasStoredSettings && 'pushEnabled' in notifications
+          ? (notifications as any).pushEnabled
+          : defaults.pushEnabled
+
         // Always merge defaults to avoid UI regressions when Firestore has partial objects.
         const mergedNotifications = {
           ...defaults,
           ...(notifications || {}),
+          desktopEnabled,
+          pushEnabled,
           mutedEventIds: notifications?.mutedEventIds ?? defaults.mutedEventIds,
           types: mergedTypes,
           lastReadByEvent: mergedLastRead,
@@ -159,25 +208,35 @@ export const useUserSettingsStore = create<UserSettingsState>((set, get) => ({
           notifications: mergedNotifications,
         })
         saveLocalLastRead(mergedLastRead)
+        saveLocalNotifications(userId, mergedNotifications)
         // Propagate displayName into auth store for consistent navbar/name after reload
         if (profile?.displayName) {
           try {
-            const { useAuthStore } = await import('./useAuthStore')
-            const { user, setUser } = useAuthStore.getState() as any
+            const { user, setUser } = useAuthStore.getState()
             if (user && user.displayName !== profile.displayName) {
               setUser({ ...user, displayName: profile.displayName })
             }
           } catch {}
         }
       } else {
+        // New user: no Firestore record yet. Start with defaults (all notifications ON)
+        // and immediately persist so next load reads the correct state.
         const defaults = createDefaultNotifications()
         set({ profile: { userId }, notifications: defaults })
         saveLocalLastRead(defaults.lastReadByEvent || {})
+        saveLocalNotifications(userId, defaults)
+        // Persist to Firestore in background — do not block the UI
+        userService.updatePartial(userId, {
+          profile: { userId },
+          notifications: defaults,
+        }).catch((e) => console.warn('⚠️ Could not persist default notifications for new user:', e))
       }
     } catch (e) {
       // Do not clobber local state on transient Firestore failures (network/rules)
       console.error('❌ Failed to load user settings from Firestore:', e)
-      throw e
+      // Keep local preferences if present; otherwise keep current state.
+      const local = loadLocalNotifications(userId)
+      if (!local) throw e
     } finally {
       set({ loading: false })
     }
@@ -200,9 +259,16 @@ export const useUserSettingsStore = create<UserSettingsState>((set, get) => ({
     }
 
     await userService.updatePartial(effectiveUserId, { notifications })
+    saveLocalNotifications(effectiveUserId, notifications)
   },
   saveNotificationsPartial: async (userId: string, partial: Partial<NotificationSettings>) => {
     if (!userId) throw new Error('Impossibile salvare: userId mancante')
-    await userService.updatePartial(userId, { notifications: partial })
+    // Update Zustand store immediately so the UI reflects the change
+    get().setNotifications(partial)
+    // Use dot-notation updateDoc so we only write the changed fields and do NOT
+    // overwrite the entire notifications map (which would wipe out fcmTokens,
+    // pushEnabled, types, etc.).
+    await userService.updateNestedPartial(userId, 'notifications', partial as Record<string, unknown>)
+    saveLocalNotifications(userId, get().notifications)
   }
 }))
