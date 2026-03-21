@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "build:icons": "node scripts/generate-icons.mjs",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "lint": "eslint . --ext ts,tsx",
     "preview": "vite preview",
     "firebase:login": "npx firebase-tools login",
     "firebase:use": "npx firebase-tools use",
@@ -17,14 +17,17 @@
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "firebase": "^10.7.1",
+    "leaflet": "^1.9.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hook-form": "^7.66.1",
+    "react-leaflet": "^4.2.1",
     "react-router-dom": "^6.20.1",
     "zod": "^4.1.13",
     "zustand": "^4.4.7"
   },
   "devDependencies": {
+    "@types/leaflet": "^1.9.21",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
     "@typescript-eslint/eslint-plugin": "^6.14.0",

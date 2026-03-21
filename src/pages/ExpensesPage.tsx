@@ -1,14 +1,17 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { expenseService, eventService, paymentService } from '../services/firestore'
-import { useAuthStore } from '../stores/useAuthStore'
+import { expenseService, paymentService } from '../services/firestore'
+import { roundTo2 } from '../services/firestoreMappers'
+import { refreshActiveFarmData, useAuthStore } from '../stores/useAuthStore'
+import { useAppStore } from '../stores/AppStore'
+import { useActiveFarmStore } from '../stores/useActiveFarmStore'
 import { Expense, Event, ExpenseParticipant, PaymentTransaction } from '../types'
 import ExpenseSettlement from '../components/ExpenseSettlement'
-import { filterSelectableEvents, getUserKeys } from '../utils/events'
+import { getSelectableEvents, getUserEventParticipation, getUserKeys } from '../utils/events'
 
 const ExpensesPage = () => {
   const { user } = useAuthStore()
-  const location = useLocation() as any
+  const location = useLocation()
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [payments, setPayments] = useState<PaymentTransaction[]>([])
   const [events, setEvents] = useState<Event[]>([])
@@ -19,7 +22,10 @@ const ExpensesPage = () => {
   const [showForm, setShowForm] = useState(false)
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const handledNavStateRef = useRef(false)
+  const handledNavStateRef = useRef<string>('')
+
+  const navEventId = (location.state as { eventId?: string } | null)?.eventId
+  const allowCreateFromGlobal = !!((location.state as { openForm?: boolean } | null)?.openForm && navEventId)
 
   // Form data per nuova spesa
   const [formData, setFormData] = useState({
@@ -32,6 +38,9 @@ const ExpensesPage = () => {
 
   const currentUserId = user?.id || ''
   const userKeys = getUserKeys(user)
+  const activeFarmId = useActiveFarmStore(s => s.activeFarmId)
+  const storeEvents = useAppStore(s => s.events)
+  const storeExpenses = useAppStore(s => s.expenses)
 
   // Carica dati iniziali
   useEffect(() => {
@@ -40,37 +49,34 @@ const ExpensesPage = () => {
         setLoading(true)
         console.log('🔄 Loading expenses and events...')
 
-        // IMPORTANT: don't let a failure in payments/expenses prevent events from loading.
-        const [eventsRes, expensesRes, paymentsRes] = await Promise.allSettled([
-          eventService.getAll(),
-          expenseService.getAll(),
-          paymentService.getAll(),
-        ])
-
-        const eventsData: Event[] = eventsRes.status === 'fulfilled' ? eventsRes.value : []
-        if (eventsRes.status === 'rejected') {
-          console.error('❌ Error loading events:', eventsRes.reason)
+        if (user?.id && (storeEvents?.length || 0) === 0 && (storeExpenses?.length || 0) === 0) {
+          await refreshActiveFarmData()
         }
 
-        const expensesData: Expense[] = expensesRes.status === 'fulfilled' ? expensesRes.value : []
-        if (expensesRes.status === 'rejected') {
-          console.error('❌ Error loading expenses:', expensesRes.reason)
-        }
+        const eventsData: Event[] = storeEvents || []
+        const expensesData: Expense[] = storeExpenses || []
 
-        const paymentsData: PaymentTransaction[] = paymentsRes.status === 'fulfilled' ? paymentsRes.value : []
-        if (paymentsRes.status === 'rejected') {
-          console.error('❌ Error loading payments:', paymentsRes.reason)
-        }
+        const paymentsData: PaymentTransaction[] = await paymentService.getForUser(currentUserId).catch((e) => {
+          console.error('❌ Error loading payments:', e)
+          return []
+        })
 
-        // Eventi selezionabili: appartenenti all'utente (uid o email) e non troppo vecchi
-        const myEvents = filterSelectableEvents(eventsData, userKeys)
+        // Only events belonging to the active farm
+        const myEvents = getSelectableEvents(eventsData, { userKeys, farmIds: activeFarmId ? [activeFarmId] : [] })
         setEvents(myEvents)
 
-        // Mostra spese SOLO se collegate a un evento dove l'utente ha status 'yes'
+        // Include:
+        // - event-linked expenses visible in the active farm
+        // - legacy/global expenses without eventId where user is directly involved
         const myEventIds = new Set(myEvents.map(e => e.id))
-        const visibleExpenses = expensesData.filter(exp => exp.eventId && myEventIds.has(exp.eventId))
+        const visibleExpenses = expensesData.filter(exp => {
+          if (exp.eventId) return myEventIds.has(exp.eventId)
+          const isPayer = exp.paidBy === currentUserId
+          const isParticipant = Array.isArray(exp.participants) && exp.participants.some(p => p.userId === currentUserId)
+          return isPayer || isParticipant
+        })
         setExpenses(visibleExpenses)
-        setPayments(paymentsData)
+        setPayments(paymentsData.filter(p => !p.eventId || myEventIds.has(p.eventId)))
         console.log(`✅ Loaded ${expensesData.length} expenses, ${paymentsData.length} payments and ${eventsData.length} events`)
       } catch (error) {
         console.error('❌ Error loading data:', error)
@@ -82,20 +88,37 @@ const ExpensesPage = () => {
     if (user) {
       loadData()
     }
-  }, [user])
+  }, [user, activeFarmId, storeEvents, storeExpenses])
 
   // Supporto navigazione dal Summary evento: apri form e pre-seleziona l'evento
   useEffect(() => {
-    if (handledNavStateRef.current) return
     const st = location?.state
     const eventId = st?.eventId as string | undefined
     const openForm = !!st?.openForm
     if (!openForm || !eventId) return
     if (!events.some(e => e.id === eventId)) return
-    handledNavStateRef.current = true
+    const navKey = `${eventId}:${openForm}`
+    if (handledNavStateRef.current === navKey) return
+    handledNavStateRef.current = navKey
     setShowForm(true)
     handleEventChange(eventId)
   }, [location?.state, events])
+
+  // Auto-open create form when ?create=1
+  useEffect(() => {
+    const params = new URLSearchParams(location?.search || '')
+    const shouldCreate = params.get('create') === '1'
+    if (!shouldCreate) return
+    setEditingExpense(null)
+    setShowForm(true)
+    setFormData({
+      title: '',
+      amount: '',
+      category: 'Cibo',
+      eventId: '',
+      participants: [],
+    })
+  }, [location?.search])
 
   // Calcolo del saldo totale
   const calculateBalance = () => {
@@ -104,15 +127,15 @@ const ExpensesPage = () => {
     
     expenses.forEach(expense => {
       if (expense.paidBy === currentUserId) {
-        totalPaid += expense.amount
+        totalPaid = roundTo2(totalPaid + expense.amount)
       }
       const userParticipation = expense.participants.find(p => p.userId === currentUserId)
       if (userParticipation) {
-        totalOwed += userParticipation.amount
+        totalOwed = roundTo2(totalOwed + userParticipation.amount)
       }
     })
     
-    return totalPaid - totalOwed
+    return roundTo2(totalPaid - totalOwed)
   }
 
   const balance = calculateBalance()
@@ -164,15 +187,24 @@ const ExpensesPage = () => {
   // Funzioni per gestire le spese
   const handleSubmitExpense = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formData.title || !formData.amount || !formData.eventId || formData.participants.length === 0) return
+    if (!formData.title || !formData.eventId || formData.participants.length === 0) return
+    const parsedAmount = parseFloat(formData.amount)
+    if (!formData.amount || isNaN(parsedAmount) || parsedAmount <= 0) return
 
     setSubmitting(true)
     try {
       const selectedEvent = events.find(e => e.id === formData.eventId)
       if (!selectedEvent) return
 
-      // Calcola l'importo per partecipante
-      const amountPerPerson = parseFloat(formData.amount) / formData.participants.length
+      // Only full access can create expenses
+      const p = getUserEventParticipation(selectedEvent, userKeys)
+      if (p.accessLevel !== 'full') {
+        alert('Non hai i permessi per creare spese in questo evento')
+        return
+      }
+
+      // Calcola l'importo per partecipante, arrotondato a 2 decimali per evitare drift IEEE-754
+      const amountPerPerson = roundTo2(parsedAmount / formData.participants.length)
 
       // Crea i partecipanti con la struttura corretta
       const participants: ExpenseParticipant[] = formData.participants.map(participantId => {
@@ -187,7 +219,7 @@ const ExpensesPage = () => {
 
       const expenseData = {
         title: formData.title,
-        amount: parseFloat(formData.amount),
+        amount: parsedAmount,
         paidBy: currentUserId,
         participants,
         eventId: formData.eventId
@@ -196,8 +228,7 @@ const ExpensesPage = () => {
       if (editingExpense) {
         await expenseService.update(editingExpense.id, expenseData)
         // Ricarica le spese
-        const updatedExpenses = await expenseService.getAll()
-        setExpenses(updatedExpenses)
+        await refreshActiveFarmData()
         setEditingExpense(null)
       } else {
         const newExpense = await expenseService.create(expenseData)
@@ -261,11 +292,11 @@ const ExpensesPage = () => {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="pt-16 px-6 pb-6 max-w-4xl mx-auto">
         <div className="text-center py-12">
           <div className="text-6xl mb-4">💰</div>
-          <h3 className="text-xl font-semibold text-gray-600 mb-2">Caricamento spese...</h3>
-          <p className="text-gray-500">Connessione a Firebase in corso</p>
+          <h3 className="text-xl font-semibold text-[--text-muted] mb-2">Caricamento spese...</h3>
+          <p className="text-[--text-muted]">Connessione a Firebase in corso</p>
         </div>
       </div>
     )
@@ -273,46 +304,55 @@ const ExpensesPage = () => {
 
   if (!user) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="pt-16 px-6 pb-6 max-w-4xl mx-auto">
         <div className="text-center py-12">
           <div className="text-6xl mb-4">🔒</div>
-          <h3 className="text-xl font-semibold text-gray-600 mb-2">Accesso richiesto</h3>
-          <p className="text-gray-500">Effettua l'accesso per vedere le spese</p>
+          <h3 className="text-xl font-semibold text-[--text-muted] mb-2">Accesso richiesto</h3>
+          <p className="text-[--text-muted]">Effettua l'accesso per vedere le spese</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="pt-16 px-4 pb-6 max-w-4xl mx-auto">
       {/* Header */}
-      <div className="mb-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="mb-5">
+        <div className="flex flex-row items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">Spese 💰</h1>
-            <p className="text-gray-600">Gestisci le spese di gruppo e i saldi</p>
+            <h1 className="text-xl font-bold text-[--text-base] mb-0.5">Spese 💰</h1>
+            <p className="text-sm text-[--text-muted]">Gestisci le spese di gruppo e i saldi</p>
           </div>
-          <div className="flex bg-gray-100 p-1 rounded-lg self-start md:self-auto">
+          <div className="flex items-center gap-2">
             <button
-              onClick={() => setViewMode('list')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                viewMode === 'list' 
-                  ? 'bg-white text-blue-600 shadow-sm' 
-                  : 'text-gray-600 hover:text-gray-800'
-              }`}
+              onClick={() => { setEditingExpense(null); setShowForm(true) }}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-sm font-medium rounded-lg transition-colors"
             >
-              Lista Spese
+              <span className="text-base leading-none font-bold">+</span>
+              <span className="hidden sm:inline">Nuova</span>
             </button>
-            <button
-              onClick={() => setViewMode('settlement')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                viewMode === 'settlement' 
-                  ? 'bg-white text-blue-600 shadow-sm' 
-                  : 'text-gray-600 hover:text-gray-800'
-              }`}
-            >
-              Chi deve a Chi
-            </button>
+            <div className="flex bg-[--bg-raised] p-0.5 rounded-lg">
+              <button
+                onClick={() => setViewMode('list')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  viewMode === 'list'
+                    ? 'bg-[--bg-card] text-blue-600 shadow-sm'
+                    : 'text-[--text-muted] hover:text-[--text-base]'
+                }`}
+              >
+                Lista
+              </button>
+              <button
+                onClick={() => setViewMode('settlement')}
+                className={`px-3 py-1.5 rounded-md text-xs font-medium transition-all ${
+                  viewMode === 'settlement'
+                    ? 'bg-[--bg-card] text-blue-600 shadow-sm'
+                    : 'text-[--text-muted] hover:text-[--text-base]'
+                }`}
+              >
+                Chi deve a Chi
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -324,20 +364,22 @@ const ExpensesPage = () => {
           events={events}
           currentUserId={currentUserId}
           onPaymentRecorded={async () => {
-            const newPayments = await paymentService.getAll()
-            setPayments(newPayments)
+            // getAll() fails with permission-denied: rules require fromUserId/toUserId match per doc.
+            // getForUser() is the correct scoped query.
+            const newPayments = await paymentService.getForUser(currentUserId)
+            setPayments(newPayments.filter(p => !p.eventId || events.some(e => e.id === p.eventId)))
           }}
         />
       ) : (
         <>
       {/* Saldo Totale */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+      <div className="bg-[--bg-card] rounded-xl shadow-sm border border-[--border-base] p-6 mb-6">
         <div className="text-center">
-          <h2 className="text-lg font-semibold text-gray-700 mb-2">Il tuo saldo</h2>
+          <h2 className="text-lg font-semibold text-[--text-muted] mb-2">Il tuo saldo</h2>
           <div className={`text-4xl font-bold mb-2 ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
             {balance >= 0 ? '+' : ''}{balance.toFixed(2)}€
           </div>
-          <p className="text-gray-500">
+          <p className="text-[--text-muted]">
             {balance > 0 
               ? 'Ti devono restituire denaro' 
               : balance < 0 
@@ -356,8 +398,8 @@ const ExpensesPage = () => {
             onClick={() => setSelectedFilter('all')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               selectedFilter === 'all'
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-500/100 text-white'
+                : 'bg-[--bg-raised] text-[--text-muted] hover:bg-[--bg-raised]'
             }`}
           >
             Tutte ({expenses.length})
@@ -366,8 +408,8 @@ const ExpensesPage = () => {
             onClick={() => setSelectedFilter('paid')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               selectedFilter === 'paid'
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-500/100 text-white'
+                : 'bg-[--bg-raised] text-[--text-muted] hover:bg-[--bg-raised]'
             }`}
           >
             Pagate da me ({expenses.filter(e => e.paidBy === currentUserId).length})
@@ -376,8 +418,8 @@ const ExpensesPage = () => {
             onClick={() => setSelectedFilter('owed')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
               selectedFilter === 'owed'
-                ? 'bg-blue-500 text-white'
-                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                ? 'bg-blue-500/100 text-white'
+                : 'bg-[--bg-raised] text-[--text-muted] hover:bg-[--bg-raised]'
             }`}
           >
             Che mi riguardano ({expenses.filter(e => e.participants.some(p => p.userId === currentUserId)).length})
@@ -386,11 +428,11 @@ const ExpensesPage = () => {
 
         {/* Filtro per evento */}
         <div className="flex items-center space-x-2">
-          <span className="text-sm font-medium text-gray-700">Evento:</span>
+          <span className="text-sm font-medium text-[--text-muted]">Evento:</span>
           <select
             value={selectedEvent}
             onChange={(e) => setSelectedEvent(e.target.value)}
-            className="px-3 py-1 rounded-lg border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
+            className="px-3 py-1 rounded-lg border border-[--border-base] text-sm focus:outline-none focus:border-blue-500"
           >
             <option value="all">Tutti gli eventi</option>
             {events.map(event => (
@@ -404,10 +446,12 @@ const ExpensesPage = () => {
       <div className="space-y-4">
         {filteredExpenses.map(expense => {
           const eventName = events.find(e => e.id === expense.eventId)?.title
-          const paidByName = events.find(e => e.id === expense.eventId)?.participants.find(p => p.userId === expense.paidBy)?.name || expense.paidBy
+          const paidByName = expense.participants.find(p => p.userId === expense.paidBy)?.name
+            || events.find(e => e.id === expense.eventId)?.participants.find(p => p.userId === expense.paidBy)?.name
+            || expense.paidBy
           
           return (
-            <div key={expense.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <div key={expense.id} className="bg-[--bg-card] rounded-xl shadow-sm border border-[--border-base] p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3 flex-1">
                   <div className="text-2xl">
@@ -415,29 +459,29 @@ const ExpensesPage = () => {
                   </div>
                   <div className="flex-1">
                     <div className="flex items-center space-x-2 mb-1">
-                      <h3 className="font-semibold text-gray-800">{expense.title}</h3>
+                      <h3 className="font-semibold text-[--text-base]">{expense.title}</h3>
                       {eventName && (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">
+                        <span className="px-2 py-1 bg-blue-500/100/10 text-blue-600 text-xs rounded-full">
                           {eventName}
                         </span>
                       )}
                     </div>
-                    <p className="text-sm text-gray-600">
+                    <p className="text-sm text-[--text-muted]">
                       Pagato da <span className="font-medium">{paidByName}</span> • {formatDate(expense.createdAt)}
                     </p>
-                    <p className="text-sm text-gray-500">
+                    <p className="text-sm text-[--text-muted]">
                       {expense.participants.length} partecipanti: {expense.participants.map(p => p.name).join(', ')}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-4">
                   <div className="text-right">
-                    <p className="text-xl font-bold text-gray-800">€{expense.amount.toFixed(2)}</p>
-                    <p className="text-sm text-gray-500">
+                    <p className="text-xl font-bold text-[--text-base]">€{expense.amount.toFixed(2)}</p>
+                    <p className="text-sm text-[--text-muted]">
                       €{(expense.amount / expense.participants.length).toFixed(2)} a testa
                     </p>
                     {expense.paidBy === currentUserId && (
-                      <span className="inline-block mt-1 px-2 py-1 bg-green-100 text-green-700 text-xs font-medium rounded-full">
+                      <span className="inline-block mt-1 px-2 py-1 bg-green-500/10 text-green-600 text-xs font-medium rounded-full">
                         Hai pagato tu
                       </span>
                     )}
@@ -447,7 +491,7 @@ const ExpensesPage = () => {
                     <div className="flex flex-col space-y-1">
                       <button
                         onClick={() => handleEditExpense(expense)}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                        className="p-2 text-blue-600 hover:bg-blue-500/10 rounded-lg transition-colors"
                         title="Modifica spesa"
                       >
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -474,8 +518,12 @@ const ExpensesPage = () => {
         {filteredExpenses.length === 0 && (
           <div className="text-center py-12">
             <div className="text-6xl mb-4">💸</div>
-            <h3 className="text-xl font-semibold text-gray-600 mb-2">Nessuna spesa trovata</h3>
-            <p className="text-gray-500">Non ci sono spese che corrispondono ai filtri selezionati</p>
+            <h3 className="text-xl font-semibold text-[--text-muted] mb-2">Nessuna spesa trovata</h3>
+            <p className="text-[--text-muted]">
+              {allowCreateFromGlobal
+                ? 'Non ci sono spese che corrispondono ai filtri selezionati'
+                : 'Questa pagina è di consultazione. Per creare una spesa: apri un evento e usa il Riassunto.'}
+            </p>
           </div>
         )}
       </div>
@@ -484,11 +532,11 @@ const ExpensesPage = () => {
 
       {/* Modal Form per Aggiungere/Modificare Spesa */}
       {showForm && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center sm:p-4 z-[60]">
+          <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full h-[calc(100dvh-4rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800">
+                <h2 className="text-xl font-bold text-[--text-base]">
                   {editingExpense ? 'Modifica Spesa' : 'Nuova Spesa'}
                 </h2>
                 <button
@@ -503,7 +551,7 @@ const ExpensesPage = () => {
                       participants: []
                     })
                   }}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="text-[--text-muted] hover:text-[--text-muted]"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -513,21 +561,21 @@ const ExpensesPage = () => {
 
               <form onSubmit={handleSubmitExpense} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-[--text-muted] mb-1">
                     Titolo spesa
                   </label>
                   <input
                     type="text"
                     value={formData.title}
                     onChange={(e) => setFormData({...formData, title: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-blue-500"
                     placeholder="Es. Cena al ristorante"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-[--text-muted] mb-1">
                     Importo (€)
                   </label>
                   <input
@@ -535,20 +583,20 @@ const ExpensesPage = () => {
                     step="0.01"
                     value={formData.amount}
                     onChange={(e) => setFormData({...formData, amount: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-blue-500"
                     placeholder="0.00"
                     required
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-[--text-muted] mb-1">
                     Evento <span className="text-red-500">*</span>
                   </label>
                   <select
                     value={formData.eventId}
                     onChange={(e) => handleEventChange(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-blue-500"
                     required
                   >
                     <option value="">Seleziona un evento</option>
@@ -556,29 +604,29 @@ const ExpensesPage = () => {
                       <option key={event.id} value={event.id}>{event.title}</option>
                     ))}
                   </select>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-[--text-muted] mt-1">
                     Seleziona l'evento per vedere i partecipanti disponibili
                   </p>
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-[--text-muted] mb-2">
                     Partecipanti per lo split {formData.eventId && <span className="text-red-500">*</span>}
                   </label>
                   {!formData.eventId ? (
-                    <div className="text-center py-4 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300">
-                      <p className="text-gray-500 text-sm">
+                    <div className="text-center py-4 bg-[--bg-subtle] rounded-lg border-2 border-dashed border-[--border-base]">
+                      <p className="text-[--text-muted] text-sm">
                         Seleziona prima un evento per vedere i partecipanti disponibili
                       </p>
                     </div>
                   ) : (
                     <div className="space-y-3">
                       {/* Controlli rapidi per la selezione */}
-                      <div className="flex flex-wrap gap-2 p-3 bg-gray-50 rounded-lg">
+                      <div className="flex flex-wrap gap-2 p-3 bg-[--bg-subtle] rounded-lg">
                         <button
                           type="button"
                           onClick={() => setFormData(prev => ({ ...prev, participants: getAvailableParticipants().map(p => p.userId) }))}
-                          className="px-3 py-1 text-xs font-medium bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors"
+                          className="px-3 py-1 text-xs font-medium bg-blue-500/100 text-white rounded-md hover:bg-blue-600 transition-colors"
                         >
                           Tutti i partecipanti ({getAvailableParticipants().length})
                         </button>
@@ -599,31 +647,31 @@ const ExpensesPage = () => {
                       </div>
 
                       {/* Lista dei partecipanti con checkbox */}
-                      <div className="border border-gray-200 rounded-lg p-3 max-h-40 overflow-y-auto">
+                      <div className="border border-[--border-base] rounded-lg p-3 max-h-40 overflow-y-auto">
                         <div className="space-y-2">
                           {getAvailableParticipants().map(participant => (
-                            <label key={participant.userId} className="flex items-center justify-between p-2 hover:bg-gray-50 rounded-md cursor-pointer">
+                            <label key={participant.userId} className="flex items-center justify-between p-2 hover:bg-[--bg-subtle] rounded-md cursor-pointer">
                               <div className="flex items-center space-x-3">
                                 <input
                                   type="checkbox"
                                   checked={formData.participants.includes(participant.userId)}
                                   onChange={() => toggleParticipant(participant.userId)}
-                                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                  className="rounded border-[--border-base] text-blue-600 focus:ring-blue-500"
                                 />
-                                <span className="text-sm text-gray-700 font-medium">{participant.name}</span>
+                                <span className="text-sm text-[--text-muted] font-medium">{participant.name}</span>
                                 {participant.userId === currentUserId && (
-                                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">tu</span>
+                                  <span className="text-xs bg-blue-500/100/10 text-blue-600 px-2 py-1 rounded-full">tu</span>
                                 )}
                               </div>
                               {formData.participants.includes(participant.userId) && formData.amount && (
-                                <span className="text-xs text-gray-500">
+                                <span className="text-xs text-[--text-muted]">
                                   €{(parseFloat(formData.amount) / formData.participants.length).toFixed(2)}
                                 </span>
                               )}
                             </label>
                           ))}
                           {getAvailableParticipants().length === 0 && (
-                            <p className="text-sm text-gray-500 text-center py-2">
+                            <p className="text-sm text-[--text-muted] text-center py-2">
                               Nessun partecipante disponibile per questo evento
                             </p>
                           )}
@@ -632,8 +680,8 @@ const ExpensesPage = () => {
 
                       {/* Riepilogo selezione */}
                       {formData.eventId && (
-                        <div className="flex items-center justify-between text-sm p-2 bg-blue-50 rounded-lg">
-                          <span className="text-gray-600">
+                        <div className="flex items-center justify-between text-sm p-2 bg-blue-500/10 rounded-lg">
+                          <span className="text-[--text-muted]">
                             {formData.participants.length > 0 
                               ? `${formData.participants.length} partecipanti selezionati`
                               : 'Nessun partecipante selezionato'
@@ -655,7 +703,7 @@ const ExpensesPage = () => {
                   )}
                 </div>
 
-                <div className="flex space-x-3 pt-4">
+                <div className="flex space-x-3 pt-4 pb-6">
                   <button
                     type="button"
                     onClick={() => {
@@ -669,7 +717,7 @@ const ExpensesPage = () => {
                         participants: []
                       })
                     }}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="flex-1 px-4 py-3 border border-[--border-base] text-[--text-muted] rounded-xl hover:bg-[--bg-subtle] transition-colors font-medium"
                     disabled={submitting}
                   >
                     Annulla
@@ -677,7 +725,7 @@ const ExpensesPage = () => {
                   <button
                     type="submit"
                     disabled={submitting}
-                    className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 px-4 py-3 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
                   >
                     {submitting ? 'Salvataggio...' : (editingExpense ? 'Salva' : 'Aggiungi')}
                   </button>
@@ -688,20 +736,23 @@ const ExpensesPage = () => {
         </div>
       )}
 
-      {/* Bottone Aggiungi Spesa Mobile */}
-      <div className="fixed bottom-28 right-6 md:bottom-8 z-40">
-        <button 
-          onClick={() => setShowForm(true)}
-          className="bg-blue-500 hover:bg-blue-600 text-white p-4 rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 hover:scale-110 ring-4 ring-blue-100"
-          title="Aggiungi nuova spesa"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
-      </div>
+      {/* Bottone Aggiungi Spesa Mobile (solo da Summary evento) */}
+      {allowCreateFromGlobal && (
+        <div className="fixed bottom-28 right-6 md:bottom-8 z-40">
+          <button 
+            onClick={() => setShowForm(true)}
+            className="bg-blue-500/100 hover:bg-blue-600 text-white p-4 rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 hover:scale-110 ring-4 ring-blue-100"
+            title="Aggiungi nuova spesa"
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
 export default ExpensesPage
+
