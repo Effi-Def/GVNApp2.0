@@ -1,198 +1,362 @@
-# GVNApp 2.0
+﻿# GVNApp 2.0
 
 Hub sociale del gruppo: organizza eventi, coordina liste e spese, chatta e ricevi promemoria — tutto in una PWA veloce, installabile e che funziona anche con rete ballerina.
 
-Hosting: https://gvnapp-e3e7d.web.app
+**Hosting:** https://gvnapp-e3e7d.web.app
+**Ultimo aggiornamento README:** Marzo 2026
 
-## 🎯 Scopo dell’app
+---
 
-Ridurre l’attrito dell’organizzazione fra amici. In pratica: fissare una data (“stasera si gioca?”), vedere chi c’è, gestire quote e cose da portare, e parlare al volo con una chat per evento. Il tutto con notifiche leggere e “umane”.
+## 🎯 Scopo dell'app
 
-## ✅ Funzionalità principali (oggi in produzione)
+Ridurre l'attrito dell'organizzazione fra amici. In pratica: fissare una data ("stasera si gioca?"), vedere chi c'è, gestire quote e cose da portare, e parlare al volo con una chat per evento. Il tutto con notifiche leggere e "umane".
 
-- Eventi
-   - Creazione/modifica con categorie, luogo, orari, priorità (low/medium/high)
-   - Multi‑day: selezione presenza per giorno
-   - Partecipazione Sì/No/Forse; hint “Confermati/Forse” senza esporre nomi
-   - Ordinamenti: per data, creato asc/desc, priorità
-   - Condivisione pubblica: route pubblica `/share/e/:id` con pagina mini‑riassunto (senza auth)
-- Chat per evento (v1)
-   - Messaggi realtime, reazioni, modifica/cancella (finestra 15’), allegati (Storage) con limiti sicuri
-   - Badge “Nuovi” nella lista eventi basato su `chatLastActivityAt` e tuo `lastReadByEvent`
-   - Muto per singolo evento; ultimo letto per evento
-   - Error‑handling in ascolto chat per evitare schermi bianchi
-- Spese
-   - Riepilogo saldi evento e “La tua situazione” (collassabili, chiusi di default)
-   - Calcolo bilanci by payer/quote partecipanti
-- Liste
-   - Liste collaborative con nuovi generatori “Macchine” e “Stanze” con capienza (es. 5/2), driver, vincoli di unicità
-- Sondaggi
-   - Creazione sondaggi e collegamento ad evento con deep‑link nella notifica
-- Notifiche
-   - Push su mobile e notifiche desktop “leggere” (in‑app)
-   - Preferenze granulari per tipologia (eventi, spese, sondaggi, liste, chat)
-   - Test push da UI (Impostazioni → Notifiche → “Test push”)
-   - Copy umani dalle Cloud Functions (“Stasera si gioca? 🎉”, “Vota anche tu 🗳️”, “Lista pronta 📝”, “Nuova spesa 💰 …”)
-- UI/UX
-   - Modali bottom‑sheet consistenti (safe‑area, scroll‑lock, action bar fissa, z‑index elevato)
-   - Calendario con verdi più “leggibili”; azioni migliorate
-   - Eliminati crash: sanitizzazione payload Firestore, gestione errori listener chat, normalizzazione date
-- PWA
-   - Service Worker Workbox + SW dedicato `firebase-messaging-sw.js` per push in background
-   - Installabile, precache, offline di base
+---
 
-## 🧩 Architettura & stack
+## 🧩 Stack tecnologico
 
-- Frontend: React 18 + TypeScript + Vite, Tailwind CSS, Zustand, React Router v6
-- Firebase: Auth, Firestore, Storage, Functions (Node 20), Hosting
-- PWA: vite‑plugin‑pwa, Workbox
+### Frontend
+| Libreria | Versione | Ruolo |
+|---|---|---|
+| React | 18.2 | UI framework |
+| TypeScript | 5.2 | Type safety |
+| Vite | 5.0 | Build tool + dev server |
+| Tailwind CSS | 3.3 | Styling utility-first |
+| React Router | v6.20 | Client-side routing (lazy + Suspense) |
+| Zustand | 4.4 | State management globale |
+| React Hook Form | 7.66 | Form handling |
+| Zod | 4.1 | Schema validation |
+| Leaflet + react-leaflet | 1.9 / 4.x | Mappe OpenStreetMap (zero API key) |
 
-## 🗂️ Struttura (ridotta)
+### Firebase (SDK 10.7.1)
+| Servizio | Uso |
+|---|---|
+| **Auth** | Google Sign-in, persistenza sessione |
+| **Firestore** | Database principale (documenti + realtime listeners) |
+| **Storage** | Allegati chat e spese (max 5 MB, jpg/png/webp) |
+| **FCM** | Push notifications (multi-device via `fcmTokens[]`) |
+| **Hosting** | Deploy statico PWA |
+| **Functions** | Node 20, firebase-functions v5, firebase-admin v12 |
+
+### PWA
+- `vite-plugin-pwa` 0.17.4 + Workbox (`autoUpdate`, `skipWaiting`, `clientsClaim`)
+- `firebase-messaging-sw.js` **auto-generato** da `vite.config.ts` tramite variabili `.env` — nessuna chiave hardcoded
+- Manifest con icone 192/512/maskable/apple-touch
+- SW disabilitato in `development` per evitare loop di caching
+
+### Build & Bundle
+- `manualChunks` per split stabile dei vendor:
+  - `vendor-react` → react + react-dom + react-router-dom
+  - `vendor-firebase-app`, `vendor-firebase-firestore`, `vendor-firebase-storage`, `vendor-firebase-messaging`
+- Tutte le pagine sono **lazy-loaded** con `React.lazy` + `Suspense`
+- Source maps disabilitati in produzione (abilitabili con `VITE_SOURCEMAP=true`)
+
+---
+
+## 🏗️ Architettura
+
+### Service Layer (`src/services/`)
+- `firestore.ts` (~1800 righe): tutti i servizi Firestore (`eventService`, `expenseService`, `pollService`, `listService`, `chatService`, `farmService`, `userService`, `paymentService`, `userPrivateService`)
+- `firestoreMappers.ts`: helper centralizzati `toDate`, `toDateOrNow`, `toTimestamp`, `cleanUndefined`, `cleanUndefinedDeep` — conversione Timestamp ↔ Date e sanitizzazione `undefined` prima di ogni write
+- `notifications.ts`: listener realtime delle notifiche in-app (`users/{uid}/notifications`)
+
+### State Management (`src/stores/`)
+| Store | Responsabilità |
+|---|---|
+| `useAuthStore` | Sessione Google Auth, `loadUserData()`, avatar cache prefetch |
+| `AppStore` | Cache globale di eventi/spese/sondaggi/liste con **persist** Zustand + serializzazione Date personalizzata (`{ __date: ISO }`) |
+| `useActiveFarmStore` | Farm attiva, lista farm, switch farm, persistenza `lastActiveFarmId` su localStorage + Firestore |
+| `UserSettingsStore` | Profilo utente, preferenze notifiche, `lastReadByEvent`, FCM token(s) |
+| `useNotificationsStore` | Notifiche in-app (realtime), badge contatore |
+
+### Contesti
+- `ActiveFarmProvider` (`src/contexts/FarmContext.tsx`): fornisce `activeFarmId` / `activeFarm` a tutti i componenti nel sotto-albero
+
+### Pattern chiave
+- **Stale-while-revalidate**: `AppStore` mostra dati persistiti istantaneamente, `loadUserData()` rimpiazza con freschi da Firestore
+- **Resume refresh**: al ritorno in app (evento `visibilitychange` / `focus`) ricarica i dati con throttle di 15 s
+- **Post-login redirect**: l'URL tentato prima del login è salvato in `sessionStorage` e ripristinato dopo l'autenticazione
+- **Onboarding gate**: utenti senza farm vengono reindirizzati a `/onboarding`
+
+---
+
+## ✅ Funzionalità in produzione
+
+### 🐷 Farms (gruppi)
+- Creazione farm con nome, emoji, privacy (`invite` / `open`)
+- Invito via link token (`/farms/join/:token`) — copia link con un tap
+- Gestione membri: lista, kick, ruoli (`owner` / `member`)
+- Gestione richieste join pendenti
+- Multi-farm: switch rapido tra fattorie, `lastActiveFarmId` persistito
+- Temi per farm (`default` / `cool` / `warm`)
+- Onboarding dedicato per nuovi utenti senza farm
+
+### 📅 Eventi
+- CRUD completo con 8 categorie (cena, aperitivo, viaggio, sport, festa, cinema, shopping, altro)
+- Priorità: `low` / `medium` / `high` — incide sull'ordinamento
+- Lifecycle: `planning` → `scheduled` → `done` / `canceled`
+- **Multi-day** (viaggi): `date` + `endDate`, presenza per singolo giorno (`days: Record<YYYY-MM-DD, boolean>`)
+- **Date planning MVP**: `proposedDates[]` con voto per data (`dateVotes`) + finalizzazione
+- Modello partecipazione doppio: nuovo `participation: Record<uid, EventParticipation>` + fallback legacy `participants[]`
+- Visibilità: `public` / `restricted` (farm-scoped con `visibility.farms[]` o user-list)
+- `participantIds[]` denormalizzato per le Firestore Security Rules
+- **Mappa evento**: campo opzionale `locationGeo: { lat, lon, address }` — geocodifica via Nominatim (OpenStreetMap, nessuna API key); visualizzazione con Leaflet nel dettaglio evento; lazy-loaded nel chunk `vendor-leaflet`
+- Ordinamenti: per data, creato asc/desc, priorità
+- Paginazione (`PAGINATION_LIMIT = 20`) con caricamento progressivo
+- **Condivisione pubblica**: route `/share/e/:id` senza auth; Cloud Function HTTPS `publicEvent` per i metadati
+- `chatLastActivityAt` su ogni evento per badge "Nuovi" messaggi
+
+### 💬 Chat per evento
+- Messaggi realtime (`onSnapshot` su `events/{id}/messages`)
+- Reazioni: `like` / `love` / `fun`
+- Modifica e cancellazione entro 15 minuti
+- Allegati: upload su Storage, tipi `image/video/file/audio`, progress bar
+- Messaggi di sistema (`type: 'system'`) per spese/sondaggi/liste creati
+- **Quote** messaggi (anteprima testo + miniatura media)
+- **@mention**: `mentions[]` con routing notifica "chatMention"
+- Badge booleano "Nuovi" basato su `lastReadByEvent` (per evento)
+- Muto per singolo evento
+- `ErrorBoundary` sul listener per evitare schermate bianche
+
+### 💰 Spese
+- CRUD con `title`, `amount`, `paidBy`, `participants[]`
+- Tipi di divisione: `equal` / `custom` / `percentage`
+- Allegati (scontrini/foto) e commenti inline
+- Calcolo saldi: "La tua situazione" collassabile
+- **`PaymentTransaction`**: registrazione pagamenti di saldo (scoped per farm o per evento)
+- Pagina `FarmSettlementPage` (`/farm/settlement`): settlement cross-event con filtro smart per farm
+
+### 📝 Liste
+- Tipi: `shopping` / `todo` / `transport` / `lodging`
+- Item con `status`, `dueDate`, `assignees[]`, `notes`
+- **Trasporti (macchine)**: `capacity` posti, `driver`, vincolo unicità
+- **Stanze**: `capacity` letti, vincolo unicità
+
+### 🗳️ Sondaggi
+- Creazione con opzioni multiple, scadenza (`votingEndsAt`), collegamento evento
+- Deep-link nella notifica push
+
+### 🔔 Notifiche
+- **FCM multi-device**: `fcmTokens[]` per più dispositivi per utente; deduplication + pulizia automatica token invalidi
+- **In-app persistenti**: salvataggio in `users/{uid}/notifications` (Firestore), realtime listener
+- **Telegram bot** (canale alternativo): notifiche via `TELEGRAM_BOT_TOKEN` con bottone "Apri App 📱"
+- Preferenze granulari per tipo: `event` / `expense` / `poll` / `list` / `chat`
+- Muto per evento (no push chat per quell'evento)
+- Permesso richiesto automaticamente al login (se `default`), skip silenzioso se `denied`
+- Test push da UI: `sendTestPush` Cloud Function HTTPS callable
+- Copy umani: "Stasera si gioca? 🎉", "Vota anche tu 🗳️", "Lista pronta 📝", "Nuova spesa 💰"
+
+### ☁️ Cloud Functions (Node 20)
+| Funzione | Trigger | Descrizione |
+|---|---|---|
+| `onEventCreated` | Firestore onCreate `events/{id}` | Notifiche ai partecipanti + tutti i member delle farm tagged; messaggi contestuali (oggi/domani/data) |
+| `onExpenseCreated` | Firestore onCreate `expenses/{id}` | Notifiche a payer + partecipanti spesa |
+| `onPollCreated` | Firestore onCreate `polls/{id}` | Notifiche ai partecipanti evento collegato |
+| `onListCreated` | Firestore onCreate `lists/{id}` | Notifiche ai partecipanti evento collegato |
+| `onChatMessageCreated` | Firestore onCreate `events/{eventId}/messages/{id}` | Push chat con rilevamento mention; skip messaggi di sistema |
+| `publicEvent` | HTTPS GET | Restituisce metadati evento pubblico (no auth) |
+| `sendTestPush` | HTTPS Callable | Test push end-to-end per l'utente chiamante |
+
+### 📱 PWA & UX
+- Service Worker `autoUpdate` (nessun prompt "Ricarica" su mobile)
+- `firebase-messaging-sw.js` gestisce push in background con tag per-tipo/per-entità
+- Installabile su Android (Chrome) e iOS 16.4+ (Safari)
+- **Farm Media** (`/farm/media`): galleria di tutti gli allegati immagine delle chat degli eventi della farm, con lightbox + navigazione tastiera
+
+---
+
+## 🗂️ Struttura sorgenti
 
 ```
 src/
-   components/           # UI (Navbar, BottomNav, Chat, Calendario, …)
-   pages/                # Home, Events, EventSummary, Expenses, Lists, Polls, PublicEvent, Settings, Notifications, NotificationPreferences
-   services/             # Firestore services (event/expense/list/poll/chat/user)
-   stores/               # Zustand (Auth, App, UserSettings, Notifications)
-   firebase/             # config, messaging SW client
-   types/                # tipi condivisi
+  App.tsx               # routing lazy + auth gate + onboarding gate + resume refresh
+  constants.ts          # categorie, APP_CONFIG (paginazione, limiti upload)
+  components/           # UI atomici e composti
+    Avatar/             # avatar utente con cache localStorage
+    Calendar/           # vista calendario eventi
+    Chat/               # componenti chat (messaggi, reazioni, allegati)
+    Layout/             # shell app (Navbar, BottomNav, sidebar)
+    ui/                 # primitivi (Button, Modal, Badge...)
+    EventForm.tsx       # form creazione/modifica evento
+    ExpenseForm.tsx     # form spesa con split
+    QuickEventForm.tsx  # form rapido evento (inline nella lista)
+    MvpEventCreateModal.tsx  # modal creazione evento da FarmDashboard
+    ExpenseSettlement.tsx    # componente saldi e transazioni
+    NotificationSystem.tsx   # toast in-app
+  pages/
+    HomePage.tsx              # dashboard farm: prossimo evento hero + attività recente
+    FarmDashboardPage.tsx     # riepilogo farm: eventi, membri, quick-create
+    FarmPage.tsx              # gestione farm: identità, admin, inviti, kick
+    FarmSettlementPage.tsx    # saldi cross-event per farm
+    FarmMediaPage.tsx         # galleria media chat
+    FarmEventPage.tsx         # evento nel contesto farm
+    JoinFarmPage.tsx          # join via token
+    OnboardingPage.tsx        # primo accesso: crea o entra in una farm
+    EventsPage.tsx            # lista eventi con RSVP inline
+    EventSummary.tsx          # dettaglio evento (tab: info, chat, spese, liste, sondaggi)
+    EventChatPage.tsx         # chat evento full-screen
+    ExpensesPage.tsx          # lista spese globali
+    PollsPage.tsx             # lista sondaggi
+    ListsPage.tsx             # liste collaborative
+    ChatsPage.tsx             # lista chat (tutte le farm)
+    SettingsPage.tsx          # profilo, notifiche, farm, debug
+    NotificationsPage.tsx     # inbox notifiche in-app
+    NotificationPreferencesPage.tsx  # preferenze push/desktop per tipo
+    PublicEvent.tsx           # pagina pubblica senza auth (/share/e/:id)
+    LoginPage.tsx             # Google Sign-in
+  services/
+    firestore.ts          # tutti i service objects Firestore (~1800 righe)
+    firestoreMappers.ts   # toDate / toTimestamp / cleanUndefinedDeep
+    notifications.ts      # listener realtime notifiche in-app
+  stores/
+    useAuthStore.ts       # Google Auth + loadUserData
+    AppStore.ts           # cache persist eventi/spese/liste/sondaggi
+    useActiveFarmStore.ts # farm attiva + switch
+    UserSettingsStore.ts  # profilo + notif settings + lastReadByEvent
+    useNotificationsStore.ts  # badge + lista notifiche in-app
+  types/index.ts          # interfacce condivise (Event, Expense, Poll, Farm...)
+  utils/
+    events.ts             # userCanViewEvent, getUserEventParticipation, getUserKeys
+    avatarCache.ts        # prefetch e cache avatar condivisi
+  firebase/
+    config.ts             # inizializzazione Firebase
+    messaging.ts          # initMessaging: permesso -> token -> salva su Firestore
+    utils.ts              # checkFirebaseConfig (dev only)
+  contexts/
+    FarmContext.tsx        # ActiveFarmProvider (activeFarmId, activeFarm)
+functions/src/index.ts    # Cloud Functions (7 handler)
+firestore.rules           # Security Rules con membership farm e participantIds
+storage.rules             # Security Rules Storage
+vite.config.ts            # build config + PWA manifest + generateFcmSwPlugin
 ```
+
+---
+
+## 🔐 Sicurezza
+
+- **Firestore Rules**: helper `userFarmIds()`, `isParticipant()`, `canViewFarmEvent()`, `canViewViaAnyFarm()` (loop unrolled per max 10 farm), `eventCutoffTime()` per visibilità temporale
+- **Sanitizzazione write**: `cleanUndefinedDeep()` applicato su ogni write; nessun `undefined` raggiunge Firestore
+- **Token FCM invalidi**: rimossi automaticamente dalla Cloud Function dopo un invio fallito
+- **Public share**: i metadati evento esposti via HTTPS Function includono solo campi safe (no participantIds, ecc.)
+- **Source maps**: disabilitati in produzione
+- **Credenziali Admin**: non versionare mai `functions/serviceAccount.json`; usa `functions/serviceAccount.example.json` come template locale
+
+---
 
 ## 🚀 Avvio rapido
 
-1) Requisiti: Node 20+ e un progetto Firebase (Auth, Firestore, Storage, Functions)
-2) Configura `.env.local` partendo da `.env.example` (incluso `VITE_FIREBASE_VAPID_KEY` per push)
-3) Comandi principali:
+**Requisiti:** Node 20+, progetto Firebase (Auth, Firestore, Storage, Functions)
 
-```
+```bash
 npm install
-npm run dev        # sviluppo
-npm run build      # build produzione
-npm run deploy     # build + deploy Hosting/Rules/Functions
+cp .env.example .env.local   # compila con le tue credenziali Firebase
+npm run dev                   # dev server (SW disabilitato)
+npm run build                 # tsc --noEmit + vite build
+npm run deploy                # build + deploy Hosting / Rules / Functions
+npm run deploy:functions      # solo Cloud Functions
+npm run build:icons           # rigenera icone PWA da scripts/generate-icons.mjs
 ```
 
-### Se vedi avvisi sui placeholder senderId/appId
+### Variabili d'ambiente richieste (`.env.local`)
 
-Se in console compare l’avviso “Skipping init: placeholder senderId/appId”, significa che nel file `.env.local` non hai ancora sostituito i valori di esempio:
+```
+VITE_FIREBASE_API_KEY=
+VITE_FIREBASE_AUTH_DOMAIN=
+VITE_FIREBASE_PROJECT_ID=
+VITE_FIREBASE_STORAGE_BUCKET=
+VITE_FIREBASE_MESSAGING_SENDER_ID=   # numerico, per FCM
+VITE_FIREBASE_APP_ID=                # da Firebase Console -> Your apps
+VITE_FIREBASE_VAPID_KEY=             # da Cloud Messaging -> Web push certificates
+```
 
-- VITE_FIREBASE_MESSAGING_SENDER_ID deve essere l’ID numerico del mittente FCM del tuo progetto
-- VITE_FIREBASE_APP_ID deve essere l’appId esatto della tua app Web
+> Se vedi "Skipping init: placeholder senderId/appId" in console, significa che queste variabili non sono state impostate. Il `firebase-messaging-sw.js` viene **rigenerato** automaticamente da queste variabili a ogni `buildStart`.
 
-Dove trovarli:
-- Vai su Firebase Console → Project settings (⚙️) → tab General → sezione “Your apps” → Web app → Config: copia `messagingSenderId` e `appId`
-- Per le notifiche push, imposta anche `VITE_FIREBASE_VAPID_KEY` da Project settings → tab Cloud Messaging → Web push certificates → “Key pair”
+---
 
-Dopo aver aggiornato `.env.local`, riavvia il dev server o rifai la build.
+## 🔔 Notifiche: guida all'attivazione
 
-## 🔔 Notifiche: Guida all'attivazione
-
-Per ricevere le notifiche push (messaggi, eventi, spese, ecc.) è necessario installare l'app come PWA. Ecco come fare:
+Per ricevere le notifiche push è necessario installare l'app come PWA.
 
 ### 🤖 Android
-1. Apri **Chrome** e vai su `https://gvnapp-e3e7d.web.app`
-2. Tocca il menu (tre puntini in alto a destra)
-3. Seleziona **"Installa app"** o **"Aggiungi a schermata Home"**
-4. Apri l'app appena installata dalla schermata Home
-5. Al primo avvio (o andando in Impostazioni), accetta la richiesta di permessi per le notifiche
+1. Apri **Chrome** → `https://gvnapp-e3e7d.web.app`
+2. Menu → **"Installa app"** / **"Aggiungi a schermata Home"**
+3. Apri l'app installata → al primo avvio accetta i permessi notifiche
 
-### 🍎 iOS (iPhone/iPad)
-*Nota: Su iOS le notifiche web funzionano solo dalla versione 16.4 in poi e SOLO se l'app è aggiunta alla Home.*
-
-1. Apri **Safari** (obbligatorio, altri browser potrebbero non funzionare)
+### 🍎 iOS 16.4+ (iPhone/iPad)
+1. Apri **Safari** (obbligatorio)
 2. Vai su `https://gvnapp-e3e7d.web.app`
-3. Tocca il tasto **Condividi** (quadrato con freccia in basso al centro)
-4. Scorri e seleziona **"Aggiungi alla schermata Home"**
-5. Apri l'app "GVNApp" che è apparsa sulla tua Home
-6. Vai in **Impostazioni** nell'app e assicurati che le notifiche siano attive. Quando richiesto da iOS, tocca **"Consenti"**
+3. Tasto **Condividi** → **"Aggiungi alla schermata Home"**
+4. Apri l'app dalla Home → Impostazioni → attiva notifiche → **"Consenti"**
 
-### ⚠️ Risoluzione problemi
-Se non ricevi le notifiche:
-1. Vai in **Impostazioni** nell'app
-2. Clicca su **"Reset Service Worker ⚠️"**
-3. Ricarica l'app
-4. Clicca su **"Test push"** per verificare il funzionamento
+### ⚠️ Troubleshooting
+1. Impostazioni → **"Reset Service Worker ⚠️"** → ricarica
+2. **"Test push"** per verificare il funzionamento end-to-end
 
-## 🔔 Notifiche: come funzionano (Tecnico)
+### Come funzionano (tecnico)
+- `firebase-messaging-sw.js` gestisce `push` + `notificationclick` in background con tag per-tipo/entità
+- `initMessaging()` in `src/firebase/messaging.ts`: registra SW → richiede permesso → salva token in `users/{uid}.notifications.fcmTokens[]`
+- Cloud Functions rispettano `pushEnabled` + preferenze per tipo (`types.chat`, `types.event`, ecc.)
+- Canale alternativo: **Telegram bot** (configura `TELEGRAM_BOT_TOKEN` nelle Functions config)
 
-- SW dedicato `public/firebase-messaging-sw.js` gestisce `push` e `notificationclick` (background)
-- In app, `initMessaging()` chiede permesso e salva il token FCM nel documento utente (`users/{id}`)
-- Le Cloud Functions inviano push solo se consentite e rispettando le preferenze per tipologia
-- Pagina “Preferenze notifiche” (`/notifications/settings`) per attivare push/desktop e scegliere i tipi
-
-## 🔐 Sicurezza & robustezza
-
-- Sanitizzazione update verso Firestore (rimozione `undefined`, propagazione errori reali Firebase)
-- Listener realtime con `onError` e banner UI per evitare schermate bianche
-- (Da indurire ulteriormente) Regole Firestore per chat solo partecipanti
+---
 
 ## 🧭 Roadmap (idee prossime)
 
-- Notifiche chat più smart (menzioni, allegati), promemoria evento (N ore prima)
-- Conteggio numerico “non letti” per chat nella lista eventi (oggi è badge booleano “Nuovi”)
-- Regole Firestore più strette per chat e preferenze; pruning token FCM invalidi
-- Migrazione `firebase-functions` all’ultima major (breaking changes) e metriche consegna
-- Ottimizzazione bundle (code‑splitting manualChunks) per ridurre il chunk principale
-- Pagina mappa/assegnazione stanze in stile “piantina”
+- Promemoria evento (push N ore prima)
+- Conteggio numerico "non letti" per chat nella lista eventi (oggi: badge booleano)
+- Regole Firestore più strette per chat (solo partecipanti)
+- Migrazione a Firebase Functions v2 (gen2) per cold start ridotti
+- Metriche consegna push (success rate, pruning automatico token stagni)
 - Modalità offline avanzata (draft queue, sync al ritorno rete)
+- Menzioni push smart (solo @me, non tutti)
 
-## 🧯 Bug backlog / Fix plan (work items)
+---
 
-> Serve per allineare riproduzione + file target + “done”.  
-> Per procedere coi fix: condividi i file indicati (o conferma i path esatti nel repo).
+## 🧯 Bug backlog / Fix plan
+
+> Per procedere sui fix: condividi i file indicati o incolla lo stacktrace completo.
 
 ### (1) Duplicazioni form
 - **Sintomo:** lo stesso form esiste in più varianti/route/modal con logiche duplicate; bugfix non propagano.
-- **Ipotesi:** componenti “-complete/-firebase” divergenti o state duplicato tra modal/page.
-- **File target (probabili):** `src/components/**/**Form*.tsx`, `src/pages/**/*Form*.tsx`, `src/App.tsx` (routing), eventuali hook.
-- **Done:** un solo componente sorgente (o wrapper) + props tipizzate; rimosse duplicazioni o consolidate.
+- **File target:** `src/components/**/*Form*.tsx`, `src/App.tsx` (routing)
+- **Done:** un solo componente sorgente + props tipizzate; nessuna duplicazione.
 
 ### (2) Date miste (Timestamp/Date/string)
-- **Sintomo:** sorting/filtri incoerenti; UI che mostra date “sballate” o crash su `.toDate()`.
-- **Ipotesi:** conversione non centralizzata; write non normalizzati; campi opzionali non sanitizzati.
-- **File target (obbligatorio):** `src/services/firestore.ts` (helper `toDate`/sanitizzazione), `src/types/index.ts`.
-- **Done:** servizi convertono sempre in `Date` in lettura e scrivono `Timestamp` in scrittura; niente `undefined` verso Firestore.
+- **Sintomo:** sorting/filtri incoerenti; UI mostra date "sballate" o crash su `.toDate()`.
+- **File target:** `src/services/firestoreMappers.ts`, `src/services/firestore.ts`, `src/types/index.ts`
+- **Done:** `toDate` / `toTimestamp` applicati sistematicamente; nessun `undefined` verso Firestore.
 
 ### (3) Spese senza evento invisibili
-- **Sintomo:** spese “globali”/senza `eventId` non compaiono in lista o non sono raggiungibili.
-- **Ipotesi:** query filtra solo per `eventId`/route richiede sempre id evento; UI non gestisce `null`.
-- **File target (probabili):** `src/services/firestore.ts` (expenseService query), `src/pages/Expenses*.tsx`, eventuale store spese.
-- **Done:** una vista/section “Senza evento” oppure supporto esplicito a `eventId: null|undefined` con query dedicata.
+- **Sintomo:** spese globali (`eventId` assente) non compaiono in lista.
+- **File target:** `src/services/firestore.ts` (expenseService query), `src/pages/ExpensesPage.tsx`
+- **Done:** sezione "Senza evento" oppure query dedicata per `eventId: null`.
 
 ### (4) iOS push incoerente
-- **Sintomo:** permessi/subscribe instabili; token non salvato; notifiche arrivano “a volte”.
-- **Ipotesi:** iOS richiede PWA installata + Safari; race tra SW registration e `getToken`; gestione errata di `Notification.permission`.
-- **File target (probabili):** `src/firebase/messaging.ts`, `public/firebase-messaging-sw.js`, eventuale UI settings notifiche.
-- **Done:** flow deterministico: registra SW → richiedi permesso (solo se installabile/standalone su iOS) → ottieni token → salva su `users/{id}`; retry + messaggi chiari.
+- **Sintomo:** permessi/subscribe instabili; token non salvato; notifiche arrivano "a volte".
+- **File target:** `src/firebase/messaging.ts`, `public/firebase-messaging-sw.js`
+- **Done:** flow deterministico SW → permesso → token → salva; retry + messaggi chiari.
 
 ### (5) `as any` nello store
 - **Sintomo:** buchi di typing, possibili runtime error mascherati.
-- **Ipotesi:** stato iniziale o setter non tipizzati; payload Firestore “unknown”.
-- **File target (probabili):** `src/stores/*.ts`, `src/types/index.ts`.
-- **Done:** eliminati `as any`; typing esplicito e narrowing su dati esterni.
+- **File target:** `src/stores/*.ts`, `src/types/index.ts`
+- **Done:** eliminati `as any`; typing esplicito con narrowing.
 
 ### (6) Rounding importi (spese)
-- **Sintomo:** centesimi “fantasma”/somma quote != totale; UI mostra 9.999999 o 10.000001.
-- **Ipotesi:** uso di float senza normalizzazione; split quote senza arrotondamento coerente.
-- **File target (probabili):** calcolo bilanci (page/service/util), tipi importo.
-- **Done:** importi gestiti in **centesimi interi** o rounding centralizzato (es. `roundTo2` + invarianti); test su split e saldi.
+- **Sintomo:** centesimi "fantasma"; UI mostra 9.999999 o 10.000001.
+- **File target:** calcolo bilanci in `ExpensesPage`, `ExpenseSettlement`, `firestore.ts`
+- **Done:** rounding centralizzato `roundTo2` o importi in centesimi interi.
 
-### (7) Errore durante l’iscrizione ad un evento (RSVP / join)
-- **Sintomo:** clic su “Partecipo / Forse / No” (o iscrizione) → errore e stato non salvato.
-- **Da incollare qui (fondamentale):**
-  - Messaggio completo in **console** (stacktrace) e eventuale `FirebaseError: ... (permission-denied|failed-precondition|invalid-argument|unauthenticated)`
-  - Payload minimo: `eventId`, azione scelta (yes/no/maybe), se l’utente è loggato, e se l’evento è pubblico/condiviso.
-- **Checklist debug veloce:**
-  - Verifica `auth.currentUser` presente al click (niente sessione scaduta).
-  - Se errore `permission-denied`: controlla **Firestore rules** su update di `events/{id}` (partecipanti / presence multi-day).
-  - Se errore `invalid-argument`: probabile write con `undefined` o tipo data non valido → sanitizzazione nel service.
-  - Se UI resta “ottimistica” ma poi rollback: gestire `catch` e mostrare errore + ripristino stato.
-- **File target (probabili):**
-  - `src/services/firestore.ts` (eventService: metodo RSVP/join/update partecipazione; sanitizzazione `undefined`; Timestamp/Date)
-  - `src/pages/EventsPage-*.tsx` / `src/pages/EventSummary*.tsx` (handler click + UI error)
-  - `firestore.rules` (permessi update campi partecipazione)
-  - eventuale store eventi (`src/stores/*.ts`)
-- **Done:** iscrizione affidabile (online), errore mostrato in modo chiaro, nessun write con `undefined`, regole allineate al modello dati.
+### (7) Errore RSVP / join evento
+- **Sintomo:** clic su "Partecipo / Forse / No" → errore, stato non salvato.
+- **Checklist debug:**
+  - `auth.currentUser` presente? (sessione non scaduta)
+  - `permission-denied` → verifica Firestore rules su `events/{id}` update
+  - `invalid-argument` → write con `undefined` → `cleanUndefinedDeep` mancante
+  - UI ottimistica poi rollback → gestire `catch` con ripristino stato
+- **File target:** `src/services/firestore.ts` (eventService RSVP), `src/pages/EventsPage.tsx`, `src/pages/EventSummary.tsx`, `firestore.rules`
+- **Done:** iscrizione affidabile, errore UI esplicito, nessun write con `undefined`.
+
+---
 
 ## 🔗 Link utili
 
@@ -201,7 +365,9 @@ Se non ricevi le notifiche:
 - Tailwind: https://tailwindcss.com
 - Firebase: https://firebase.google.com/docs
 - Zustand: https://docs.pmnd.rs/zustand
+- React Hook Form: https://react-hook-form.com
+- Zod: https://zod.dev
 
-—
+---
 
 GVNApp 2.0 — organizzare fra amici senza sbatti. 🎉
