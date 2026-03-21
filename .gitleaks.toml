@@ -1,0 +1,10 @@
+title = "GVNApp secret scanning config"
+
+[allowlist]
+description = "Allow safe template and docs examples"
+paths = [
+  '''functions/serviceAccount.example.json''',
+  '''docs/SECURITY-REMEDIATION-2026-03-21.md'''
+]
+
+# Keep default gitleaks rules enabled; this file only adds allowlist paths
