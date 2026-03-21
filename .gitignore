@@ -113,6 +113,9 @@ firestore-debug.log*
 # Secrets (never commit credentials)
 functions/serviceAccount.json
 **/serviceAccount.json
+**/serviceAccount.*.json
+*.pem
+*.p12
 
 # Local agent/tool config
 .claude/
