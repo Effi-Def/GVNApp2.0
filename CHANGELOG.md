@@ -6,6 +6,7 @@
 - Scelta di chi ha pagato una spesa, anche diverso da chi la inserisce.
 - Link a Spese, Sondaggi e Liste nel menu, anche su tablet.
 - `functions/scripts/check-legacy-docs.cjs`: controllo in sola lettura dei documenti legacy.
+- Cose da fare: idee della fattoria con "Ci sto", da trasformare in evento o sondaggio; quando non c'e` niente in programma le piu` votate compaiono in Home.
 
 ### Changed
 - Nomi coerenti in tutta l'app: Fattoria, Maiali e Re Maiale.
@@ -19,9 +20,10 @@
 - I profili non sono piu` elencabili e non contengono piu` l'email.
 - Tema scuro, allineamento testi, menu tra 768 e 1023 px, titolo chat su desktop.
 - Compilazione delle Cloud Functions.
+- I Maiali che non hanno creato un sondaggio possono votarlo; i nuovi sondaggi senza evento sono visibili a tutta la fattoria.
 
 ### Notes
-- Per entrare in funzione servono il deploy di hosting, regole e functions.
+- Per entrare in funzione servono il deploy di hosting, regole, indici e functions.
 - Restano aperte le eccezioni legacy sui documenti senza `participantIds`.
 
 ## [0.1.0] - 2026-03-22

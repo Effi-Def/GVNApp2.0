@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { eventService, farmService } from '../services/firestore'
 import { useFarmContext } from '../contexts/FarmContext'
+import { useFarmIdeas } from '../hooks/useFarmIdeas'
 import { useActiveFarmStore } from '../stores/useActiveFarmStore'
 import { useAppStore } from '../stores/AppStore'
 import { refreshActiveFarmData, useAuthStore } from '../stores/useAuthStore'
@@ -10,6 +11,7 @@ import TutorialModal, { shouldShowTutorial } from '../components/TutorialModal'
 import { getUserKeys, getUserEventParticipation, userCanViewEvent } from '../utils/events'
 import { formatEuro } from '../utils/expenseUtils'
 import { FIRST_RUN_EVENT } from '../utils/firstRun'
+import { getIdeaCategory, rankOpenIdeas } from '../utils/ideas'
 
 type RsvpStatus = 'yes' | 'maybe' | 'no'
 
@@ -267,6 +269,10 @@ export default function HomePage() {
     const graceMs = 1000 * 60 * 60 * 2
     return sortedEvents.find((e) => (e.date?.getTime?.() || 0) >= now - graceMs) || null
   }, [sortedEvents])
+
+  // Ideas resurface on Home only when nothing is planned
+  const { ideas } = useFarmIdeas(heroEvent ? null : activeFarmId)
+  const topIdeas = useMemo(() => rankOpenIdeas(ideas).slice(0, 3), [ideas])
 
   const upcomingEvents = useMemo(() => {
     const now = Date.now()
@@ -613,6 +619,44 @@ export default function HomePage() {
             >
               📅 Ho una data
             </button>
+          </div>
+          <div className="mt-4 pt-3 border-t border-[--border-base]">
+            {topIdeas.length > 0 ? (
+              <>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-[--text-muted]">Dalle vostre idee</div>
+                  <button
+                    type="button"
+                    className="text-xs text-[--text-muted] hover:text-[--text-base] transition"
+                    onClick={() => navigate('/ideas')}
+                  >
+                    Vedi tutte
+                  </button>
+                </div>
+                <div className="mt-1">
+                  {topIdeas.map((idea) => (
+                    <button
+                      key={idea.id}
+                      type="button"
+                      className="w-full text-left flex items-center gap-3 py-2 rounded-lg hover:bg-[--bg-subtle] transition"
+                      onClick={() => navigate('/ideas')}
+                    >
+                      <span className="shrink-0" aria-hidden>{getIdeaCategory(idea.category).emoji}</span>
+                      <span className="flex-1 min-w-0 text-sm font-medium text-[--text-base] truncate">{idea.title}</span>
+                      <span className="shrink-0 text-xs text-[--text-muted]">🐷 {idea.interestedIds.length}</span>
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="text-sm text-[--text-muted] hover:text-[--text-base] transition"
+                onClick={() => navigate('/ideas?create=1')}
+              >
+                💡 Avete un’idea per la prossima uscita? <span className="underline">Segnatela</span>
+              </button>
+            )}
           </div>
         </div>
       )}

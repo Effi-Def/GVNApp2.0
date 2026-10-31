@@ -99,7 +99,7 @@ const PollsPage = () => {
         setEvents(myEvents)
         // Filtra i sondaggi ai soli eventi a cui partecipo
         const myIds = new Set(myEvents.map(e => e.id))
-        setPolls(pls.filter(p => !p.eventId || myIds.has(p.eventId)))
+        setPolls(pls.filter(p => p.eventId ? myIds.has(p.eventId) : (!p.farmId || p.farmId === activeFarmId)))
       } catch (error) {
         console.error('❌ Error loading data:', error)
       } finally {
@@ -138,11 +138,12 @@ const PollsPage = () => {
     if (!shouldCreate) return
 
     const pollType: 'date' | 'generic' = params.get('type') === 'date' ? 'date' : 'generic'
+    const idea = location?.state?.idea as { title?: string; note?: string } | undefined
     setEditingPoll(null)
     setShowForm(true)
     setFormData({
-      title: pollType === 'date' ? 'Quando siete liberi?' : '',
-      description: '',
+      title: idea?.title ? `Quando facciamo “${idea.title}”?` : (pollType === 'date' ? 'Quando siete liberi?' : ''),
+      description: idea?.note || '',
       eventId: '',
       votingDurationHours: pollType === 'date' ? 72 : 24,
       options: pollType === 'date' ? ['', '', ''] : ['', ''],
@@ -276,6 +277,8 @@ const PollsPage = () => {
         options: pollOptions,
         createdBy: currentUserId,
         eventId: formData.eventId || undefined,
+        // Without an event the farm is what makes the poll visible to the others
+        farmId: formData.eventId ? undefined : (activeFarmId || undefined),
         isActive: true,
         votingDurationHours: formData.votingDurationHours,
         votingEndsAt: new Date(Date.now() + formData.votingDurationHours * 60 * 60 * 1000)
@@ -344,8 +347,8 @@ const PollsPage = () => {
         updatedAt: new Date()
       }
 
-      await pollService.update(pollId, updatedPollData)
-      
+      await pollService.vote(pollId, newVote)
+
       // Aggiorna lo stato locale
       setPolls(prev => prev.map(p => 
         p.id === pollId ? updatedPollData : p

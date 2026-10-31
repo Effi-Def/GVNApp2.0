@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { eventService, farmService } from '../services/firestore'
+import { eventService, farmService, ideaService } from '../services/firestore'
 import { db } from '../firebase/config'
 import { doc, getDoc, QueryDocumentSnapshot } from 'firebase/firestore'
 import { refreshActiveFarmData, useAuthStore } from '../stores/useAuthStore'
@@ -13,6 +13,15 @@ import QuickEventForm, { QuickEventFormValues } from '../components/QuickEventFo
 import AdvancedSection from '../components/AdvancedSection'
 import { useActiveFarmStore } from '../stores/useActiveFarmStore'
 import { useFarmContext } from '../contexts/FarmContext'
+
+type IdeaPrefill = {
+  id: string
+  farmId: string
+  title: string
+  note?: string
+  location?: string
+  category: EventCategory
+}
 
 const EventsPage = () => {
   const { user } = useAuthStore()
@@ -27,7 +36,14 @@ const EventsPage = () => {
   const [submitting, setSubmitting] = useState(false)
   const [activeFarmMembers, setActiveFarmMembers] = useState<FarmMembership[]>([])
   const [quickPrefillDate, setQuickPrefillDate] = useState('')
-  
+  const [ideaPrefill, setIdeaPrefill] = useState<IdeaPrefill | null>(null)
+  const quickInitialValues = useMemo(() => ideaPrefill ? {
+    title: ideaPrefill.title,
+    description: ideaPrefill.note,
+    location: ideaPrefill.location,
+    category: ideaPrefill.category,
+  } : undefined, [ideaPrefill])
+
   // Pagination state
   const [loadingMore, setLoadingMore] = useState(false)
   const [hasMore, setHasMore] = useState(true)
@@ -177,6 +193,7 @@ const EventsPage = () => {
     if (shouldCreate) {
       setEditingEvent(null)
       setShowForm(true)
+      setIdeaPrefill((location.state as { idea?: IdeaPrefill } | null)?.idea ?? null)
       if (dateParam) {
         setQuickPrefillDate(dateParam)
       }
@@ -221,6 +238,18 @@ const EventsPage = () => {
       addEvent(newEvent)
       setShowForm(false)
       setQuickPrefillDate('')
+      if (ideaPrefill) {
+        const idea = ideaPrefill
+        setIdeaPrefill(null)
+        // Drop the prefill from history: a reload must not offer the same event again
+        navigate('/events', { replace: true })
+        try {
+          await ideaService.markOrganized(idea.farmId, idea.id, newEvent.id)
+        } catch (error) {
+          console.error('❌ Error linking idea to event:', error)
+          alert('Evento creato, ma l’idea risulta ancora da organizzare. Puoi riprovare da Cose da fare.')
+        }
+      }
       console.log('✅ Quick event created successfully')
     } catch (error) {
       console.error('❌ Error creating quick event:', error)
@@ -447,6 +476,7 @@ const EventsPage = () => {
             onClick={() => {
               setEditingEvent(null)
               setQuickPrefillDate('')
+              setIdeaPrefill(null)
               setShowForm(true)
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-lg transition-colors"
@@ -609,10 +639,12 @@ const EventsPage = () => {
           onClose={() => {
             setShowForm(false)
             setQuickPrefillDate('')
+            setIdeaPrefill(null)
           }}
           onSubmit={handleQuickCreateEvent}
           isLoading={submitting}
           initialDate={quickPrefillDate}
+          initialValues={quickInitialValues}
           farmMembers={activeFarmMembers}
           farmName={activeFarm?.name}
         />

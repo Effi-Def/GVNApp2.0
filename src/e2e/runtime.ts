@@ -3,6 +3,7 @@ import {
   eventService,
   expenseService,
   farmService,
+  ideaService,
   listService,
   paymentService,
   pollService,
@@ -16,8 +17,11 @@ import type {
   Expense,
   Farm,
   FarmMembership,
+  Idea,
+  IdeaDraft,
   PaymentTransaction,
   Poll,
+  PollVote,
   ShoppingList,
   User,
   UserPrivate,
@@ -65,6 +69,7 @@ type MockDb = {
   payments: Record<string, PaymentTransaction>
   polls: Record<string, Poll>
   lists: Record<string, ShoppingList>
+  ideas: Record<string, Idea>
   chats: Record<string, ChatMessage[]>
   chatParticipants: Record<string, ChatParticipantState[]>
   typing: Record<string, TypingState[]>
@@ -74,6 +79,9 @@ type MockDb = {
     expense: number
     payment: number
     chat: number
+    poll: number
+    list: number
+    idea: number
   }
 }
 
@@ -98,7 +106,9 @@ const OTHER_USER: User = {
 type MessageListener = (messages: ChatMessage[]) => void
 type ParticipantListener = (participants: ChatParticipantState[]) => void
 type TypingListener = (entries: TypingState[]) => void
+type IdeaListener = (ideas: Idea[]) => void
 
+const ideaListeners = new Map<string, Set<IdeaListener>>()
 const messageListeners = new Map<string, Set<MessageListener>>()
 const participantListeners = new Map<string, Set<ParticipantListener>>()
 const typingListeners = new Map<string, Set<TypingListener>>()
@@ -163,6 +173,7 @@ export function installE2ERuntime() {
   patchExpenseService()
   patchPaymentService()
   patchPollAndListServices()
+  patchIdeaService()
   patchChatService()
 
   try {
@@ -246,7 +257,7 @@ function updateDb(mutator: (db: MockDb) => void) {
 function ensureDb() {
   const scenario = getE2EScenario()
   const existing = readDb()
-  if (existing && existing.scenario === scenario) {
+  if (existing && existing.scenario === scenario && existing.ideas) {
     return existing
   }
   const seeded = createScenarioDb(scenario)
@@ -367,6 +378,7 @@ function createScenarioDb(scenario: E2EScenario): MockDb {
     payments: {},
     polls: {},
     lists: {},
+    ideas: {},
     chats: { [E2E_SEEDED_EVENT_ID]: [] },
     chatParticipants: {
       [E2E_SEEDED_EVENT_ID]: [
@@ -381,6 +393,9 @@ function createScenarioDb(scenario: E2EScenario): MockDb {
       expense: 0,
       payment: 0,
       chat: 0,
+      poll: 0,
+      list: 0,
+      idea: 0,
     },
   }
 
@@ -724,22 +739,141 @@ function patchPaymentService() {
 function patchPollAndListServices() {
   Object.assign(pollService as object, {
     async getAll() {
-      return []
+      return cloneValue(sortByNewest(Object.values(ensureDb().polls)))
     },
     async getForUserVisibleEvents() {
-      return []
+      return cloneValue(sortByNewest(Object.values(ensureDb().polls)))
+    },
+    async create(pollData: Omit<Poll, 'id' | 'createdAt' | 'updatedAt' | 'votes'>) {
+      const now = new Date()
+      const created: Poll = { ...cloneValue(pollData), id: nextId('poll', 'poll'), votes: [], createdAt: now, updatedAt: now }
+      updateDb((db) => {
+        db.polls[created.id] = created
+      })
+      return cloneValue(created)
+    },
+    async update(pollId: string, pollData: Partial<Poll>) {
+      updateDb((db) => {
+        const current = db.polls[pollId]
+        if (current) db.polls[pollId] = { ...current, ...cloneValue(pollData), updatedAt: new Date() }
+      })
+    },
+    async vote(pollId: string, vote: PollVote) {
+      updateDb((db) => {
+        const current = db.polls[pollId]
+        if (current) current.votes.push(cloneValue(vote))
+      })
+    },
+    async delete(pollId: string) {
+      updateDb((db) => {
+        delete db.polls[pollId]
+      })
     },
   })
 
   Object.assign(listService as object, {
     async getAll() {
-      return []
+      return cloneValue(sortByNewest(Object.values(ensureDb().lists)))
     },
-    async getByEventId() {
-      return []
+    async getByEventId(eventId: string) {
+      return cloneValue(sortByNewest(Object.values(ensureDb().lists).filter((list) => list.eventId === eventId)))
     },
     async getForUserVisibleEvents() {
-      return []
+      return cloneValue(sortByNewest(Object.values(ensureDb().lists)))
+    },
+    async create(listData: Omit<ShoppingList, 'id' | 'createdAt' | 'updatedAt'>) {
+      const now = new Date()
+      const created: ShoppingList = { ...cloneValue(listData), id: nextId('list', 'list'), createdAt: now, updatedAt: now }
+      updateDb((db) => {
+        db.lists[created.id] = created
+      })
+      return cloneValue(created)
+    },
+    async update(listId: string, listData: Partial<ShoppingList>) {
+      updateDb((db) => {
+        const current = db.lists[listId]
+        if (current) db.lists[listId] = { ...current, ...cloneValue(listData), updatedAt: new Date() }
+      })
+    },
+    async delete(listId: string) {
+      updateDb((db) => {
+        delete db.lists[listId]
+      })
+    },
+  })
+}
+
+function farmIdeas(farmId: string) {
+  return sortByNewest(Object.values(ensureDb().ideas).filter((idea) => idea.farmId === farmId))
+}
+
+function changeIdea(ideaId: string, change: (idea: Idea) => void) {
+  let farmId = ''
+  updateDb((db) => {
+    const idea = db.ideas[ideaId]
+    if (!idea) return
+    change(idea)
+    idea.updatedAt = new Date()
+    farmId = idea.farmId
+  })
+  if (farmId) notifyIdeas(farmId)
+}
+
+function notifyIdeas(farmId: string) {
+  const payload = cloneValue(farmIdeas(farmId))
+  ideaListeners.get(farmId)?.forEach((listener) => listener(payload))
+}
+
+function patchIdeaService() {
+  Object.assign(ideaService as object, {
+    listen(farmId: string, onData: IdeaListener) {
+      return registerListener(ideaListeners, farmId, onData, farmIdeas(farmId))
+    },
+    async create(farmId: string, draft: IdeaDraft, userId: string) {
+      const now = new Date()
+      const created: Idea = {
+        ...cloneValue(draft),
+        id: nextId('idea', 'idea'),
+        farmId,
+        createdBy: userId,
+        interestedIds: [userId],
+        status: 'open',
+        createdAt: now,
+        updatedAt: now,
+      }
+      updateDb((db) => {
+        db.ideas[created.id] = created
+      })
+      notifyIdeas(farmId)
+    },
+    async update(_farmId: string, ideaId: string, draft: IdeaDraft) {
+      changeIdea(ideaId, (idea) => {
+        Object.assign(idea, { note: undefined, link: undefined, location: undefined }, cloneValue(draft))
+      })
+    },
+    async setInterest(_farmId: string, ideaId: string, userId: string, interested: boolean) {
+      changeIdea(ideaId, (idea) => {
+        const others = idea.interestedIds.filter((id) => id !== userId)
+        idea.interestedIds = interested ? [...others, userId] : others
+      })
+    },
+    async markOrganized(_farmId: string, ideaId: string, eventId: string) {
+      changeIdea(ideaId, (idea) => {
+        idea.status = 'organized'
+        idea.eventId = eventId
+      })
+    },
+    async reopen(_farmId: string, ideaId: string) {
+      changeIdea(ideaId, (idea) => {
+        idea.status = 'open'
+        idea.eventId = undefined
+      })
+    },
+    async delete(farmId: string, ideaId: string) {
+      updateDb((db) => {
+        delete db.ideas[ideaId]
+      })
+      notifyIdeas(farmId)
     },
   })
 }

@@ -878,7 +878,31 @@ export const exportUserData = functions.https.onCall(async (_data, context) => {
       }
     })
 
-    // 8. In-app notifications (latest 500)
+    // 8. Ideas created by the user or marked "Ci sto" (also from farms the user has left)
+    const [createdIdeasSnap, interestedIdeasSnap] = await Promise.all([
+      db().collectionGroup('ideas').where('createdBy', '==', uid).get(),
+      db().collectionGroup('ideas').where('interestedIds', 'array-contains', uid).get(),
+    ])
+    const ideaMap = new Map<string, Record<string, unknown>>()
+    for (const d of [...createdIdeasSnap.docs, ...interestedIdeasSnap.docs]) {
+      if (ideaMap.has(d.ref.path)) continue
+      const i = d.data()
+      ideaMap.set(d.ref.path, {
+        id: d.id,
+        farmId: i.farmId ?? null,
+        title: i.title ?? null,
+        category: i.category ?? null,
+        note: i.note ?? null,
+        link: i.link ?? null,
+        location: i.location ?? null,
+        isCreator: i.createdBy === uid,
+        interested: Array.isArray(i.interestedIds) && i.interestedIds.includes(uid),
+        createdAt: toIsoString(i.createdAt),
+      })
+    }
+    const ideas = Array.from(ideaMap.values())
+
+    // 9. In-app notifications (latest 500)
     const notifsSnap = await db()
       .collection('users').doc(uid).collection('notifications')
       .orderBy('createdAt', 'desc').limit(500)
@@ -909,6 +933,7 @@ export const exportUserData = functions.https.onCall(async (_data, context) => {
       payments,
       polls,
       lists,
+      ideas,
       notifications,
     }
   } catch (e) {

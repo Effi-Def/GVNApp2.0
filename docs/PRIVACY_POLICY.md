@@ -9,7 +9,7 @@ Per richieste sui dati personali utilizzare i canali di supporto indicati nel re
 
 ## 2. Dati trattati
 - Dati account: identificativi Google, email, nome visualizzato.
-- Dati di utilizzo: eventi, partecipazioni, messaggi chat, spese, pagamenti, sondaggi, liste.
+- Dati di utilizzo: eventi, partecipazioni, messaggi chat, spese, pagamenti, sondaggi, liste, idee.
 - Dati tecnici: token notifiche push, log tecnici necessari per sicurezza e affidabilita`.
 
 ## 3. Finalita` del trattamento

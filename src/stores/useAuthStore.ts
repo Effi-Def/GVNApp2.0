@@ -102,7 +102,7 @@ async function _doLoadUserData() {
 
       const [scopedExpenses, scopedPolls] = await Promise.all([
         expenseService.getForEventIds(Array.from(activeFarmEventIds)).catch(() => []),
-        pollService.getForUserVisibleEvents({ userId: u?.id || '', eventIds: Array.from(activeFarmEventIds) }).catch(() => []),
+        pollService.getForUserVisibleEvents({ userId: u?.id || '', eventIds: Array.from(activeFarmEventIds), farmId: activeFarmId }).catch(() => []),
       ])
 
       const listsData = u?.id
@@ -167,7 +167,7 @@ async function _doRefreshActiveFarmData() {
 
     const [scopedExpenses, scopedPolls] = await Promise.all([
       expenseService.getForEventIds(Array.from(activeFarmEventIds)).catch(() => []),
-      pollService.getForUserVisibleEvents({ userId: u.id, eventIds: Array.from(activeFarmEventIds) }).catch(() => []),
+      pollService.getForUserVisibleEvents({ userId: u.id, eventIds: Array.from(activeFarmEventIds), farmId: activeFarmId }).catch(() => []),
     ])
     const listsData = await listService.getForUserVisibleEvents({ userId: u.id, eventIds: Array.from(activeFarmEventIds) }).catch(() => [])
 

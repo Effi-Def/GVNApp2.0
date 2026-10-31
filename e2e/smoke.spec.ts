@@ -62,6 +62,37 @@ test('crea evento -> RSVP -> chat invio messaggio', async ({ page }) => {
   await expect(page.getByRole('main').getByText('Messaggio smoke e2e', { exact: true })).toBeVisible()
 })
 
+test('crea idea -> Ci sto -> organizza evento', async ({ page }) => {
+  await primeRuntime(page, { scenario: 'seeded', auth: 'signed-in' })
+
+  await page.goto('/ideas?create=1')
+  await expect(page.getByText('Nuova idea', { exact: true }).last()).toBeVisible()
+  await page.getByLabel('Cosa vi piacerebbe fare?').fill('Pesce a Sori')
+  await page.locator('form').getByRole('button', { name: /Ristorante/ }).click()
+  await page.locator('form').getByRole('button', { name: 'Aggiungi', exact: true }).click()
+
+  const interest = page.getByRole('button', { name: /Ci sto/ })
+  await expect(interest).toHaveText(/Ci sto · 1/)
+  await interest.click()
+  await expect(interest).toHaveText(/Ci sto · 0/)
+  await interest.click()
+  await expect(interest).toHaveText(/Ci sto · 1/)
+
+  await page.getByRole('article').getByRole('button', { name: 'Organizza', exact: true }).click()
+  await page.getByRole('button', { name: /Ho una data/ }).click()
+
+  await expect(page.getByText('Nuovo Evento')).toBeVisible()
+  await expect(page.getByLabel('Titolo')).toHaveValue('Pesce a Sori')
+  await page.getByLabel('Data').fill('2030-07-20')
+  await page.locator('form').getByRole('button', { name: 'Crea', exact: true }).click()
+  await expect(page.getByRole('main').getByText('Pesce a Sori')).toBeVisible()
+
+  // In-app navigation: page.goto would run primeRuntime again and wipe the mock data
+  await page.getByRole('link', { name: 'Da fare' }).click()
+  await page.getByText(/Già organizzate \(1\)/).click()
+  await expect(page.getByRole('button', { name: 'Apri evento' })).toBeVisible()
+})
+
 test('crea spesa collegata evento -> visualizza saldo', async ({ page }) => {
   await primeRuntime(page, { scenario: 'seeded', auth: 'signed-in' })
 

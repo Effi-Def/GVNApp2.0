@@ -226,6 +226,7 @@ export interface Poll {
   options: PollOption[]
   createdBy: string
   eventId?: string
+  farmId?: string // Fattoria che vede il sondaggio quando non è legato a un evento
   votes: PollVote[]
   isActive: boolean  // Aggiungiamo stato attivo/chiuso
   createdAt: Date
@@ -247,6 +248,28 @@ export interface PollVote {
   optionId: string
   votedAt: Date
 }
+
+export type IdeaCategory = 'posto' | 'ristorante' | 'evento' | 'viaggio' | 'altro'
+export type IdeaStatus = 'open' | 'organized'
+
+// "Cose da fare": idee della fattoria, prima che diventino un evento
+export interface Idea {
+  id: string
+  farmId: string
+  title: string
+  category: IdeaCategory
+  note?: string
+  link?: string
+  location?: string
+  createdBy: string
+  interestedIds: string[]
+  status: IdeaStatus
+  eventId?: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export type IdeaDraft = Pick<Idea, 'title' | 'category' | 'note' | 'link' | 'location'>
 
 export interface ShoppingList {
   id: string
