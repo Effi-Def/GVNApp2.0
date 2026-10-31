@@ -10,6 +10,7 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
+    "test:rules": "npx firebase-tools emulators:exec --only firestore --project demo-gvnapp \"vitest run --config vitest.rules.config.ts\"",
     "build:icons": "node scripts/generate-icons.mjs",
     "lint": "eslint . --ext ts,tsx",
     "preview": "vite preview",
@@ -32,6 +33,7 @@
     "zustand": "^4.4.7"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@playwright/test": "^1.53.2",
     "@types/leaflet": "^1.9.21",
     "@types/react": "^18.2.43",

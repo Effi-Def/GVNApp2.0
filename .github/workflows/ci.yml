@@ -73,6 +73,32 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  rules:
+    name: Firestore Rules
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test rules on the emulator
+        run: npm run test:rules
+
   functions:
     name: Functions Build
     runs-on: ubuntu-latest
