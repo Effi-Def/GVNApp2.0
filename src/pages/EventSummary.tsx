@@ -1,15 +1,22 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, lazy, Suspense } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+
+const EventMap = lazy(() => import('../components/Map/EventMap'))
 import { useAppStore } from '../stores/AppStore'
 import { useAuthStore } from '../stores/useAuthStore'
-import { expenseService, pollService, listService, eventService } from '../services/firestore'
-import { Event, Expense, Poll, ShoppingList, EventParticipant } from '../types'
+import { useActiveFarmStore } from '../stores/useActiveFarmStore'
+import { eventService, expenseService, farmService, listService, pollService } from '../services/firestore'
+import { roundTo2 } from '../services/firestoreMappers'
+import { Event, Expense, FarmMembership, Poll, ShoppingList, EventParticipant, EventParticipation } from '../types'
 import { getUserKeys, getUserEventParticipation } from '../utils/events'
+import { formatEuro, formatEuroSigned, getExpenseShares } from '../utils/expenseUtils'
+import ExpenseForm from '../components/ExpenseForm'
+import PollForm from '../components/PollForm'
 
 const EventSummary = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { events, updateEvent } = useAppStore()
+  const { events, expenses: storeExpenses, polls: storePolls, lists: storeLists, addExpense, addPoll, updateEvent } = useAppStore()
   const { user } = useAuthStore()
   const [event, setEvent] = useState<Event | null>(null)
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -17,10 +24,25 @@ const EventSummary = () => {
   const [lists, setLists] = useState<ShoppingList[]>([])
   const [loading, setLoading] = useState(true)
   const [fatalError, setFatalError] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null)
+  const showToast = (msg: string, type: 'ok' | 'err' = 'err') => {
+    setToast({ msg, type })
+    setTimeout(() => setToast(null), 3500)
+  }
   const [tooltipDay, setTooltipDay] = useState<string | null>(null)
   const [showBalances, setShowBalances] = useState(false)
   const [showMyDebts, setShowMyDebts] = useState(false)
   const [showParticipantsOverlay, setShowParticipantsOverlay] = useState(false)
+
+  const [showExpenseForm, setShowExpenseForm] = useState(false)
+  const [showPollForm, setShowPollForm] = useState(false)
+  const [submittingExpense, setSubmittingExpense] = useState(false)
+  const [submittingPoll, setSubmittingPoll] = useState(false)
+  const activeFarmId = useActiveFarmStore(s => s.activeFarmId)
+  const [farmMembers, setFarmMembers] = useState<FarmMembership[]>([])
+  const [actionLoading, setActionLoading] = useState<'vote' | 'finalize' | null>(null)
+  const [submittingParticipation, setSubmittingParticipation] = useState(false)
+  const [participationError, setParticipationError] = useState<string | null>(null)
 
   useEffect(() => {
     // Ensure we start at the top when opening the summary
@@ -30,20 +52,21 @@ const EventSummary = () => {
         setLoading(true)
         let ev = events.find(e => e.id === id) || null
         if (!ev && id) {
-          const all = await eventService.getAll()
-          ev = all.find(e => e.id === id) || null
+          ev = await eventService.getById(id)
         }
         setEvent(ev)
 
-        // Filter related data
-        const [allExpenses, allPolls, allLists] = await Promise.all([
-          expenseService.getAll().catch(() => []),
-          pollService.getAll().catch(() => []),
-          listService.getAll().catch(() => [])
-        ])
-        setExpenses((allExpenses as any[]).filter(e => e.eventId === id))
-        setPolls((allPolls as any[]).filter(p => p.eventId === id))
-        setLists((allLists as any[]).filter(l => l.eventId === id))
+        // Related data comes from the already scoped AppStore when possible.
+        setExpenses(((storeExpenses as Expense[]) || []).filter(e => e.eventId === id))
+        setPolls(((storePolls as Poll[]) || []).filter(p => p.eventId === id))
+        const fromStore = (((storeLists as ShoppingList[]) || []).filter(l => l.eventId === id))
+        if (fromStore.length) {
+          setLists(fromStore)
+        } else {
+          // Fallback for deep links: fetch only lists for this event id.
+          const allLists = id ? await listService.getByEventId(id).catch(() => [] as ShoppingList[]) : [] as ShoppingList[]
+          setLists(allLists.filter(l => l.eventId === id))
+        }
       } catch (e: any) {
         console.error('❌ Error loading EventSummary data:', e)
         setFatalError('Impossibile caricare il riassunto dell\'evento. Riprova più tardi.')
@@ -52,7 +75,7 @@ const EventSummary = () => {
       }
     }
     load()
-  }, [id, events])
+  }, [id, events, storeExpenses, storePolls, storeLists])
 
   const participants = event?.participants || []
   const participationStats = useMemo(() => {
@@ -65,22 +88,17 @@ const EventSummary = () => {
   }, [participants])
 
   const hypeMessage = useMemo(() => {
-    const { confirmed, maybe, total, progress } = participationStats
-    if (total === 0) return 'Invita gli amici per sbloccare il livello della festa!'
-    if (progress >= 90) return '🔥 Livello MAX! la festa è praticamente piena.'
-    if (progress >= 60) return '🎉 Ottimo ritmo: mancano pochi passi alla festa perfetta.'
-    if (confirmed.length === 0) return '🚀 Sii il primo a confermare per dare il via alla festa.'
-    if (maybe.length > 0) return '👀 Convincili! Trasforma i “forse” in “sì” e sblocca bonus.'
-    return `💪 ${confirmed.length}/${total} già pronti: continua così!`
+    const { confirmed, total } = participationStats
+    if (total === 0) return 'Nessuna risposta ancora.'
+    if (confirmed.length === total) return 'Tutti hanno confermato.'
+    const pending = total - confirmed.length
+    return `${confirmed.length} ${confirmed.length === 1 ? 'confermato' : 'confermati'} su ${total} · ${pending} in attesa`
   }, [participationStats])
 
   const stageLabel = useMemo(() => {
-    const { progress, total } = participationStats
-    if (total === 0) return 'Stato: lobby vuota'
-    if (progress >= 90) return 'Stato: PARTY LEGEND 🏆'
-    if (progress >= 60) return 'Stato: Squadra rodata ⚡'
-    if (progress >= 30) return 'Stato: Riscaldamento 🔥'
-    return 'Stato: Warm-up 🎯'
+    const { confirmed, total } = participationStats
+    if (total === 0) return 'Nessuna risposta'
+    return `${confirmed.length} / ${total} confermati`
   }, [participationStats])
   const startOfDay = (d: Date) => { const nd = new Date(d); nd.setHours(0,0,0,0); return nd }
   const dateKey = (d: Date) => {
@@ -101,9 +119,39 @@ const EventSummary = () => {
   const currentUserName = user?.displayName || user?.email || 'Utente'
   const meKeys = useMemo(() => getUserKeys(user), [user?.id, user?.email])
   const myP = useMemo(() => (event ? getUserEventParticipation(event, meKeys) : { status: 'none', accessLevel: 'none' as const }), [event, meKeys])
-  const myStatus: 'yes' | 'no' | 'maybe' | 'none' = (myP.status as any) || 'none'
+  const myStatus = myP.status
   const canChat = !!event && (meKeys.includes(event.createdBy) || myStatus === 'yes')
   const [myDays, setMyDays] = useState<Set<string>>(new Set())
+
+  // Planning: proposed dates
+  const proposedDates = useMemo(() => {
+    const raw = event?.proposedDates
+    return Array.isArray(raw) ? raw.filter((x: string) => x.trim()) : []
+  }, [event])
+  const dateVotes = useMemo(() => {
+    const raw = event?.dateVotes
+    return raw && typeof raw === 'object' ? raw : {} as Record<string, string>
+  }, [event])
+  const myDateVote: string | undefined = event?.dateVotes?.[currentUserId]
+  const voteCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const d of proposedDates) counts[d] = 0
+    for (const v of Object.values(dateVotes)) {
+      if (typeof v !== 'string' || counts[v] == null) continue
+      counts[v] += 1
+    }
+    return counts
+  }, [proposedDates, dateVotes])
+  const isPlanning = useMemo(() => {
+    if (event?.status === 'planning') return true
+    if (event?.dateFinalized === false) return true
+    if (proposedDates.length > 0 && !event?.selectedDateKey) return true
+    return false
+  }, [event, proposedDates.length])
+  const pendingMembers = useMemo(() => {
+    const responded = new Set((event?.participants || []).map(p => p.userId).filter(Boolean))
+    return farmMembers.filter(m => m?.userId && !responded.has(m.userId))
+  }, [farmMembers, event?.participants])
 
   useEffect(() => {
     if (!event || !currentUserId) return
@@ -118,10 +166,41 @@ const EventSummary = () => {
     }
   }, [event, currentUserId, myStatus, isMultiDay, dayKeys.join('|')])
 
+  useEffect(() => {
+    if (!activeFarmId) { setFarmMembers([]); return }
+    let alive = true
+    farmService.listMembers(activeFarmId)
+      .then(m => { if (alive) setFarmMembers(Array.isArray(m) ? m : []) })
+      .catch(() => { if (alive) setFarmMembers([]) })
+    return () => { alive = false }
+  }, [activeFarmId])
+
+  const voteDate = async (dateKey: string) => {
+    if (!id || !currentUserId) return
+    setActionLoading('vote')
+    try {
+      await eventService.voteOnProposedDate(id, currentUserId, dateKey)
+      const remote = await eventService.getById(id)
+      if (remote) { setEvent(remote); updateEvent(id, remote) }
+    } catch (err) { console.error('voteDate error:', err) }
+    finally { setActionLoading(null) }
+  }
+
+  const finalizeDate = async (dateKey: string) => {
+    if (!id || !currentUserId || event?.createdBy !== currentUserId) return
+    setActionLoading('finalize')
+    try {
+      await eventService.finalizeProposedDate(id, dateKey)
+      const remote = await eventService.getById(id)
+      if (remote) { setEvent(remote); updateEvent(id, remote) }
+    } catch (err) { console.error('finalizeDate error:', err) }
+    finally { setActionLoading(null) }
+  }
+
   const updatePresence = async (newSet: Set<string>) => {
     if (!event || !currentUserId) return
     if (myStatus !== 'yes') {
-      alert('Conferma la partecipazione (✅) per selezionare i giorni di presenza')
+      showToast('Conferma la partecipazione (✅) per selezionare i giorni di presenza')
       return
     }
     try {
@@ -140,7 +219,7 @@ const EventSummary = () => {
       updateEvent(event.id, { participants: updatedParticipants, updatedAt: new Date() })
     } catch (e) {
       console.error('❌ Error updating daily presence:', e)
-      alert('Errore durante il salvataggio dei giorni di presenza')
+      showToast('Errore durante il salvataggio dei giorni di presenza')
     }
   }
 
@@ -152,7 +231,9 @@ const EventSummary = () => {
   }
 
   const handleParticipation = async (status: 'yes' | 'no' | 'maybe') => {
-    if (!event || !currentUserId) return
+    if (!event || !currentUserId || submittingParticipation) return
+    setSubmittingParticipation(true)
+    setParticipationError(null)
     try {
       await eventService.updateParticipation(event.id, currentUserId, currentUserName, status)
 
@@ -179,12 +260,14 @@ const EventSummary = () => {
         return base
       })()
 
-      const updated = { ...event, participants: updatedParticipants, participation: updatedParticipation as any, updatedAt: new Date() }
+      const updated = { ...event, participants: updatedParticipants, participation: updatedParticipation as Record<string, EventParticipation>, updatedAt: new Date() }
       setEvent(updated)
-      updateEvent(event.id, { participants: updatedParticipants, participation: updatedParticipation as any, updatedAt: new Date() })
+      updateEvent(event.id, { participants: updatedParticipants, participation: updatedParticipation as Record<string, EventParticipation>, updatedAt: new Date() })
     } catch (err) {
       console.error('❌ Error updating participation from summary:', err)
-      alert('Errore durante l\'aggiornamento della partecipazione')
+      setParticipationError('Impossibile aggiornare la partecipazione. Riprova.')
+    } finally {
+      setSubmittingParticipation(false)
     }
   }
 
@@ -195,34 +278,34 @@ const EventSummary = () => {
 
     for (const exp of expenses) {
       const payer = users.get(exp.paidBy)
-      if (payer) payer.balance += exp.amount
-      for (const pp of exp.participants) {
-        const u = users.get(pp.userId)
-        if (u) u.balance -= pp.amount
+      if (payer) payer.balance = roundTo2(payer.balance + exp.amount)
+      for (const { userId, share } of getExpenseShares(exp)) {
+        const u = users.get(userId)
+        if (u) u.balance = roundTo2(u.balance - share)
       }
     }
     return Array.from(users.values())
   }, [event, participants, expenses])
 
   // Debts for current user: positive means others owe me, negative means I owe
-  const userId = user?.id || user?.email || ''
   const myDebts = useMemo(() => {
-    if (!event || !userId) return [] as { counterpartyId: string; counterpartyName: string; amount: number }[]
+    if (!event || !currentUserId) return [] as { counterpartyId: string; counterpartyName: string; amount: number }[]
     const nameById = new Map(participants.map(p => [p.userId, p.name] as const))
     const ledger = new Map<string, number>()
     for (const exp of expenses) {
-      if (exp.paidBy === userId) {
+      const shares = getExpenseShares(exp)
+      if (exp.paidBy === currentUserId) {
         // Others owe me their shares
-        for (const pp of exp.participants) {
-          if (pp.userId !== userId) {
-            ledger.set(pp.userId, (ledger.get(pp.userId) || 0) + pp.amount)
+        for (const { userId, share } of shares) {
+          if (userId !== currentUserId) {
+            ledger.set(userId, roundTo2((ledger.get(userId) || 0) + share))
           }
         }
       }
       // If I am participant and not payer, I owe my share to the payer
-      const mine = exp.participants.find(pp => pp.userId === userId)
-      if (mine && exp.paidBy !== userId) {
-        ledger.set(exp.paidBy, (ledger.get(exp.paidBy) || 0) - mine.amount)
+      const mine = shares.find(s => s.userId === currentUserId)
+      if (mine && exp.paidBy !== currentUserId) {
+        ledger.set(exp.paidBy, roundTo2((ledger.get(exp.paidBy) || 0) - mine.share))
       }
     }
     return Array.from(ledger.entries()).map(([counterpartyId, amount]) => ({
@@ -230,37 +313,87 @@ const EventSummary = () => {
       counterpartyName: nameById.get(counterpartyId) || counterpartyId,
       amount
     })).sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount))
-  }, [event, expenses, participants, userId])
+  }, [event, expenses, participants, currentUserId])
 
   if (loading) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">Caricamento...</div>
+      <div className="pt-16 px-6 pb-6 max-w-4xl mx-auto">Caricamento...</div>
     )
   }
 
   if (!event) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">Evento non trovato</div>
+      <div className="pt-16 px-6 pb-6 max-w-4xl mx-auto">Evento non trovato</div>
     )
   }
 
   if (fatalError) {
     return (
-      <div className="p-4 sm:p-6 max-w-4xl mx-auto">
-        <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg">
+      <div className="pt-16 px-4 sm:px-6 pb-4 sm:pb-6 max-w-4xl mx-auto">
+        <div className="bg-red-500/10 border border-red-500/30 text-red-700 dark:text-red-400 p-4 rounded-lg">
           {fatalError}
         </div>
         <div className="mt-4">
-          <button onClick={() => navigate(-1)} className="text-sm text-gray-600 hover:text-gray-800">← Indietro</button>
+          <button onClick={() => navigate(-1)} className="text-sm text-[--text-muted] hover:text-[--text-base]">← Indietro</button>
         </div>
       </div>
     )
   }
 
+  const handleCreateExpense = async (expenseData: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>) => {
+    if (!event?.id) return
+    setSubmittingExpense(true)
+    try {
+      const created = await expenseService.create({ ...expenseData, eventId: event.id })
+      addExpense(created)
+      setExpenses(prev => [created, ...prev])
+      try {
+        const now = new Date()
+        setEvent(prev => (prev ? { ...prev, updatedAt: now } : prev))
+        updateEvent(event.id, { updatedAt: now })
+      } catch {}
+    } finally {
+      setSubmittingExpense(false)
+      setShowExpenseForm(false)
+    }
+  }
+
+  const handleCreatePoll = async (pollData: Omit<Poll, 'id' | 'createdAt' | 'updatedAt'>) => {
+    if (!event?.id) return
+    setSubmittingPoll(true)
+    try {
+      const { votes: _votes, id: _id, createdAt: _createdAt, updatedAt: _updatedAt, ...rest } = pollData as any
+      const created = await pollService.create({
+        ...rest,
+        eventId: event.id,
+        createdBy: (rest.createdBy as string) || (user?.id || ''),
+        isActive: typeof rest.isActive === 'boolean' ? rest.isActive : true,
+      })
+      addPoll(created)
+      setPolls(prev => [created, ...prev])
+      try {
+        const now = new Date()
+        setEvent(prev => (prev ? { ...prev, updatedAt: now } : prev))
+        updateEvent(event.id, { updatedAt: now })
+      } catch {}
+    } finally {
+      setSubmittingPoll(false)
+      setShowPollForm(false)
+    }
+  }
+
   return (
-    <div className="p-4 sm:p-6 max-w-5xl mx-auto space-y-6">
+    <div className="pt-16 pb-4 px-4 sm:px-6 max-w-5xl mx-auto space-y-6">
+      {/* Toast notification */}
+      {toast && (
+        <div className={`fixed top-20 left-1/2 -translate-x-1/2 z-[100] px-4 py-2.5 rounded-xl shadow-lg text-sm font-medium transition-all ${
+          toast.type === 'ok' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+        }`}>
+          {toast.msg}
+        </div>
+      )}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">{event.title} <span>🐷</span></h1>
+        <h1 className="text-2xl font-bold text-[--text-base] flex items-center gap-2">{event.title} <span>🐷</span></h1>
         <div className="flex items-center gap-2">
           <button
             onClick={async () => {
@@ -275,7 +408,7 @@ const EventSummary = () => {
                   await (navigator as any).share(shareData)
                 } else if (navigator.clipboard) {
                   await navigator.clipboard.writeText(shareUrl)
-                  alert('Link copiato negli appunti')
+                  showToast('Link copiato negli appunti 📋', 'ok')
                 } else {
                   prompt('Copia il link', shareUrl)
                 }
@@ -283,40 +416,64 @@ const EventSummary = () => {
                 console.error('Share failed:', e)
               }
             }}
-            className="px-3 py-1.5 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50 text-sm"
+            className="px-3 py-1.5 rounded-lg border border-[--border-base] text-[--text-base] hover:bg-[--bg-subtle] text-sm"
             title="Condividi evento"
           >
             Condividi
           </button>
-          <button onClick={() => navigate(-1)} className="text-sm text-gray-600 hover:text-gray-800">← Indietro</button>
+          <button onClick={() => navigate(-1)} className="text-sm text-[--text-muted] hover:text-[--text-base]">← Indietro</button>
         </div>
       </div>
 
       {/* Primary event info */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="bg-[--bg-card] rounded-xl border border-[--border-base] p-4">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="space-y-1">
-            <div className="text-sm text-neutral-600 flex items-center gap-2">
+            <div className="text-sm text-[--text-muted] flex items-center gap-2">
               <span>📅</span>
               <span>
                 {new Date(event.date).toLocaleDateString('it-IT')} {event.time && `alle ${event.time}`}
                 {event.endDate && ` — ${new Date(event.endDate).toLocaleDateString('it-IT')}`}
               </span>
             </div>
-            <div className="text-sm text-neutral-600 flex items-center gap-2">
+            <div className="text-sm text-[--text-muted] flex items-center gap-2">
               <span>📍</span>
-              <span>{event.location}</span>
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(event.location)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="hover:underline hover:text-green-600 transition-colors"
+              >
+                {event.location}
+              </a>
             </div>
           </div>
         </div>
         {event.description && (
-          <p className="mt-3 text-sm text-neutral-700 whitespace-pre-line">{event.description}</p>
+          <p className="mt-3 text-sm text-[--text-muted] whitespace-pre-line">{event.description}</p>
+        )}
+
+        {/* Mappa OpenStreetMap — visible solo quando lat/lon sono stati salvati */}
+        {event.locationGeo && (
+          <div className="mt-4">
+            <Suspense fallback={
+              <div className="h-48 w-full rounded-xl bg-[--bg-raised] animate-pulse flex items-center justify-center text-[--text-muted] text-sm">
+                Caricamento mappa…
+              </div>
+            }>
+              <EventMap
+                lat={event.locationGeo.lat}
+                lon={event.locationGeo.lon}
+                label={event.location}
+              />
+            </Suspense>
+          </div>
         )}
 
         {/* Per-day selection for multi-day events */}
         {isMultiDay && (
           <div className="mt-4">
-            <h3 className="text-sm font-semibold text-gray-900 mb-2">La tua presenza per giorno</h3>
+            <h3 className="text-sm font-semibold text-[--text-base] mb-2">La tua presenza per giorno</h3>
             <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 gap-1.5">
               {dayKeys.map(k => {
                 const d = new Date(k)
@@ -326,7 +483,7 @@ const EventSummary = () => {
                   <button
                     key={k}
                     onClick={() => toggleDay(k)}
-                    className={`px-2 py-1 text-[11px] rounded border transition-colors ${selected ? 'bg-green-50 border-green-300 text-green-800' : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                    className={`px-2 py-1 text-[11px] rounded border transition-colors ${selected ? 'bg-green-50 border-green-300 text-green-800 dark:bg-green-900/20 dark:text-green-400' : 'bg-[--bg-card] border-[--border-base] text-[--text-muted] hover:bg-[--bg-subtle]'}`}
                     title={`Presenza il ${label}`}
                   >
                     {label}
@@ -338,179 +495,209 @@ const EventSummary = () => {
         )}
       </div>
 
-      {/* Partecipazione: solo controlli, lista nascosta */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
-        <h2 className="text-lg font-semibold mb-3">La tua partecipazione</h2>
-        {currentUserId ? (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-gray-700">Risposta:</span>
-            <button
-              onClick={() => handleParticipation('yes')}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                myStatus === 'yes' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-green-100'
-              }`}
-            >
-              ✓ Partecipo
-            </button>
-            <button
-              onClick={() => handleParticipation('maybe')}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                myStatus === 'maybe' ? 'bg-yellow-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-yellow-100'
-              }`}
-            >
-              ? Forse
-            </button>
-            <button
-              onClick={() => handleParticipation('no')}
-              className={`px-3 py-1 text-xs rounded-lg transition-colors ${
-                myStatus === 'no' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-700 hover:bg-red-100'
-              }`}
-            >
-              ✗ Non partecipo
-            </button>
+      {/* Planning: proposed date voting */}
+      {proposedDates.length > 0 && (
+        <div className="bg-[--bg-card] rounded-xl border border-[--border-base] p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold">{isPlanning ? '📅 Scegliamo una data' : '📅 Date proposte'}</h2>
+              <p className="text-xs text-[--text-muted]">
+                {isPlanning
+                  ? (event?.createdBy === currentUserId ? "Finalizza la data quando tutti hanno votato." : "L'organizzatore finalizzerà la data.")
+                  : 'Vota la data che preferisci.'}
+              </p>
+            </div>
+            {actionLoading === 'finalize' && <span className="text-xs text-[--text-muted] animate-pulse">Finalizzo…</span>}
+            {actionLoading === 'vote' && <span className="text-xs text-[--text-muted] animate-pulse">Aggiorno…</span>}
           </div>
+          <div className="mt-3 space-y-2">
+            {proposedDates.map(d => {
+              const selected = myDateVote === d
+              const n = voteCounts[d] || 0
+              const canFinalize = isPlanning && event?.createdBy === currentUserId
+              return (
+                <div key={d} className={`flex items-center gap-2 p-3 rounded-xl border transition ${selected ? 'bg-primary-600 border-primary-600 text-white' : 'bg-neutral-50 border-[--border-base]'}`}>
+                  <button
+                    type="button"
+                    className={`flex-1 text-left text-sm font-medium ${selected ? 'text-white' : 'text-[--text-base]'}`}
+                    disabled={actionLoading !== null}
+                    onClick={() => voteDate(d)}
+                  >
+                    {d} · {n} voto{n === 1 ? '' : 'i'}
+                  </button>
+                  {canFinalize && (
+                    <button
+                      type="button"
+                      className={`text-xs px-3 py-1.5 rounded-lg border font-semibold transition ${selected ? 'bg-white text-primary-700 border-white' : 'bg-[--bg-card] text-[--text-muted] border-[--border-base] hover:bg-[--bg-raised]'}`}
+                      disabled={actionLoading !== null}
+                      onClick={() => finalizeDate(d)}
+                    >
+                      Finalizza
+                    </button>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Partecipazione: solo controlli, lista nascosta */}
+      <div className="bg-[--bg-card] rounded-xl border border-[--border-base] p-4">
+        <h2 className="text-sm font-semibold text-[--text-muted] mb-3">La tua risposta</h2>
+        {currentUserId ? (
+          <>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleParticipation('yes')}
+                disabled={submittingParticipation}
+                className={`flex-1 py-2 text-sm rounded-xl border font-medium transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                  myStatus === 'yes' ? 'bg-green-600 text-white border-green-600' : 'bg-[--bg-card] text-[--text-muted] border-[--border-base] hover:bg-green-50 dark:hover:bg-green-900/20'
+                }`}
+              >
+                {submittingParticipation && myStatus !== 'yes' ? '…' : '✓ Sì'}
+              </button>
+              <button
+                onClick={() => handleParticipation('maybe')}
+                disabled={submittingParticipation}
+                className={`flex-1 py-2 text-sm rounded-xl border font-medium transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                  myStatus === 'maybe' ? 'bg-amber-500 text-white border-amber-500' : 'bg-[--bg-card] text-[--text-muted] border-[--border-base] hover:bg-amber-50 dark:hover:bg-amber-900/20'
+                }`}
+              >
+                {submittingParticipation && myStatus !== 'maybe' ? '…' : '~ Forse'}
+              </button>
+              <button
+                onClick={() => handleParticipation('no')}
+                disabled={submittingParticipation}
+                className={`flex-1 py-2 text-sm rounded-xl border font-medium transition disabled:opacity-50 disabled:cursor-not-allowed ${
+                  myStatus === 'no' ? 'bg-neutral-700 text-white border-neutral-700' : 'bg-[--bg-card] text-[--text-muted] border-[--border-base] hover:bg-[--bg-raised]'
+                }`}
+              >
+                {submittingParticipation && myStatus !== 'no' ? '…' : '✗ No'}
+              </button>
+            </div>
+            {participationError && (
+              <p className="mt-2 text-xs text-red-500">{participationError}</p>
+            )}
+          </>
         ) : (
-          <p className="text-sm text-gray-600">Accedi per rispondere all'evento.</p>
+          <p className="text-sm text-[--text-muted]">Accedi per rispondere all'evento.</p>
         )}
         <button
           type="button"
           onClick={() => setShowParticipantsOverlay(true)}
-          className="mt-3 w-full rounded-xl border border-primary-100 bg-primary-50/70 hover:bg-primary-50 transition-all px-3 py-3 text-left shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-300"
+          className="mt-3 w-full rounded-xl border border-[--border-base] bg-[--bg-subtle] hover:bg-[--bg-raised] transition px-3 py-3 text-left"
         >
-          <div className="flex items-center justify-between text-xs text-primary-800">
-            <span className="font-semibold flex items-center gap-1 text-sm text-primary-700">👥 Squadra evento</span>
-            <span className="text-[11px] underline">vedi nomi</span>
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium text-[--text-muted]">Partecipanti</span>
+            <span className="text-xs text-[--text-muted]">{stageLabel} →</span>
           </div>
-          <div className="mt-2 flex items-center justify-between text-xs text-primary-700">
-            <span>Confermati: <strong>{participationStats.confirmed.length}</strong></span>
-            {participationStats.maybe.length > 0 && (
-              <span>Forse: <strong>{participationStats.maybe.length}</strong></span>
-            )}
-            {participationStats.declined.length > 0 && (
-              <span>No: <strong>{participationStats.declined.length}</strong></span>
-            )}
-          </div>
-          <div className="mt-2 h-2 rounded-full bg-primary-100 overflow-hidden">
+          <div className="mt-2 h-1.5 rounded-full bg-[--bg-raised] overflow-hidden">
             <div
-              className="h-full bg-gradient-to-r from-primary-500 via-primary-400 to-emerald-400"
-              style={{ width: `${participationStats.total === 0 ? 0 : Math.min(100, Math.max(12, participationStats.progress))}%` }}
+              className="h-full bg-green-500 rounded-full transition-all"
+              style={{ width: `${participationStats.total === 0 ? 0 : Math.min(100, participationStats.progress)}%` }}
             />
           </div>
-          <p className="mt-2 text-xs text-primary-700 flex items-center gap-1">
-            <span>🎯</span>
-            <span>{hypeMessage}</span>
-          </p>
+          <p className="mt-1.5 text-xs text-[--text-muted]">{hypeMessage}</p>
         </button>
       </div>
 
       {/* Chat call-to-action */}
-      <div className="bg-gradient-to-r from-primary-600 via-primary-500 to-emerald-500 text-white rounded-xl p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4 shadow">
-        <div>
-          <h2 className="text-lg font-semibold flex items-center gap-2">💬 Chat evento</h2>
-          <p className="text-sm text-white/80">Coordina il gruppo in tempo reale e tieni vivo l'entusiasmo del team.</p>
-          {!canChat && (
-            <p className="text-xs text-white/80 mt-1">Disponibile dopo aver confermato la partecipazione (✅).</p>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => navigate('/chats')}
-            className="px-3 py-2 rounded-lg border border-white/30 text-sm hover:bg-white/10 transition"
-          >Apri elenco chat</button>
+      <div className="bg-[--bg-card] rounded-xl border border-[--border-base] p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-[--text-base]">💬 Chat evento</h2>
+            <p className="text-xs text-[--text-muted] mt-0.5">
+              {canChat ? 'Coordina i maiali in tempo reale.' : 'Disponibile dopo aver confermato la partecipazione.'}
+            </p>
+          </div>
           <button
             onClick={() => { if (canChat) navigate(`/events/${event.id}/chat`) }}
             disabled={!canChat}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold shadow transition ${
+            className={`px-3 py-2 rounded-xl text-sm font-medium transition ${
               canChat
-                ? 'bg-white text-primary-600'
-                : 'bg-white/70 text-primary-700/60 cursor-not-allowed'
+                ? 'bg-neutral-900 text-white hover:bg-neutral-700'
+                : 'bg-[--bg-raised] text-[--text-muted] cursor-not-allowed'
             }`}
-          >Vai alla chat evento</button>
+          >Apri chat</button>
         </div>
       </div>
 
       {showParticipantsOverlay && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center">
           <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setShowParticipantsOverlay(false)}></div>
-          <div className="relative w-full max-w-xl mx-4 bg-white rounded-2xl shadow-2xl p-5 space-y-5">
-            <div className="flex items-start justify-between gap-3">
+          <div className="relative w-full max-w-xl mx-4 bg-[--bg-card] rounded-2xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between gap-3">
               <div>
-                <span className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 uppercase tracking-wide">{stageLabel}</span>
-                <h3 className="text-xl font-bold text-neutral-900 mt-1 flex items-center gap-2">Squadra partecipanti <span>🏅</span></h3>
-                <p className="text-sm text-neutral-600 max-w-md">Guarda chi ha già confermato, chi è indeciso e carica la squadra per salire di livello.</p>
+                <h3 className="text-base font-semibold text-[--text-base]">Partecipanti</h3>
+                <p className="text-xs text-[--text-muted] mt-0.5">{stageLabel}</p>
               </div>
-              <button onClick={() => setShowParticipantsOverlay(false)} className="text-sm text-neutral-500 hover:text-neutral-700">✕</button>
+              <button onClick={() => setShowParticipantsOverlay(false)} className="text-[--text-muted] hover:text-[--text-base] text-sm">\u2715</button>
             </div>
 
-            <div>
-              <div className="flex items-center justify-between text-xs text-neutral-600">
-                <span>Confermati: <strong>{participationStats.confirmed.length}</strong></span>
-                <span>Totale squadra: <strong>{participationStats.total}</strong></span>
-              </div>
-              <div className="mt-2 h-3 bg-neutral-100 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-emerald-400 via-primary-500 to-purple-500"
-                  style={{ width: `${participationStats.total === 0 ? 0 : participationStats.progress}%` }}
-                ></div>
-              </div>
-              <p className="mt-2 text-xs text-primary-600 flex items-center gap-1">⚡ {hypeMessage}</p>
+            <div className="h-1.5 bg-[--bg-raised] rounded-full overflow-hidden">
+              <div
+                className="h-full bg-green-500 rounded-full transition-all"
+                style={{ width: `${participationStats.total === 0 ? 0 : participationStats.progress}%` }}
+              />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="bg-primary-50 rounded-xl border border-primary-100 p-3">
-                <h4 className="text-sm font-semibold text-primary-700 flex items-center gap-1">✅ Confermati ({participationStats.confirmed.length})</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="rounded-xl border border-[--border-base] bg-[--bg-subtle] p-3">
+                <h4 className="text-xs font-semibold text-[--text-muted] mb-2">Confermati ({participationStats.confirmed.length})</h4>
                 {participationStats.confirmed.length === 0 ? (
-                  <p className="mt-2 text-xs text-primary-600">Ancora nessuno. Dai il buon esempio!</p>
+                  <p className="text-xs text-[--text-muted]">Nessuno ancora.</p>
                 ) : (
-                  <ul className="mt-2 space-y-1 text-xs text-primary-800">
+                  <ul className="space-y-1 text-xs text-[--text-base]">
                     {participationStats.confirmed.map(p => (
-                      <li key={p.userId} className="flex items-center justify-between">
-                        <span className="truncate">{p.name}</span>
-                        <span className="text-[10px] bg-white/70 text-primary-600 px-2 py-0.5 rounded-full border border-primary-200">Protagonista</span>
-                      </li>
+                      <li key={p.userId} className="truncate">{p.name}</li>
                     ))}
                   </ul>
                 )}
               </div>
 
-              <div className="bg-amber-50 rounded-xl border border-amber-100 p-3">
-                <h4 className="text-sm font-semibold text-amber-700 flex items-center gap-1">🤔 Forse ({participationStats.maybe.length})</h4>
+              <div className="rounded-xl border border-[--border-base] bg-[--bg-subtle] p-3">
+                <h4 className="text-xs font-semibold text-[--text-muted] mb-2">Forse ({participationStats.maybe.length})</h4>
                 {participationStats.maybe.length === 0 ? (
-                  <p className="mt-2 text-xs text-amber-700/80">Nessuno per ora. Continua così!</p>
+                  <p className="text-xs text-[--text-muted]">Nessuno.</p>
                 ) : (
-                  <ul className="mt-2 space-y-1 text-xs text-amber-800">
+                  <ul className="space-y-1 text-xs text-[--text-base]">
                     {participationStats.maybe.map(p => (
-                      <li key={p.userId} className="flex items-center justify-between">
-                        <span className="truncate">{p.name}</span>
-                        <span className="text-[10px] bg-white/70 text-amber-600 px-2 py-0.5 rounded-full border border-amber-200">Convincilo!</span>
-                      </li>
+                      <li key={p.userId} className="truncate">{p.name}</li>
                     ))}
                   </ul>
                 )}
               </div>
 
-              <div className="bg-neutral-50 rounded-xl border border-neutral-200 p-3">
-                <h4 className="text-sm font-semibold text-neutral-700 flex items-center gap-1">❌ Non partecipano ({participationStats.declined.length})</h4>
+              <div className="rounded-xl border border-[--border-base] bg-[--bg-subtle] p-3">
+                <h4 className="text-xs font-semibold text-[--text-muted] mb-2">Non partecipano ({participationStats.declined.length})</h4>
                 {participationStats.declined.length === 0 ? (
-                  <p className="mt-2 text-xs text-neutral-600">Per ora nessuna rinuncia. Ottimo!</p>
+                  <p className="text-xs text-[--text-muted]">Nessuno.</p>
                 ) : (
-                  <ul className="mt-2 space-y-1 text-xs text-neutral-800">
+                  <ul className="space-y-1 text-xs text-[--text-base]">
                     {participationStats.declined.map(p => (
-                      <li key={p.userId} className="flex items-center justify-between">
-                        <span className="truncate">{p.name}</span>
-                        <span className="text-[10px] bg-white px-2 py-0.5 rounded-full border border-neutral-200">Out</span>
-                      </li>
+                      <li key={p.userId} className="truncate">{p.name}</li>
                     ))}
                   </ul>
                 )}
               </div>
             </div>
-
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-neutral-500">
-              <span>Consiglio: raggiungi il 100% di conferme per sbloccare il badge “Evento epico”.</span>
+            {pendingMembers.length > 0 && (
+              <div className="rounded-xl border border-[--border-base] bg-[--bg-subtle] p-3">
+                <h4 className="text-xs font-semibold text-[--text-muted] mb-2">In attesa di risposta ({pendingMembers.length})</h4>
+                <div className="flex flex-wrap gap-1">
+                  {pendingMembers.map(m => (
+                    <span key={m.userId} className="text-xs bg-[--bg-card] border border-[--border-base] rounded-full px-2 py-0.5 text-[--text-muted]">
+                      {m.displayName || m.userId}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex justify-end">
               <button
                 onClick={() => setShowParticipantsOverlay(false)}
-                className="self-start sm:self-end px-3 py-1.5 rounded-lg border border-neutral-200 hover:bg-neutral-100"
+                className="px-3 py-1.5 rounded-lg border border-[--border-base] text-sm hover:bg-[--bg-subtle]"
               >Chiudi</button>
             </div>
           </div>
@@ -518,16 +705,16 @@ const EventSummary = () => {
       )}
 
       {/* Balances (summary) - collapsible */}
-      <div className="bg-white rounded-xl border border-gray-200">
+      <div className="bg-[--bg-card] rounded-xl border border-[--border-base]">
         <button
           onClick={() => setShowBalances(v => !v)}
-          className="w-full px-4 py-3 flex items-center justify-between"
+          className="w-full px-4 py-3 flex items-center justify-between text-left"
         >
           <div>
             <h2 className="text-lg font-semibold">Saldi evento</h2>
-            <p className="text-xs text-gray-500">Riepilogo di quanto ciascuno ha a credito/debito.</p>
+            <p className="text-xs text-[--text-muted]">Riepilogo di quanto ciascuno ha a credito/debito.</p>
           </div>
-          <span className="text-gray-500">{showBalances ? '▾' : '▸'}</span>
+          <span className="text-[--text-muted]">{showBalances ? '▾' : '▸'}</span>
         </button>
         {showBalances && (
           <div className="p-4 pt-0">
@@ -536,7 +723,7 @@ const EventSummary = () => {
                 <div key={b.userId} className="flex items-center justify-between px-3 py-2 rounded border">
                   <span>{b.name}</span>
                   <span className={`${b.balance >= 0 ? 'text-green-600' : 'text-red-600'} font-semibold`}>
-                    {b.balance >= 0 ? '+' : ''}{b.balance.toFixed(2)}€
+                    {formatEuroSigned(b.balance)}
                   </span>
                 </div>
               ))}
@@ -546,26 +733,26 @@ const EventSummary = () => {
       </div>
 
       {/* My debts/credits vs people in this event - collapsible */}
-      <div className="bg-white rounded-xl border border-gray-200">
-        <button onClick={() => setShowMyDebts(v => !v)} className="w-full px-4 py-3 flex items-center justify-between">
+      <div className="bg-[--bg-card] rounded-xl border border-[--border-base]">
+        <button onClick={() => setShowMyDebts(v => !v)} className="w-full px-4 py-3 flex items-center justify-between text-left">
           <div>
             <h2 className="text-lg font-semibold">La tua situazione</h2>
-            <p className="text-xs text-gray-500">Importi positivi = ti devono dare, negativi = devi tu.</p>
+            <p className="text-xs text-[--text-muted]">Importi positivi = ti devono dare, negativi = devi tu.</p>
           </div>
-          <span className="text-gray-500">{showMyDebts ? '▾' : '▸'}</span>
+          <span className="text-[--text-muted]">{showMyDebts ? '▾' : '▸'}</span>
         </button>
         {showMyDebts && (
           <div className="p-4 pt-0">
-            {(!userId || myDebts.length === 0) ? (
-              <p className="text-sm text-gray-600">Nessun debito/credito specifico per te in questo evento.</p>
+            {(!currentUserId || myDebts.length === 0) ? (
+              <p className="text-sm text-[--text-muted]">Nessun debito/credito specifico per te in questo evento.</p>
             ) : (
               <div className="space-y-2">
                 {myDebts.map(d => (
                   <div key={d.counterpartyId} className="flex items-center justify-between px-3 py-2 rounded border">
-                    <div className="text-sm text-gray-800">{d.counterpartyName}</div>
+                    <div className="text-sm text-[--text-base]">{d.counterpartyName}</div>
                     <div className={`${d.amount >= 0 ? 'text-green-600' : 'text-red-600'} font-semibold`}>
                       {d.amount >= 0 ? 'Deve darti ' : 'Devi a lui/lei '}
-                      {Math.abs(d.amount).toFixed(2)}€
+                      {formatEuro(Math.abs(d.amount))}
                     </div>
                   </div>
                 ))}
@@ -577,9 +764,9 @@ const EventSummary = () => {
 
       {/* Presence chart for multi-day events */}
       {isMultiDay && (
-        <div className="bg-white rounded-xl border border-gray-200 p-4">
+        <div className="bg-[--bg-card] rounded-xl border border-[--border-base] p-4">
           <h2 className="text-lg font-semibold mb-1">Presenze per giorno</h2>
-          <p className="text-xs text-gray-500 mb-3">Asse Y = giorni, asse X = numero partecipanti presenti quel giorno.</p>
+          <p className="text-xs text-[--text-muted] mb-3">Asse Y = giorni, asse X = numero partecipanti presenti quel giorno.</p>
           {(() => {
             const counts = dayKeys.map(k => {
               const present = participants.filter(p => (p.days && p.days[k]) || (!p.days && p.status === 'yes'))
@@ -596,23 +783,23 @@ const EventSummary = () => {
                   const isOpen = open === key
                   return (
                     <div key={key} className="relative flex items-center gap-2">
-                      <div className="w-28 shrink-0 text-xs text-gray-700">{label}</div>
-                      <div className="relative h-8 flex-1 border-b border-dashed border-gray-200">
+                      <div className="w-28 shrink-0 text-xs text-[--text-muted]">{label}</div>
+                      <div className="relative h-8 flex-1 border-b border-dashed border-[--border-base]">
                         <button
                           className="absolute -translate-x-1/2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center shadow"
                           style={{ left: `${leftPct}%` }}
                           onClick={() => setOpen(isOpen ? null : key)}
-                          title={`${count} partecipanti`}
+                          title={count === 1 ? '1 partecipante' : `${count} partecipanti`}
                         >
                           {count}
                         </button>
                         {isOpen && (
-                          <div className="absolute z-20 mt-2 left-1/2 -translate-x-1/2 bg-white border border-gray-200 rounded shadow p-2 text-xs min-w-[12rem] max-w-[80vw]">
-                            <div className="font-medium text-gray-900 mb-1">{label}</div>
+                          <div className="absolute z-20 mt-2 left-1/2 -translate-x-1/2 bg-[--bg-card] border border-[--border-base] rounded shadow p-2 text-xs min-w-[12rem] max-w-[80vw]">
+                            <div className="font-medium text-[--text-base] mb-1">{label}</div>
                             {users.length === 0 ? (
-                              <div className="text-gray-600">Nessuno</div>
+                              <div className="text-[--text-muted]">Nessuno</div>
                             ) : (
-                              <ul className="list-disc list-inside space-y-0.5 text-gray-800">
+                              <ul className="list-disc list-inside space-y-0.5 text-[--text-base]">
                                 {users.map(u => (<li key={u}>{u}</li>))}
                               </ul>
                             )}
@@ -629,13 +816,13 @@ const EventSummary = () => {
       )}
 
       {/* Expenses */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="bg-[--bg-card] rounded-xl border border-[--border-base] p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">Spese</h2>
           <button
             type="button"
-            onClick={() => { if (event?.id) navigate('/expenses', { state: { openForm: true, eventId: event.id } }) }}
-            className="w-7 h-7 flex items-center justify-center rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+            onClick={() => { if (event?.id) setShowExpenseForm(true) }}
+            className="w-7 h-7 flex items-center justify-center rounded-full border border-[--border-base] text-[--text-muted] hover:bg-[--bg-subtle]"
             title="Aggiungi spesa"
             aria-label="Aggiungi spesa"
           >
@@ -643,16 +830,22 @@ const EventSummary = () => {
           </button>
         </div>
         {expenses.length === 0 ? (
-          <p className="text-sm text-gray-600">Nessuna spesa</p>
+          <p className="text-sm text-[--text-muted]">Nessuna spesa</p>
         ) : (
           <div className="space-y-2">
             {expenses.map(e => (
               <div key={e.id} className="flex items-center justify-between px-3 py-2 rounded border">
                 <div className="truncate">
-                  <div className="font-medium text-gray-900 truncate">{e.title}</div>
-                  <div className="text-xs text-gray-500">Pagata da {e.paidBy}</div>
+                  <div className="font-medium text-[--text-base] truncate">{e.title}</div>
+                  <div className="text-xs text-[--text-muted]">
+                    Pagata da{' '}
+                    {e.participants.find(p => p.userId === e.paidBy)?.name
+                      || participants.find(p => p.userId === e.paidBy)?.name
+                      || farmMembers.find(m => m.userId === e.paidBy)?.displayName
+                      || (e.paidBy === user?.id ? (user?.displayName || 'Tu') : e.paidBy)}
+                  </div>
                 </div>
-                <div className="text-gray-900 font-semibold">{e.amount.toFixed(2)}€</div>
+                <div className="text-[--text-base] font-semibold">{formatEuro(e.amount)}</div>
               </div>
             ))}
           </div>
@@ -660,13 +853,13 @@ const EventSummary = () => {
       </div>
 
       {/* Polls */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="bg-[--bg-card] rounded-xl border border-[--border-base] p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">Sondaggi</h2>
           <button
             type="button"
-            onClick={() => { if (event?.id) navigate('/polls', { state: { openForm: true, eventId: event.id } }) }}
-            className="w-7 h-7 flex items-center justify-center rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+            onClick={() => { if (event?.id) setShowPollForm(true) }}
+            className="w-7 h-7 flex items-center justify-center rounded-full border border-[--border-base] text-[--text-muted] hover:bg-[--bg-subtle]"
             title="Aggiungi sondaggio"
             aria-label="Aggiungi sondaggio"
           >
@@ -674,26 +867,45 @@ const EventSummary = () => {
           </button>
         </div>
         {polls.length === 0 ? (
-          <p className="text-sm text-gray-600">Nessun sondaggio</p>
+          <p className="text-sm text-[--text-muted]">Nessun sondaggio</p>
         ) : (
-          <ul className="list-disc list-inside text-sm text-gray-800">
-            {polls.map(p => (
-              <li key={p.id}>
-                {p.title} • {p.options.length} opzioni • {p.votes.length} voti
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-2">
+            {polls.map(p => {
+              const now = new Date()
+              const expired = p.votingEndsAt ? p.votingEndsAt < now : false
+              const active = p.isActive && !expired
+              const totalVotes = p.votes?.length ?? 0
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  className="w-full text-left flex items-center justify-between px-3 py-2.5 rounded-lg border border-[--border-base] hover:bg-[--bg-subtle] transition gap-3"
+                  onClick={() => navigate('/polls', { state: { eventId: event.id } })}
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium text-[--text-base] truncate">{p.title}</div>
+                    <div className="text-xs text-[--text-muted] mt-0.5">{p.options.length} opzioni · {totalVotes} vot{totalVotes === 1 ? 'o' : 'i'}</div>
+                  </div>
+                  <span className={`shrink-0 text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                    active ? 'bg-green-50 text-green-700' : 'bg-[--bg-raised] text-[--text-muted]'
+                  }`}>
+                    {active ? 'Aperto' : 'Chiuso'}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
         )}
       </div>
 
       {/* Lists */}
-      <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="bg-[--bg-card] rounded-xl border border-[--border-base] p-4">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold">Liste</h2>
           <button
             type="button"
             onClick={() => { if (event?.id) navigate('/lists', { state: { openForm: true, eventId: event.id } }) }}
-            className="w-7 h-7 flex items-center justify-center rounded-full border border-gray-200 text-gray-700 hover:bg-gray-50"
+            className="w-7 h-7 flex items-center justify-center rounded-full border border-[--border-base] text-[--text-muted] hover:bg-[--bg-subtle]"
             title="Aggiungi lista"
             aria-label="Aggiungi lista"
           >
@@ -701,19 +913,65 @@ const EventSummary = () => {
           </button>
         </div>
         {lists.length === 0 ? (
-          <p className="text-sm text-gray-600">Nessuna lista</p>
+          <p className="text-sm text-[--text-muted]">Nessuna lista</p>
         ) : (
-          <ul className="list-disc list-inside text-sm text-gray-800">
-            {lists.map(l => (
-              <li key={l.id}>
-                {l.title} • {l.items.filter(i => i.completed).length}/{l.items.length} completati
-              </li>
-            ))}
-          </ul>
+          <div className="space-y-2">
+            {lists.map(l => {
+              const typeIcon = l.type === 'transport' ? '🚗' : l.type === 'lodging' ? '🛏️' : l.type === 'todo' ? '✅' : '🛒'
+              const done = l.items.filter(i => i.completed).length
+              const total = l.items.length
+              const pct = total ? Math.round((done / total) * 100) : 0
+              return (
+                <button
+                  key={l.id}
+                  type="button"
+                  className="w-full text-left flex items-center justify-between px-3 py-2.5 rounded-lg border border-[--border-base] hover:bg-[--bg-subtle] transition gap-3"
+                  onClick={() => navigate('/lists', { state: { eventId: event.id } })}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-base">{typeIcon}</span>
+                      <span className="font-medium text-[--text-base] truncate">{l.title}</span>
+                    </div>
+                    {total > 0 && (
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <div className="flex-1 h-1.5 bg-[--bg-raised] rounded-full overflow-hidden">
+                          <div className="h-full bg-green-500 rounded-full transition-all" style={{ width: `${pct}%` }} />
+                        </div>
+                        <span className="text-[10px] text-[--text-muted] shrink-0">{done}/{total}</span>
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-xs text-[--text-muted] shrink-0">›</span>
+                </button>
+              )
+            })}
+          </div>
         )}
       </div>
+
+      {showExpenseForm && event?.id ? (
+        <ExpenseForm
+          defaultEventId={event.id}
+          onSubmit={handleCreateExpense}
+          onClose={() => setShowExpenseForm(false)}
+          isLoading={submittingExpense}
+        />
+      ) : null}
+
+      {showPollForm && event?.id ? (
+        <PollForm
+          defaultEventId={event.id}
+          onSubmit={handleCreatePoll}
+          onClose={() => setShowPollForm(false)}
+          isLoading={submittingPoll}
+        />
+      ) : null}
     </div>
   )
 }
 
 export default EventSummary
+
+
+

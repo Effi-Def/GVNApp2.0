@@ -1,13 +1,46 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { pollService, eventService } from '../services/firestore'
-import { useAuthStore } from '../stores/useAuthStore'
+import { pollService } from '../services/firestore'
+import { refreshActiveFarmData, useAuthStore } from '../stores/useAuthStore'
+import { useAppStore } from '../stores/AppStore'
+import { useActiveFarmStore } from '../stores/useActiveFarmStore'
 import { Poll, PollOption, PollVote, Event } from '../types'
-import { filterSelectableEvents, getUserKeys } from '../utils/events'
+import { getSelectableEvents, getUserEventParticipation, getUserKeys } from '../utils/events'
+import AdvancedSection from '../components/AdvancedSection'
+
+// Format ISO date string (YYYY-MM-DD) as Italian readable
+function formatDateOption(value: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    try {
+      const [y, m, d] = value.split('-').map(Number)
+      return new Date(y, m - 1, d).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' })
+    } catch { return value }
+  }
+  return value
+}
+
+// Get upcoming weekend dates (Sat + Sun) for n weekends
+function getUpcomingWeekends(weekends = 3): { label: string; value: string }[] {
+  const results: { label: string; value: string }[] = []
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  const d = new Date(today)
+  const daysToSat = ((6 - d.getDay()) + 7) % 7 || 7
+  d.setDate(d.getDate() + daysToSat)
+  for (let w = 0; w < weekends; w++) {
+    for (let offset = 0; offset < 2; offset++) {
+      const dd = new Date(d); dd.setDate(d.getDate() + offset)
+      const value = `${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,'0')}-${String(dd.getDate()).padStart(2,'0')}`
+      const label = dd.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' })
+      results.push({ label, value })
+    }
+    d.setDate(d.getDate() + 7)
+  }
+  return results
+}
 
 const PollsPage = () => {
   const { user } = useAuthStore()
-  const location = useLocation() as any
+  const location = useLocation()
   const [polls, setPolls] = useState<Poll[]>([])
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
@@ -16,6 +49,7 @@ const PollsPage = () => {
   const [editingPoll, setEditingPoll] = useState<Poll | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const handledNavStateRef = useRef(false)
+
   
   // Prevent background scroll on mobile when poll form modal is open
   useEffect(() => {
@@ -31,12 +65,16 @@ const PollsPage = () => {
     description: '',
     eventId: '',
     votingDurationHours: 24,
-    options: ['', '']
+    options: ['', ''],
+    pollType: 'generic' as 'date' | 'generic',
   })
 
   const currentUserId = user?.id || ''
   const currentUserName = user?.displayName || user?.email || 'Utente'
   const userKeys = getUserKeys(user)
+  const activeFarmId = useActiveFarmStore(s => s.activeFarmId)
+  const storeEvents = useAppStore(s => s.events)
+  const storePolls = useAppStore(s => s.polls)
 
   // Carica sondaggi e eventi
   useEffect(() => {
@@ -47,19 +85,21 @@ const PollsPage = () => {
           return
         }
         setLoading(true)
-        console.log('🗳️ Loading polls and events...')
-        
-        const [pollsData, eventsData] = await Promise.all([
-          pollService.getAll(),
-          eventService.getAll()
-        ])
-        // Eventi selezionabili: appartenenti all'utente (uid o email) e non troppo vecchi
-        const myEvents = filterSelectableEvents(eventsData, userKeys)
+
+        // Ensure data is present (farm-scoped)
+        if ((storeEvents?.length || 0) === 0 && (storePolls?.length || 0) === 0) {
+          await refreshActiveFarmData()
+        }
+
+        const evts = storeEvents || []
+        const pls = storePolls || []
+
+        // Eventi selezionabili: appartenenti all'utente e non troppo vecchi
+        const myEvents = getSelectableEvents(evts, { userKeys, farmIds: activeFarmId ? [activeFarmId] : [] })
         setEvents(myEvents)
         // Filtra i sondaggi ai soli eventi a cui partecipo
         const myIds = new Set(myEvents.map(e => e.id))
-        setPolls(pollsData.filter(p => !p.eventId || myIds.has(p.eventId)))
-        console.log(`✅ Loaded ${pollsData.length} polls and ${eventsData.length} events`)
+        setPolls(pls.filter(p => !p.eventId || myIds.has(p.eventId)))
       } catch (error) {
         console.error('❌ Error loading data:', error)
       } finally {
@@ -68,7 +108,7 @@ const PollsPage = () => {
     }
 
     loadData()
-  }, [user])
+  }, [user, activeFarmId, storeEvents, storePolls])
 
   // Supporto navigazione dal Summary evento: apri form e pre-seleziona l'evento
   useEffect(() => {
@@ -90,6 +130,25 @@ const PollsPage = () => {
       options: ['', ''],
     }))
   }, [location?.state, events])
+
+  // Auto-open create form when ?create=1
+  useEffect(() => {
+    const params = new URLSearchParams(location?.search || '')
+    const shouldCreate = params.get('create') === '1'
+    if (!shouldCreate) return
+
+    const pollType: 'date' | 'generic' = params.get('type') === 'date' ? 'date' : 'generic'
+    setEditingPoll(null)
+    setShowForm(true)
+    setFormData({
+      title: pollType === 'date' ? 'Quando siete liberi?' : '',
+      description: '',
+      eventId: '',
+      votingDurationHours: pollType === 'date' ? 72 : 24,
+      options: pollType === 'date' ? ['', '', ''] : ['', ''],
+      pollType,
+    })
+  }, [location?.search])
 
   // Selezione evento per filtro (UI verrà aggiunta dove serve)
   // Reset automatico se l'evento selezionato non esiste più
@@ -186,10 +245,23 @@ const PollsPage = () => {
   // Gestione submit sondaggio
   const handleSubmitPoll = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!formData.title || formData.options.some(opt => !opt.trim())) return
+    if (!formData.title || formData.options.filter(o => o.trim()).length < 2) return
 
     setSubmitting(true)
     try {
+      if (formData.eventId) {
+        const selectedEvent = events.find(ev => ev.id === formData.eventId)
+        if (!selectedEvent) {
+          alert('Evento non valido')
+          return
+        }
+        const p = getUserEventParticipation(selectedEvent, userKeys)
+        if (p.accessLevel !== 'full') {
+          alert('Non hai i permessi per creare sondaggi in questo evento')
+          return
+        }
+      }
+
       const pollOptions: PollOption[] = formData.options
         .filter(opt => opt.trim())
         .map((option, index) => ({
@@ -211,8 +283,7 @@ const PollsPage = () => {
 
       if (editingPoll) {
         await pollService.update(editingPoll.id, pollData)
-        const updatedPolls = await pollService.getAll()
-        setPolls(updatedPolls)
+        await refreshActiveFarmData()
         setEditingPoll(null)
       } else {
         const newPoll = await pollService.create(pollData)
@@ -225,7 +296,8 @@ const PollsPage = () => {
         description: '',
         eventId: '',
         votingDurationHours: 24,
-        options: ['', '']
+        options: ['', ''],
+        pollType: 'generic',
       })
       setShowForm(false)
       console.log('✅ Poll saved successfully')
@@ -289,12 +361,15 @@ const PollsPage = () => {
   // Modifica sondaggio
   const handleEditPoll = (poll: Poll) => {
     setEditingPoll(poll)
+    const opts = poll.options.map(opt => opt.text)
+    const isDatePoll = opts.every(o => /^\d{4}-\d{2}-\d{2}$/.test(o.trim()))
     setFormData({
       title: poll.title,
       description: poll.description || '',
       eventId: poll.eventId || '',
       votingDurationHours: poll.votingDurationHours || 24,
-      options: poll.options.map(opt => opt.text)
+      options: opts,
+      pollType: isDatePoll ? 'date' : 'generic',
     })
     setShowForm(true)
   }
@@ -335,35 +410,42 @@ const PollsPage = () => {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="pt-16 px-6 pb-6 max-w-4xl mx-auto">
         <div className="text-center py-12">
           <div className="text-6xl mb-4">🗳️</div>
-          <h3 className="text-xl font-semibold text-gray-600 mb-2">Caricamento sondaggi...</h3>
-          <p className="text-gray-500">Connessione a Firebase in corso</p>
+          <h3 className="text-xl font-semibold text-[--text-muted] mb-2">Caricamento sondaggi...</h3>
+          <p className="text-[--text-muted]">Connessione a Firebase in corso</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="pt-16 px-4 pb-6 max-w-4xl mx-auto">
       {/* Header */}
-      <div className="mb-8">
+      <div className="mb-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">Sondaggi 🗳️</h1>
-            <p className="text-gray-600">Crea sondaggi e raccogli le opinioni del gruppo</p>
+            <h1 className="text-xl font-bold text-[--text-base] mb-0.5">Sondaggi 🗳️</h1>
+            <p className="text-sm text-[--text-muted]">Crea sondaggi e raccogli le opinioni della fattoria</p>
           </div>
+          <button
+            onClick={() => { setEditingPoll(null); setShowForm(true) }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-neutral-900 hover:bg-neutral-700 active:bg-neutral-800 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            <span className="text-base leading-none font-bold">+</span>
+            <span className="hidden sm:inline">Nuovo</span>
+          </button>
         </div>
 
         {/* Filtri */}
         <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">Evento:</span>
+            <span className="text-sm font-medium text-[--text-muted]">Evento:</span>
             <select
               value={selectedEvent}
               onChange={(e) => setSelectedEvent(e.target.value)}
-              className="px-3 py-1 rounded-lg border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
+              className="px-3 py-1 rounded-lg border border-[--border-base] text-sm focus:outline-none focus:border-neutral-500"
             >
               <option value="all">Tutti gli eventi</option>
               {events.map(event => (
@@ -389,23 +471,23 @@ const PollsPage = () => {
           const pollIsActive = poll.isActive && !isExpired
 
           return (
-            <div key={poll.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <div key={poll.id} className="bg-[--bg-card] rounded-xl shadow-sm border border-[--border-base] p-6">
               <div className="flex items-start justify-between mb-4">
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-2">
-                    <h3 className="text-xl font-semibold text-gray-800">{poll.title}</h3>
+                    <h3 className="text-xl font-semibold text-[--text-base]">{poll.title}</h3>
                     {eventName && (
-                      <span className="px-2 py-1 bg-blue-100 text-blue-700 text-xs rounded-full">
+                      <span className="px-2 py-1 bg-[--bg-raised] text-[--text-muted] text-xs rounded-full">
                         📅 {eventName}
                       </span>
                     )}
                   </div>
                   
                   {poll.description && (
-                    <p className="text-gray-600 mb-3">{poll.description}</p>
+                    <p className="text-[--text-muted] mb-3">{poll.description}</p>
                   )}
                   
-                  <div className="flex flex-wrap items-center gap-3 text-sm text-gray-500 mb-3">
+                  <div className="flex flex-wrap items-center gap-3 text-sm text-[--text-muted] mb-3">
                     <span>📅 Creato il {formatDate(poll.createdAt)}</span>
                     <span>👤 da {creatorName}</span>
                     <span>👥 {totalVotes} voti</span>
@@ -415,8 +497,8 @@ const PollsPage = () => {
                   <div className="flex items-center space-x-2 mb-2">
                     <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                       pollIsActive 
-                        ? 'bg-green-100 text-green-700' 
-                        : 'bg-red-100 text-red-700'
+                        ? 'bg-green-500/10 text-green-600' 
+                        : 'bg-red-500/10 text-red-600'
                     }`}>
                       {pollIsActive ? 'Attivo' : 'Chiuso'}
                     </span>
@@ -424,8 +506,8 @@ const PollsPage = () => {
                     {timeRemaining && (
                       <span className={`px-3 py-1 rounded-full text-xs font-medium ${
                         timeRemaining.expired 
-                          ? 'bg-red-100 text-red-700' 
-                          : 'bg-orange-100 text-orange-700'
+                          ? 'bg-red-500/10 text-red-600' 
+                          : 'bg-orange-500/10 text-orange-600'
                       }`}>
                         ⏰ {timeRemaining.timeString}
                       </span>
@@ -438,7 +520,7 @@ const PollsPage = () => {
                   <div className="flex space-x-2">
                     <button
                       onClick={() => handleEditPoll(poll)}
-                      className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                      className="p-2 text-[--text-muted] hover:text-[--text-base] hover:bg-[--bg-subtle] rounded-lg transition-colors"
                       title="Modifica sondaggio"
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -473,30 +555,28 @@ const PollsPage = () => {
                         className={`w-full text-left p-4 rounded-lg border-2 transition-all duration-200 ${
                           userHasVoted || !pollIsActive
                             ? isUserChoice
-                              ? 'border-blue-500 bg-blue-50 cursor-default'
-                              : 'border-gray-200 bg-gray-50 cursor-default'
-                            : 'border-gray-200 hover:border-blue-500 hover:bg-blue-50 cursor-pointer'
+                              ? 'border-neutral-900 bg-[--bg-raised] cursor-default'
+                              : 'border-[--border-base] bg-[--bg-subtle] cursor-default'
+                            : 'border-[--border-base] hover:border-neutral-500 hover:bg-[--bg-raised] cursor-pointer'
                         }`}
                       >
                         <div className="flex items-center justify-between">
-                          <span className={`font-medium ${
-                            isUserChoice ? 'text-blue-700' : 'text-gray-800'
-                          }`}>
-                            {option.text}
-                            {isUserChoice && <span className="ml-2 text-sm">✓ La tua scelta</span>}
+                          <span className="font-medium text-[--text-base]">
+                            {formatDateOption(option.text)}
+                            {isUserChoice && <span className="ml-2 text-sm text-[--text-muted]">✓</span>}
                           </span>
                           <div className="flex items-center space-x-2">
-                            <span className="text-sm text-gray-600">{optionVotes} voti</span>
-                            <span className="text-sm font-semibold text-gray-800">{percentage}%</span>
+                            <span className="text-sm text-[--text-muted]">{optionVotes} voti</span>
+                            <span className="text-sm font-semibold text-[--text-base]">{percentage}%</span>
                           </div>
                         </div>
                         
                         {/* Barra di progresso */}
                         {userHasVoted && (
-                          <div className="mt-2 w-full bg-gray-200 rounded-full h-2">
+                          <div className="mt-2 w-full bg-[--bg-raised] rounded-full h-2">
                             <div 
                               className={`h-2 rounded-full transition-all duration-500 ${
-                                isUserChoice ? 'bg-blue-500' : 'bg-gray-400'
+                                isUserChoice ? 'bg-neutral-900' : 'bg-[--border-base]'
                               }`}
                               style={{ width: `${percentage}%` }}
                             ></div>
@@ -516,9 +596,9 @@ const PollsPage = () => {
                   </p>
                 </div>
               ) : pollIsActive ? (
-                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                  <p className="text-sm text-blue-700">
-                    🗳️ Clicca su un'opzione per votare
+                <div className="mt-4 p-3 bg-[--bg-subtle] border border-[--border-base] rounded-lg">
+                  <p className="text-sm text-[--text-muted]">
+                    🗳️ Tocca un'opzione per votare
                   </p>
                 </div>
               ) : isExpired ? (
@@ -528,8 +608,8 @@ const PollsPage = () => {
                   </p>
                 </div>
               ) : (
-                <div className="mt-4 p-3 bg-gray-50 border border-gray-200 rounded-lg">
-                  <p className="text-sm text-gray-700">
+                <div className="mt-4 p-3 bg-[--bg-subtle] border border-[--border-base] rounded-lg">
+                  <p className="text-sm text-[--text-muted]">
                     🔒 Questo sondaggio è stato chiuso
                   </p>
                 </div>
@@ -539,22 +619,38 @@ const PollsPage = () => {
         })}
 
         {polls.filter(p => selectedEvent === 'all' || p.eventId === selectedEvent).length === 0 && (
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4">🗳️</div>
-            <h3 className="text-xl font-semibold text-gray-600 mb-2">Nessun sondaggio</h3>
-            <p className="text-gray-500">Crea il primo sondaggio per raccogliere le opinioni del gruppo</p>
+          <div className="text-center py-12 space-y-3">
+            <div className="text-5xl">🗳️</div>
+            <div className="text-base font-semibold text-[--text-base]">Nessun sondaggio ancora</div>
+            <p className="text-sm text-[--text-muted]">Scopri quando tutti sono liberi in 2 tap.</p>
+            <div className="flex gap-2 justify-center pt-1">
+              <button
+                onClick={() => { setEditingPoll(null); setFormData({ title: 'Quando siete liberi?', description: '', eventId: '', votingDurationHours: 72, options: ['', '', ''], pollType: 'date' }); setShowForm(true) }}
+                className="px-4 py-2 rounded-xl bg-[--text-base] text-[--bg-card] text-sm font-semibold hover:opacity-90 transition"
+              >
+                🗓️ Quando siete liberi?
+              </button>
+              <button
+                onClick={() => { setEditingPoll(null); setShowForm(true) }}
+                className="px-4 py-2 rounded-xl bg-[--bg-raised] text-[--text-base] text-sm font-semibold hover:bg-[--bg-subtle] transition"
+              >
+                + Sondaggio libero
+              </button>
+            </div>
           </div>
         )}
       </div>
 
       {/* Modal Form */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-4 z-[70]">
-          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
-            <div className="p-6 pb-[calc(6rem+env(safe-area-inset-bottom))]">
+        <div className="fixed inset-0 !mt-0 bg-black/50 flex items-end sm:items-center justify-center p-4 z-[70]">
+          <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
+            <div className="p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800">
-                  {editingPoll ? 'Modifica Sondaggio' : 'Nuovo Sondaggio'}
+                <h2 className="text-xl font-bold text-[--text-base]">
+                  {editingPoll
+                    ? 'Modifica Sondaggio'
+                    : formData.pollType === 'date' ? '🗓️ Quando siete liberi?' : 'Nuovo Sondaggio'}
                 </h2>
                 <button
                   onClick={() => {
@@ -565,10 +661,11 @@ const PollsPage = () => {
                       description: '',
                       eventId: '',
                       votingDurationHours: 24,
-                      options: ['', '']
+                      options: ['', ''],
+                      pollType: 'generic',
                     })
                   }}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="text-[--text-muted] hover:text-[--text-muted]"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -578,90 +675,127 @@ const PollsPage = () => {
 
               <form onSubmit={handleSubmitPoll} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-[--text-muted] mb-1">
                     Titolo sondaggio
                   </label>
                   <input
                     type="text"
                     value={formData.title}
                     onChange={(e) => setFormData({...formData, title: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
+                    className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-neutral-500"
                     placeholder="Es. Dove andare per il prossimo evento?"
                     required
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Descrizione (opzionale)
-                  </label>
-                  <textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({...formData, description: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                    rows={3}
-                    placeholder="Aggiungi dettagli al sondaggio..."
-                  />
-                </div>
+                <AdvancedSection storageKey="gvn.advanced.pollCreate" title="Avanzate">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-[--text-muted] mb-1">
+                        Descrizione (opzionale)
+                      </label>
+                      <textarea
+                        value={formData.description}
+                        onChange={(e) => setFormData({...formData, description: e.target.value})}
+                        className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-neutral-500"
+                        rows={3}
+                        placeholder="Aggiungi dettagli al sondaggio..."
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-[--text-muted] mb-1">
+                        Evento collegato (opzionale)
+                      </label>
+                      <select
+                        value={formData.eventId}
+                        onChange={(e) => setFormData({...formData, eventId: e.target.value})}
+                        className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-neutral-500"
+                      >
+                        <option value="">Nessun evento specifico</option>
+                        {events.map(event => (
+                          <option key={event.id} value={event.id}>{event.title}</option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-[--text-muted] mt-1">
+                        Collega il sondaggio a un evento specifico
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-medium text-[--text-muted] mb-1">
+                        Durata votazioni (ore)
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="168"
+                        value={formData.votingDurationHours}
+                        onChange={(e) => setFormData({...formData, votingDurationHours: parseInt(e.target.value) || 24})}
+                        className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-neutral-500"
+                      />
+                      <p className="text-xs text-[--text-muted] mt-1">
+                        Le votazioni si chiuderanno automaticamente dopo questo periodo
+                      </p>
+                    </div>
+                  </div>
+                </AdvancedSection>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Evento collegato (opzionale)
+                  <label className="block text-sm font-medium text-[--text-muted] mb-2">
+                    {formData.pollType === 'date' ? 'Date proposte' : 'Opzioni di voto'}
                   </label>
-                  <select
-                    value={formData.eventId}
-                    onChange={(e) => setFormData({...formData, eventId: e.target.value})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="">Nessun evento specifico</option>
-                    {events.map(event => (
-                      <option key={event.id} value={event.id}>{event.title}</option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Collega il sondaggio a un evento specifico
-                  </p>
-                </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Durata votazioni (ore)
-                  </label>
-                  <input
-                    type="number"
-                    min="1"
-                    max="168"
-                    value={formData.votingDurationHours}
-                    onChange={(e) => setFormData({...formData, votingDurationHours: parseInt(e.target.value) || 24})}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Le votazioni si chiuderanno automaticamente dopo questo periodo
-                  </p>
-                </div>
+                  {/* Weekend shortcuts for date polls */}
+                  {formData.pollType === 'date' && (
+                    <div className="flex flex-wrap gap-1.5 mb-3">
+                      {getUpcomingWeekends(3).map(({ label, value }) => {
+                        const already = formData.options.includes(value)
+                        return (
+                          <button
+                            key={value}
+                            type="button"
+                            disabled={already}
+                            onClick={() => {
+                              setFormData(prev => {
+                                const emptyIdx = prev.options.findIndex(o => !o.trim())
+                                if (emptyIdx >= 0) {
+                                  const opts = [...prev.options]; opts[emptyIdx] = value
+                                  return { ...prev, options: opts }
+                                }
+                                return { ...prev, options: [...prev.options, value] }
+                              })
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-medium border transition ${
+                              already
+                                ? 'bg-[--bg-raised] text-[--text-muted] border-[--border-base] cursor-default'
+                                : 'bg-[--bg-subtle] text-[--text-base] border-[--border-base] hover:border-neutral-600 hover:bg-[--bg-raised]'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Opzioni di voto
-                  </label>
                   {formData.options.map((option, index) => (
                     <div key={index} className="flex items-center space-x-2 mb-2">
                       <input
-                        type="text"
+                        type={formData.pollType === 'date' ? 'date' : 'text'}
                         value={option}
                         onChange={(e) => updateOption(index, e.target.value)}
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-blue-500"
-                        placeholder={`Opzione ${index + 1}`}
-                        required
+                        className="flex-1 px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-neutral-500 bg-[--bg-card] text-[--text-base]"
+                        placeholder={formData.pollType === 'date' ? '' : `Opzione ${index + 1}`}
                       />
                       {formData.options.length > 2 && (
                         <button
                           type="button"
                           onClick={() => removeOption(index)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg"
+                          className="p-2 text-[--text-muted] hover:text-red-500 hover:bg-[--bg-subtle] rounded-lg"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                           </svg>
                         </button>
                       )}
@@ -670,15 +804,15 @@ const PollsPage = () => {
                   <button
                     type="button"
                     onClick={addOption}
-                    className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-blue-500 hover:text-blue-600 transition-colors"
+                    className="w-full py-2 border-2 border-dashed border-[--border-base] rounded-lg text-[--text-muted] hover:border-neutral-500 hover:text-[--text-base] transition-colors"
                   >
-                    + Aggiungi opzione
+                    + {formData.pollType === 'date' ? 'Aggiungi data' : 'Aggiungi opzione'}
                   </button>
                 </div>
 
                 {/* Fixed action bar with safe-area */}
-                <div className="fixed left-1/2 -translate-x-1/2 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[60] w-full max-w-md px-6">
-                  <div className="bg-white border rounded-xl shadow-md px-4 py-3 flex space-x-3">
+                <div className="sticky bottom-0 z-10 pt-3 pb-[env(safe-area-inset-bottom)]">
+                  <div className="bg-[--bg-card] border border-[--border-base] rounded-xl shadow-md px-4 py-3 flex space-x-3">
                     <button
                       type="button"
                       onClick={() => {
@@ -689,10 +823,11 @@ const PollsPage = () => {
                           description: '',
                           eventId: '',
                           votingDurationHours: 24,
-                          options: ['', '']
+                          options: ['', ''],
+                          pollType: 'generic',
                         })
                       }}
-                      className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                      className="flex-1 px-4 py-2 border border-[--border-base] text-[--text-muted] rounded-lg hover:bg-[--bg-subtle] transition-colors"
                       disabled={submitting}
                     >
                       Annulla
@@ -700,9 +835,9 @@ const PollsPage = () => {
                     <button
                       type="submit"
                       disabled={submitting}
-                      className="flex-1 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="flex-1 px-4 py-2 bg-neutral-900 text-white rounded-lg hover:bg-neutral-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {submitting ? 'Salvataggio...' : (editingPoll ? 'Salva' : 'Crea Sondaggio')}
+                      {submitting ? 'Salvataggio...' : editingPoll ? 'Salva' : formData.pollType === 'date' ? 'Invia sondaggio →' : 'Crea Sondaggio'}
                     </button>
                   </div>
                 </div>
@@ -711,21 +846,9 @@ const PollsPage = () => {
           </div>
         </div>
       )}
-
-      {/* Bottone Mobile */}
-      <div className="fixed bottom-28 right-6 md:bottom-8 z-40">
-        <button 
-          onClick={() => setShowForm(true)}
-          className="bg-blue-500 hover:bg-blue-600 text-white p-4 rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 hover:scale-110 ring-4 ring-blue-100"
-          title="Crea nuovo sondaggio"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
-      </div>
     </div>
   )
 }
 
 export default PollsPage
+

@@ -14,9 +14,20 @@ service firebase.storage {
     }
 
     // Event Chat Attachments
+    // Read/write only for the event creator or explicit participants.
+    // Legacy events without participantIds remain accessible to any signed-in user.
     match /events/{eventId}/chat/{messageId}/{fileName} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null;
+      function eventDoc() {
+        return firestore.get(/databases/(default)/documents/events/$(eventId)).data;
+      }
+      function canAccessEventChat() {
+        let ev = eventDoc();
+        return ev.createdBy == request.auth.uid
+          || !('participantIds' in ev)
+          || request.auth.uid in ev.participantIds;
+      }
+      allow read: if request.auth != null && canAccessEventChat();
+      allow write: if request.auth != null && canAccessEventChat();
     }
   }
 }

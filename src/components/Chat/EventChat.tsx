@@ -1,22 +1,28 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { chatService, eventService } from '../../services/firestore'
-import { ChatMessage, ChatReactionKey, EventParticipant, EventParticipation } from '../../types'
+import { ChatMessage, EventParticipant, EventParticipation } from '../../types'
+import { ChatDescriptor, eventDescriptor } from '../../types/chat'
 import { useAuthStore } from '../../stores/useAuthStore'
 import { useUserSettingsStore } from '../../stores/UserSettingsStore'
+import MessageBubble from './MessageBubble'
+import ThreadPanel from './ThreadPanel'
 
 interface Props {
-  eventId: string
+  eventId?: string
+  /** When provided, overrides eventId-derived paths for messages/presence/storage. */
+  chatDescriptor?: ChatDescriptor
+  /**
+   * Pre-loaded member list for @mentions in channel mode.
+   * In event mode this is populated automatically from eventService.getById().
+   */
+  chatPeople?: Array<{ uid: string; name: string }>
+  /** Called instead of markEventChatRead when in channel/non-event mode. */
+  onMarkRead?: () => Promise<void>
   eventName?: string
   onBack?: () => void
   className?: string
   canWrite?: boolean
 }
-
-const REACTIONS: { key: ChatReactionKey; label: string }[] = [
-  { key: 'like', label: '👍' },
-  { key: 'love', label: '❤️' },
-  { key: 'fun', label: '😂' },
-]
 
 const canEditOrDelete = (msg: ChatMessage, meId: string) => {
   if (msg.userId !== meId) return false
@@ -24,7 +30,18 @@ const canEditOrDelete = (msg: ChatMessage, meId: string) => {
   return Date.now() - created < 15 * 60 * 1000 // 15 minutes window
 }
 
-const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, canWrite: canWriteProp }) => {
+// Module-level message cache: keeps the last known messages for each event.
+// If EventChat ever remounts (e.g. due to a store refresh in the parent), the
+// cached messages are shown immediately instead of flashing an empty list.
+const _chatMsgCache = new Map<string, ChatMessage[]>()
+
+const EventChat: React.FC<Props> = ({ eventId: eventIdProp, chatDescriptor: descriptorProp, chatPeople, onMarkRead, eventName, onBack, className, canWrite: canWriteProp }) => {
+  // Resolve a descriptor — either passed directly (channel mode) or derived from eventId (event mode).
+  const descriptor: ChatDescriptor = descriptorProp ?? eventDescriptor(eventIdProp ?? '')
+  // Stable cache/listen key is the messages collection path.
+  const chatKey = descriptor.messagesPath
+  // For backward-compat code that still references eventId (muted list, event participant load, etc.)
+  const eventId = eventIdProp ?? ''
   const { user } = useAuthStore()
   const me = { id: user?.id || user?.email || '', name: user?.displayName || user?.email || 'Tu', photoURL: user?.photoURL }
 
@@ -33,7 +50,7 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
     return Array.from(new Set(keys))
   }, [user?.id, user?.email])
 
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<ChatMessage[]>(() => _chatMsgCache.get(chatKey) ?? [])
   const [chatError, setChatError] = useState<string | null>(null)
   const [text, setText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -51,8 +68,10 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
   const [eventCreatedBy, setEventCreatedBy] = useState<string | null>(null)
   const [eventParticipation, setEventParticipation] = useState<Record<string, EventParticipation> | null>(null)
   const [typingUsers, setTypingUsers] = useState<{ uid: string; updatedAt: Date; typing: boolean }[]>([])
+  const [openThread, setOpenThread] = useState<ChatMessage | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const [showNewIndicator, setShowNewIndicator] = useState(false)
+  const [newMsgCount, setNewMsgCount] = useState(0)
   const typingDebounce = useRef<number | null>(null)
   const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({})
   
@@ -68,27 +87,32 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
   const muted = !!(notifications.mutedEventIds || []).includes(eventId)
 
   useEffect(() => {
-    const unsub = chatService.listen(
-      eventId,
+    const unsub = chatService.listenPath(
+      descriptor.messagesPath,
       msgs => {
+        _chatMsgCache.set(chatKey, msgs)
         setChatError(null)
         setMessages(msgs)
       },
       () => {
-        setChatError('Impossibile caricare la chat per questo evento (permessi o rete).')
+        setChatError('Impossibile caricare la chat (permessi o rete).')
       }
     )
     return () => unsub()
-  }, [eventId])
+  }, [chatKey, descriptor.messagesPath])
 
   useEffect(() => {
-    const unsubP = chatService.listenParticipants(eventId, list => setParticipants(list))
-    const unsubT = chatService.listenTyping(eventId, list => setTypingUsers(list))
+    const unsubP = chatService.listenParticipantsAt(descriptor.presenceBasePath, list => setParticipants(list))
+    const unsubT = chatService.listenTypingAt(descriptor.presenceBasePath, list => setTypingUsers(list))
     return () => { unsubP(); unsubT() }
-  }, [eventId])
+  }, [descriptor.presenceBasePath])
 
-  // Load event participants for @mentions (so you can tag even if they never opened the chat)
+  // Load event participants for @mentions — skipped in channel mode (chatPeople prop used instead)
   useEffect(() => {
+    if (descriptor.context === 'channel') {
+      if (chatPeople) setEventPeople(chatPeople)
+      return
+    }
     let alive = true
     eventService.getById(eventId)
       .then(ev => {
@@ -104,7 +128,7 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
       })
       .catch(() => {})
     return () => { alive = false }
-  }, [eventId])
+  }, [eventId, descriptor.context, chatPeople])
 
   const computedCanWrite = useMemo(() => {
     if (!me.id) return false
@@ -124,14 +148,34 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
 
   const canWrite = typeof canWriteProp === 'boolean' ? canWriteProp : computedCanWrite
 
+  // Once canWrite has been true for this session, lock it so that a transient
+  // false (e.g. a store refresh causes a brief re-render before data stabilises)
+  // never unmounts the ChatComposer mid-conversation.
+  const canWriteLocked = useRef(false)
+  useEffect(() => {
+    if (canWrite) canWriteLocked.current = true
+  }, [canWrite])
+  const stableCanWrite = canWrite || canWriteLocked.current
+
   // Scroll handling
+  // scrollContainerRef points to the overflow-y-auto div inside ChatThread.
+  // Using a direct ref (instead of bottomRef.current?.parentElement) avoids
+  // any ambiguity and lets us call scrollTop = scrollHeight reliably.
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null)
+
   const scrollToBottom = (smooth = true) => {
-    bottomRef.current?.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto', block: 'end' })
+    const el = scrollContainerRef.current
+    if (!el) return
+    if (smooth) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    } else {
+      el.scrollTop = el.scrollHeight
+    }
   }
 
   useEffect(() => {
     // Auto-scroll logic
-    const el = bottomRef.current?.parentElement
+    const el = scrollContainerRef.current
     if (!el) return
     
     const lastMsg = messages[messages.length - 1]
@@ -141,16 +185,44 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
     if (isMine || nearBottom) {
       scrollToBottom()
       setShowNewIndicator(false)
+      setNewMsgCount(0)
     } else if (messages.length > 0) {
       setShowNewIndicator(true)
+      setNewMsgCount(prev => prev + 1)
     }
   }, [messages.length, me.id])
 
+  const doMarkRead = React.useCallback(() => {
+    if (onMarkRead) {
+      onMarkRead().catch(() => {})
+    } else if (eventId) {
+      markEventChatRead(eventId).catch(() => {})
+    }
+    if (me.id) chatService.markReadAt(descriptor.presenceBasePath, me.id, { displayName: me.name, photoURL: me.photoURL }).catch(() => {})
+  }, [onMarkRead, eventId, markEventChatRead, me.id, me.name, me.photoURL, descriptor.presenceBasePath])
+
   useEffect(() => {
     // Mark as read when opening
-    markEventChatRead(eventId).catch(()=>{})
-    if (me.id) chatService.markRead(eventId, me.id, { displayName: me.name, photoURL: me.photoURL }).catch(()=>{})
-  }, [eventId, markEventChatRead, me.id])
+    doMarkRead()
+  }, [doMarkRead])
+
+  // Adjust scroll when the mobile keyboard opens/closes (visualViewport shrinks/grows).
+  // Only auto-scroll to bottom when the user was already near the bottom —
+  // avoids jumping away from a position the user deliberately scrolled to.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    const onResize = () => {
+      const el = scrollContainerRef.current
+      if (!el) return
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200
+        if (nearBottom) scrollToBottom(false)
+      }))
+    }
+    vv.addEventListener('resize', onResize)
+    return () => vv.removeEventListener('resize', onResize)
+  }, [])
 
 
   const othersTyping = useMemo(() => {
@@ -163,8 +235,8 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
     try {
       setSending(true)
       setUploadProgress({})
-      await chatService.sendMessage(
-        eventId,
+      await chatService.sendMessageTo(
+        descriptor,
         { files: [audioFile] },
         { id: me.id, displayName: me.name, photoURL: me.photoURL },
         (fileName, pct) => setUploadProgress(prev => ({ ...prev, [fileName]: pct }))
@@ -172,29 +244,66 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
       scrollToBottom()
     } catch (e) {
       console.error('Failed to send voice message', e)
-      alert('Errore invio vocale')
+      setChatError('Errore invio messaggio vocale')
+      setTimeout(() => setChatError(null), 3000)
     } finally {
       setSending(false)
       setUploadProgress({})
     }
   }
 
+  const sendLocation = async () => {
+    if (!me.id) return
+    if (!navigator.geolocation) {
+      setChatError('Geolocalizzazione non supportata da questo browser')
+      setTimeout(() => setChatError(null), 3000)
+      return
+    }
+    setSending(true)
+    try {
+      const pos = await new Promise<GeolocationPosition>((resolve, reject) =>
+        navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 10000, enableHighAccuracy: true })
+      )
+      const { latitude, longitude } = pos.coords
+      const url = `https://www.google.com/maps?q=${latitude.toFixed(6)},${longitude.toFixed(6)}`
+      await chatService.sendMessageTo(
+        descriptor,
+        { text: `📍 La mia posizione: ${url}` },
+        { id: me.id, displayName: me.name, photoURL: me.photoURL }
+      )
+      scrollToBottom()
+      doMarkRead()
+    } catch (e: any) {
+      const code = (e as GeolocationPositionError)?.code
+      const msg = code === 1
+        ? 'Posizione negata. Consenti l\u2019accesso alla posizione nelle impostazioni.'
+        : code === 2 ? 'Posizione non disponibile.'
+        : 'Impossibile ottenere la posizione.'
+      setChatError(msg)
+      setTimeout(() => setChatError(null), 4000)
+    } finally {
+      setSending(false)
+    }
+  }
+
   const onSend = async () => {
-    if (!me.id) return alert('Devi essere autenticato')
-    if (!text.trim() && files.length === 0) return
+    if (!me.id) { setChatError('Devi essere autenticato'); return }
+    const draftText = text
+    const draftFiles = files
+    const draftQuoted = quoted
+    const draftMentions = selectedMentions
+    if (!draftText.trim() && draftFiles.length === 0) return
+
+    const quotedPayload = draftQuoted
+      ? { messageId: draftQuoted.id, textPreview: draftQuoted.text, mediaThumbUrl: draftQuoted.attachments?.[0]?.url }
+      : undefined
+    const mentions = draftMentions
+      .filter(m => draftText.includes(`@${m.name}`))
+      .map(m => m.uid)
+
     try {
       setSending(true)
-      const quotedPayload = quoted ? { messageId: quoted.id, textPreview: quoted.text, mediaThumbUrl: quoted.attachments?.[0]?.url } : undefined
-      const mentions = selectedMentions
-        .filter(m => text.includes(`@${m.name}`))
-        .map(m => m.uid)
-      setUploadProgress({})
-      await chatService.sendMessage(
-        eventId,
-        { text: text.trim() || undefined, files: files.length ? files : undefined, quoted: quotedPayload, mentions: mentions.length ? mentions : undefined },
-        { id: me.id, displayName: me.name, photoURL: me.photoURL },
-        (fileName, pct) => setUploadProgress(prev => ({ ...prev, [fileName]: pct }))
-      )
+      // Clear immediately so the composer does not keep stale text on slow networks.
       setText('')
       setFiles([])
       setQuoted(null)
@@ -203,28 +312,46 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
       setMentionQuery('')
       setMentionStart(null)
       setMentionIndex(0)
-      await markEventChatRead(eventId)
-      if (me.id) chatService.markRead(eventId, me.id, { displayName: me.name, photoURL: me.photoURL }).catch(()=>{})
+      setUploadProgress({})
+      await chatService.sendMessageTo(
+        descriptor,
+        { text: draftText.trim() || undefined, files: draftFiles.length ? draftFiles : undefined, quoted: quotedPayload, mentions: mentions.length ? mentions : undefined },
+        { id: me.id, displayName: me.name, photoURL: me.photoURL },
+        (fileName, pct) => setUploadProgress(prev => ({ ...prev, [fileName]: pct }))
+      )
+      doMarkRead()
       scrollToBottom()
     } catch (e) {
       console.error('Send message failed', e)
-      alert('Errore nell\'invio del messaggio')
+      // Restore draft on failure to avoid data loss.
+      setText(draftText)
+      setFiles(draftFiles)
+      setQuoted(draftQuoted)
+      setSelectedMentions(draftMentions)
+      setChatError('Errore nell\'invio del messaggio')
+      setTimeout(() => setChatError(null), 3000)
     } finally {
       setSending(false)
+      // Keep keyboard open (Telegram/WhatsApp behaviour)
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => { textareaRef.current?.focus() })
+      })
     }
   }
 
   // Audio Recording Functions
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      // Pick best supported format
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4'].find(t => MediaRecorder.isTypeSupported(t)) || ''
+      const mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
       mediaRecorderRef.current = mediaRecorder
       audioChunksRef.current = []
       isRecordingCancelled.current = false
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data && event.data.size > 0) {
           audioChunksRef.current.push(event.data)
         }
       }
@@ -238,17 +365,21 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
           return
         }
 
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        // Prevent sending empty or too short recordings (< 1s)
-        if (audioBlob.size < 1000 || audioChunksRef.current.length === 0) {
-           return
-        }
+        const chunks = audioChunksRef.current
+        if (chunks.length === 0) return
 
-        const audioFile = new File([audioBlob], `voice-message-${Date.now()}.webm`, { type: 'audio/webm' })
+        const ext = mimeType.includes('ogg') ? 'ogg' : mimeType.includes('mp4') ? 'mp4' : 'webm'
+        const fileMime = mimeType || 'audio/webm'
+        const audioBlob = new Blob(chunks, { type: fileMime })
+        if (audioBlob.size < 500) return // too short/empty
+
+        const audioFile = new File([audioBlob], `voice-${Date.now()}.${ext}`, { type: fileMime })
         await sendVoiceMessage(audioFile)
+        audioChunksRef.current = []
       }
 
-      mediaRecorder.start()
+      // Request data every 250ms for better chunk reliability
+      mediaRecorder.start(250)
       setIsRecording(true)
       setRecordingTime(0)
       recordingTimerRef.current = window.setInterval(() => {
@@ -256,36 +387,34 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
       }, 1000)
     } catch (err) {
       console.error('Error accessing microphone:', err)
-      alert('Impossibile accedere al microfono')
+      setChatError('Impossibile accedere al microfono')
+      setTimeout(() => setChatError(null), 3000)
     }
   }
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      // If recording is very short (< 500ms), treat as cancel/accidental
-      if (recordingTime < 1 && audioChunksRef.current.length === 0) {
-        isRecordingCancelled.current = true
-      }
-      mediaRecorderRef.current.stop()
-      setIsRecording(false)
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current)
-        recordingTimerRef.current = null
-      }
+    if (!mediaRecorderRef.current || !isRecording) return
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
     }
+    setIsRecording(false)
+    setRecordingTime(0)
+    // state_changed listener will fire onstop — let it handle sending
+    try { mediaRecorderRef.current.stop() } catch {}
   }
 
   const cancelRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
-      isRecordingCancelled.current = true
-      mediaRecorderRef.current.stop()
-      setIsRecording(false)
-      if (recordingTimerRef.current) {
-        clearInterval(recordingTimerRef.current)
-        recordingTimerRef.current = null
-      }
-      audioChunksRef.current = [] 
+    if (!mediaRecorderRef.current || !isRecording) return
+    isRecordingCancelled.current = true
+    if (recordingTimerRef.current) {
+      clearInterval(recordingTimerRef.current)
+      recordingTimerRef.current = null
     }
+    setIsRecording(false)
+    setRecordingTime(0)
+    try { mediaRecorderRef.current.stop() } catch {}
+    audioChunksRef.current = []
   }
 
   const formatTime = (seconds: number) => {
@@ -294,12 +423,12 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const toggleReaction = async (m: ChatMessage, key: ChatReactionKey) => {
+  const toggleReaction = async (m: ChatMessage, emoji: string) => {
     if (!me.id) return
-    const arr = m.reactions?.[key] || []
+    const arr = (m.reactions || {})[emoji] || []
     const has = arr.includes(me.id)
     try {
-      await chatService.toggleReaction(eventId, m.id, key, me.id, has)
+      await chatService.toggleReactionAt(descriptor.messagesPath, m.id, emoji, me.id, has)
     } catch (e) {
       console.error('toggleReaction failed', e)
     }
@@ -307,14 +436,21 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
 
   const onFilesSelected = (ev: React.ChangeEvent<HTMLInputElement>) => {
     const sel = Array.from(ev.target.files || [])
-    // basic limits: max 3 files, 5MB each
-    const limited = sel.slice(0, 3).filter(f => f.size <= 5 * 1024 * 1024)
-    setFiles(limited)
+    // max 10 files, 20MB each
+    const limited = sel.slice(0, 10).filter(f => f.size <= 20 * 1024 * 1024)
+    const rejected = sel.filter(f => f.size > 20 * 1024 * 1024)
+    if (rejected.length > 0) {
+      setChatError(`${rejected.length} file troppo grandi (max 20 MB)`)
+      setTimeout(() => setChatError(null), 3000)
+    }
+    setFiles(prev => [...prev, ...limited].slice(0, 10))
+    // Reset input so same file can be re-selected
+    ev.target.value = ''
   }
 
   const onDelete = async (m: ChatMessage) => {
     if (!confirm('Eliminare questo messaggio?')) return
-    try { await chatService.deleteMessage(eventId, m.id) } catch (e) { console.error(e) }
+    try { await chatService.deleteMessageAt(descriptor.messagesPath, m.id) } catch (e) { console.error(e) }
   }
 
   const ticksFor = (m: ChatMessage): 'clock' | 'single' | 'double' | 'double-blue' => {
@@ -338,10 +474,10 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
   const onComposerChange = (v: string) => {
     setText(v)
     if (!me.id) return
-    chatService.setTyping(eventId, me.id, true).catch(()=>{})
+    chatService.setTypingAt(descriptor.presenceBasePath, me.id, true).catch(() => {})
     if (typingDebounce.current) window.clearTimeout(typingDebounce.current)
     typingDebounce.current = window.setTimeout(() => {
-      chatService.setTyping(eventId, me.id, false).catch(()=>{})
+      chatService.setTypingAt(descriptor.presenceBasePath, me.id, false).catch(() => {})
     }, 2500)
   }
 
@@ -434,25 +570,25 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
   }
 
   return (
-    <div id="chat" className={`flex flex-col min-h-0 bg-[#e5ddd5] dark:bg-gray-900 rounded-xl overflow-hidden border border-gray-300 dark:border-gray-700 shadow-sm relative ${className || 'h-[calc(100vh-140px)]'}`}>
+    <div id="chat" className={`flex flex-col min-h-0 bg-[#e5ddd5] dark:bg-gray-900 rounded-xl overflow-hidden border border-[--border-base] dark:border-gray-700 shadow-sm relative ${className || 'h-[calc(100vh-140px)]'}`}>
       {/* Header */}
-      <div className="sticky top-0 z-10 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex items-center gap-3 shadow-sm">
+      <div className="sticky top-0 z-10 bg-[--bg-card] dark:bg-gray-800 border-b border-[--border-base] dark:border-gray-700 px-4 py-3 flex items-center gap-3 shadow-sm">
         {onBack && (
-          <button onClick={onBack} className="p-1 -ml-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300">
+          <button onClick={onBack} className="p-1 -ml-1 rounded-full hover:bg-[--bg-raised] dark:hover:bg-gray-700 text-[--text-muted] dark:text-gray-300">
             <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
           </button>
         )}
         <div className="flex-1 min-w-0">
-          <h2 className="font-semibold truncate text-gray-900 dark:text-white">{eventName || 'Chat Evento'}</h2>
-          <div className="text-xs text-gray-500 truncate">
+          <h2 className="font-semibold truncate text-[--text-base] dark:text-white">{eventName || 'Chat Evento'}</h2>
+          <div className="text-xs text-[--text-muted] truncate">
             {othersTyping.length > 0
               ? <span className="text-green-600 font-medium">sta scrivendo...</span>
-              : `${participants.length} partecipanti`
+              : (participants.length === 1 ? '1 partecipante' : `${participants.length} partecipanti`)
             }
           </div>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => toggleEventMute(eventId)} className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300">
+          <button onClick={() => toggleEventMute(eventId)} className="p-2 rounded-full hover:bg-[--bg-raised] dark:hover:bg-gray-700 text-[--text-muted] dark:text-gray-300">
             {muted ? '🔇' : '🔈'}
           </button>
         </div>
@@ -464,19 +600,32 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
         chatError={chatError}
         showNewIndicator={showNewIndicator}
         onReply={setQuoted}
+        onOpenThread={setOpenThread}
         onDelete={onDelete}
         onToggleReaction={toggleReaction}
         canEditOrDelete={(m) => canEditOrDelete(m, me.id)}
         renderTicks={renderTicks}
         scrollToBottom={scrollToBottom}
         bottomRef={bottomRef}
+        scrollContainerRef={scrollContainerRef}
         onAtBottom={() => {
-          if (me.id) chatService.markRead(eventId, me.id, { displayName: me.name, photoURL: me.photoURL }).catch(()=>{})
+          if (me.id) chatService.markReadAt(descriptor.presenceBasePath, me.id, { displayName: me.name, photoURL: me.photoURL }).catch(()=>{})
           setShowNewIndicator(false)
+          setNewMsgCount(0)
         }}
+        newMsgCount={newMsgCount}
+        people={eventPeople}
       />
 
-      {canWrite && (
+      {openThread && (
+        <ThreadPanel
+          descriptor={descriptor}
+          message={openThread}
+          onClose={() => setOpenThread(null)}
+        />
+      )}
+
+      {stableCanWrite && (
         <ChatComposer
           quoted={quoted}
           onClearQuoted={() => setQuoted(null)}
@@ -512,6 +661,7 @@ const EventChat: React.FC<Props> = ({ eventId, eventName, onBack, className, can
           stopRecording={stopRecording}
           cancelRecording={cancelRecording}
           formatTime={formatTime}
+          onSendLocation={sendLocation}
         />
       )}
     </div>
@@ -526,13 +676,17 @@ function ChatThread(props: {
   chatError: string | null
   showNewIndicator: boolean
   onReply: (m: ChatMessage) => void
+  onOpenThread: (m: ChatMessage) => void
   onDelete: (m: ChatMessage) => void
-  onToggleReaction: (m: ChatMessage, key: ChatReactionKey) => void
+  onToggleReaction: (m: ChatMessage, emoji: string) => void
   canEditOrDelete: (m: ChatMessage) => boolean
   renderTicks: (m: ChatMessage) => React.ReactNode
   scrollToBottom: (smooth?: boolean) => void
   bottomRef: React.RefObject<HTMLDivElement>
+  scrollContainerRef: React.RefObject<HTMLDivElement>
   onAtBottom: () => void
+  newMsgCount: number
+  people: Array<{ uid: string; name: string }>
 }) {
   const {
     me,
@@ -540,18 +694,23 @@ function ChatThread(props: {
     chatError,
     showNewIndicator,
     onReply,
+    onOpenThread,
     onDelete,
     onToggleReaction,
     canEditOrDelete,
     renderTicks,
     scrollToBottom,
     bottomRef,
+    scrollContainerRef,
     onAtBottom,
+    newMsgCount,
+    people,
   } = props
 
   return (
     <>
       <div
+        ref={scrollContainerRef}
         className="flex-1 min-h-0 overflow-y-auto p-4 space-y-2 bg-[#e5ddd5] dark:bg-gray-900"
         style={{
           backgroundImage:
@@ -571,8 +730,8 @@ function ChatThread(props: {
           </div>
         )}
 
-        {messages.length === 0 && (
-          <div className="flex flex-col items-center justify-center h-full text-gray-400 gap-2">
+        {messages.length === 0 && !chatError && (
+          <div className="flex flex-col items-center justify-center h-full text-[--text-muted] gap-2">
             <div className="text-4xl">💬</div>
             <div className="text-sm">Nessun messaggio. Inizia la conversazione!</div>
           </div>
@@ -602,7 +761,7 @@ function ChatThread(props: {
               lastDay = dk
               els.push(
                 <div key={`sep-${dk}`} className="flex justify-center my-4 sticky top-0 z-10">
-                  <span className="bg-gray-200/80 backdrop-blur-sm text-gray-600 text-[11px] font-medium px-3 py-1 rounded-full shadow-sm">
+                  <span className="bg-[--bg-raised]/80 backdrop-blur-sm text-[--text-muted] text-[11px] font-medium px-3 py-1 rounded-full shadow-sm">
                     {dayLabel(m.createdAt)}
                   </span>
                 </div>
@@ -616,7 +775,7 @@ function ChatThread(props: {
             if (m.type === 'system') {
               els.push(
                 <div key={m.id} className="flex justify-center my-2">
-                  <div className="bg-gray-100/80 text-gray-600 text-xs px-3 py-1 rounded-lg flex items-center gap-2 border border-gray-200">
+                  <div className="bg-[--bg-raised]/80 text-[--text-muted] text-xs px-3 py-1 rounded-lg flex items-center gap-2 border border-[--border-base]">
                     <span className="font-semibold">{m.userName === 'System' ? 'Sistema' : m.userName}</span>
                     <span>{m.text}</span>
                   </div>
@@ -626,117 +785,20 @@ function ChatThread(props: {
             }
 
             els.push(
-              <div key={m.id} className={`flex flex-col ${mine ? 'items-end' : 'items-start'} mb-2 group px-2`}>
-                <div
-                  className={`max-w-[80%] relative shadow-sm px-3 py-2 ${
-                    mine
-                      ? 'bg-green-100 dark:bg-green-900/50 text-gray-900 dark:text-white rounded-3xl rounded-tr-none ml-auto'
-                      : 'bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 rounded-3xl rounded-tl-none'
-                  }`}
-                >
-                  {/* Reply Context */}
-                  {m.quoted && (
-                    <div
-                      className={`mb-1 rounded-lg p-2 text-xs border-l-4 cursor-pointer bg-black/5 dark:bg-white/10 ${mine ? 'border-green-600' : 'border-gray-400'}`}
-                      onClick={() => {
-                        const el = document.getElementById(`msg-${m.quoted?.messageId}`)
-                        el?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-                      }}
-                    >
-                      <div className="font-semibold opacity-90 mb-0.5 truncate">{m.quoted.textPreview || 'Allegato'}</div>
-                    </div>
-                  )}
-
-                  {/* Message Content */}
-                  <div className="">
-                    {!mine && !grouped && (
-                      <div className="text-xs font-bold text-orange-600 mb-1">{m.userName}</div>
-                    )}
-
-                    {m.deleted ? (
-                      <div className="italic opacity-60 text-sm flex items-center gap-1">
-                        🚫 <span>Messaggio eliminato</span>
-                      </div>
-                    ) : (
-                      <>
-                        {/* Attachments */}
-                        {m.attachments && m.attachments.length > 0 && (
-                          <div className="mb-2 grid gap-2">
-                            {m.attachments.map((att) => (
-                              <div key={att.id}>
-                                {att.type === 'image' ? (
-                                  <a href={att.url} target="_blank" rel="noreferrer">
-                                    <img src={att.url} alt="attachment" className="rounded-lg max-h-60 object-cover w-full aspect-video" />
-                                  </a>
-                                ) : att.type === 'audio' ? (
-                                  <div className="flex items-center gap-2 bg-black/5 dark:bg-white/10 p-2 rounded-lg min-w-[200px]">
-                                    <audio controls src={att.url} className="h-8 w-full" />
-                                  </div>
-                                ) : (
-                                  <a
-                                    href={att.url}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                    className="flex items-center gap-2 p-2 bg-black/5 dark:bg-white/10 rounded-lg hover:bg-black/10 transition"
-                                  >
-                                    <span className="text-2xl">📄</span>
-                                    <span className="text-sm underline truncate">{att.name}</span>
-                                  </a>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-
-                        {/* Text */}
-                        {m.text && <div className="text-[15px] whitespace-pre-wrap break-words leading-relaxed">{m.text}</div>}
-                      </>
-                    )}
-                  </div>
-
-                  {/* Context Menu Trigger */}
-                  {!m.deleted && (
-                    <div className="absolute top-0 right-0 p-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Menu
-                        message={m}
-                        onReply={() => onReply(m)}
-                        onCopy={() => m.text && navigator.clipboard.writeText(m.text)}
-                        onDelete={() => onDelete(m)}
-                        canEdit={canEditOrDelete(m)}
-                      />
-                    </div>
-                  )}
-                </div>
-
-                {/* Footer: Reactions & Timestamp */}
-                <div className={`flex flex-col ${mine ? 'items-end' : 'items-start'} mt-1`}>
-                  {/* Reactions */}
-                  {Object.keys(m.reactions || {}).length > 0 && (
-                    <div className="flex gap-1 -mt-3 mb-1 z-10 relative px-2">
-                      {REACTIONS.map((r) => {
-                        const count = m.reactions?.[r.key]?.length || 0
-                        if (count === 0) return null
-                        const iReacted = m.reactions?.[r.key]?.includes(me.id)
-                        return (
-                          <button
-                            key={r.key}
-                            onClick={() => onToggleReaction(m, r.key)}
-                            className={`text-[10px] px-1.5 py-0.5 rounded-full border shadow-sm bg-white dark:bg-gray-800 ${iReacted ? 'border-green-500' : 'border-gray-200 dark:border-gray-600'}`}
-                          >
-                            {r.label} {count}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )}
-
-                  <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400 px-1">
-                    <span>{m.createdAt?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    {mine && <span>{renderTicks(m)}</span>}
-                    {m.editedAt && <span>(modificato)</span>}
-                  </div>
-                </div>
-              </div>
+              <MessageBubble
+                key={m.id}
+                m={m}
+                mine={mine}
+                grouped={grouped}
+                meId={me.id}
+                onReply={onReply}
+                onOpenThread={onOpenThread}
+                onDelete={onDelete}
+                onToggleReaction={onToggleReaction}
+                canEditOrDelete={canEditOrDelete}
+                renderTicks={renderTicks}
+                people={people}
+              />
             )
           }
           return els
@@ -747,8 +809,16 @@ function ChatThread(props: {
       {/* New Message Indicator */}
       {showNewIndicator && (
         <div className="absolute bottom-20 right-4 z-20">
-          <button onClick={() => scrollToBottom()} className="bg-white text-primary-600 p-2 rounded-full shadow-lg border border-gray-100 animate-bounce">
-            ⬇️
+          <button
+            onClick={() => { scrollToBottom(); onAtBottom() }}
+            className="bg-primary-600 text-white pl-2.5 pr-3 py-2 rounded-full shadow-lg flex items-center gap-1.5 text-xs font-semibold"
+          >
+            {newMsgCount > 0 && (
+              <span className="bg-white text-primary-600 rounded-full w-5 h-5 flex items-center justify-center text-[10px] font-bold leading-none shrink-0">
+                {Math.min(newMsgCount, 99)}
+              </span>
+            )}
+            <span>nuovi ↓</span>
           </button>
         </div>
       )}
@@ -783,6 +853,7 @@ function ChatComposer(props: {
   stopRecording: () => void
   cancelRecording: () => void
   formatTime: (seconds: number) => string
+  onSendLocation: () => void
 }) {
   const {
     quoted,
@@ -811,35 +882,87 @@ function ChatComposer(props: {
     stopRecording,
     cancelRecording,
     formatTime,
+    onSendLocation,
   } = props
 
+  // Click-based attachment menu (hover doesn't work on mobile)
+  const [plusOpen, setPlusOpen] = useState(false)
+
+  // Auto-grow textarea
+  useEffect(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 128)}px`
+  }, [text, textareaRef])
+
   return (
-    <div className="bg-white p-2 border-t pb-[max(0.25rem,env(safe-area-inset-bottom))]">
+    <div className="bg-[--bg-card] border-t pb-[max(0.25rem,env(safe-area-inset-bottom))]">
+      {/* ─── RECORDING MODE overlay ──────────────────────────────── */}
+      {isRecording && (
+        <div className="flex items-center gap-2 px-3 py-3">
+          {/* Cancel */}
+          <button
+            type="button"
+            onClick={cancelRecording}
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-[--bg-raised] text-[--text-muted] rounded-2xl text-sm font-semibold hover:bg-[--bg-raised] transition-colors shrink-0"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M18 6 6 18M6 6l12 12"/></svg>
+            Annulla
+          </button>
+
+          {/* Recording indicator */}
+          <div className="flex-1 flex items-center gap-2 bg-red-50 border border-red-200 rounded-2xl px-3 py-2 overflow-hidden">
+            <span className="shrink-0 w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+            <span className="font-mono font-bold text-red-600 text-sm shrink-0">{formatTime(recordingTime)}</span>
+            {/* Animated waveform bars */}
+            <div className="flex items-end gap-[3px] h-5 overflow-hidden" aria-hidden>
+              {[0.4, 0.7, 1, 0.6, 0.9, 0.5, 0.8, 0.45, 0.75, 0.6].map((h, i) => (
+                <span
+                  key={i}
+                  className="w-[3px] rounded-full bg-red-400"
+                  style={{
+                    height: '100%',
+                    transform: `scaleY(${h})`,
+                    transformOrigin: 'bottom',
+                    animation: `wavePulse 0.8s ease-in-out ${(i * 0.08).toFixed(2)}s infinite alternate`,
+                  }}
+                />
+              ))}
+            </div>
+            <span className="text-xs text-red-400 ml-auto shrink-0">🎤 Registrazione in corso</span>
+          </div>
+
+          {/* Send */}
+          <button
+            type="button"
+            onClick={stopRecording}
+            className="flex items-center gap-1.5 px-4 py-2.5 bg-primary-600 text-white rounded-2xl text-sm font-semibold hover:bg-primary-700 transition-colors shrink-0 shadow-sm"
+          >
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            Invia
+          </button>
+        </div>
+      )}
+
+      {/* ─── NORMAL COMPOSER (hidden while recording) ───────────── */}
+      <div className={isRecording ? 'hidden' : 'p-2'}>
       {/* Quoted Message Preview */}
       {quoted && (
-        <div className="flex items-center justify-between bg-gray-50 p-2 rounded-lg mb-2 border-l-4 border-primary-500">
+        <div className="flex items-center justify-between bg-[--bg-subtle] p-2 rounded-lg mb-2 border-l-4 border-primary-500">
           <div className="overflow-hidden">
             <div className="text-xs font-bold text-primary-600">Risposta a {quoted.userName}</div>
-            <div className="text-sm truncate text-gray-600">{quoted.text || 'Allegato'}</div>
+            <div className="text-sm truncate text-[--text-muted]">{quoted.text || 'Allegato'}</div>
           </div>
-          <button onClick={onClearQuoted} className="p-1 hover:bg-gray-200 rounded-full">✕</button>
+          <button onClick={onClearQuoted} className="p-1 hover:bg-[--bg-raised] rounded-full">✕</button>
         </div>
       )}
 
       {/* File Preview */}
       {files.length > 0 && (
-        <div className="flex gap-2 mb-2 overflow-x-auto pb-2">
+        <div className="flex gap-2 mb-2 overflow-x-auto pb-1 pt-1">
           {files.map((f, i) => (
-            <div key={i} className="relative bg-gray-100 p-2 rounded-lg min-w-[100px]">
-              <div className="text-xs truncate w-24">{f.name}</div>
-              <div className="text-[10px] text-gray-500">{(f.size / 1024).toFixed(0)} KB</div>
-              <button
-                onClick={() => onRemoveFile(i)}
-                className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full w-4 h-4 flex items-center justify-center text-xs"
-              >
-                ×
-              </button>
-            </div>
+            <FilePreviewThumb key={i} file={f} onRemove={() => onRemoveFile(i)} />
           ))}
         </div>
       )}
@@ -848,7 +971,7 @@ function ChatComposer(props: {
       {Object.keys(uploadProgress).length > 0 && (
         <div className="mb-2 space-y-1">
           {Object.entries(uploadProgress).map(([name, pct]) => (
-            <div key={name} className="h-1 w-full bg-gray-100 rounded-full overflow-hidden">
+            <div key={name} className="h-1 w-full bg-[--bg-raised] rounded-full overflow-hidden">
               <div className="h-full bg-primary-500 transition-all duration-300" style={{ width: `${pct}%` }} />
             </div>
           ))}
@@ -856,38 +979,89 @@ function ChatComposer(props: {
       )}
 
       <div className="flex items-end gap-2">
-        {/* Plus Menu */}
-        <div className="relative group">
-          <button className="p-3 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-full transition-colors">
-            <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 5v14M5 12h14" />
+        {/* Attachment buttons */}
+        <div className="flex items-center gap-1">
+          {/* Quick camera/gallery picker */}
+          <label className="cursor-pointer p-2 text-[--text-muted] hover:bg-[--bg-raised] dark:hover:bg-gray-700 rounded-full transition-colors" title="Foto / Video">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+              <circle cx="12" cy="13" r="4"/>
             </svg>
-          </button>
-          <div className="absolute bottom-full left-0 mb-2 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 p-2 hidden group-hover:block min-w-[160px] z-20">
-            <label className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg cursor-pointer text-gray-700 dark:text-gray-200">
-              <span className="text-xl">📷</span>
-              <span className="text-sm font-medium">Foto e Video</span>
-              <input type="file" multiple accept="image/*,video/*" className="hidden" onChange={onFilesSelected} />
-            </label>
-            <label className="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 dark:hover:bg-gray-700 rounded-lg cursor-pointer text-gray-700 dark:text-gray-200">
-              <span className="text-xl">📄</span>
-              <span className="text-sm font-medium">Documento</span>
-              <input type="file" multiple className="hidden" onChange={onFilesSelected} />
-            </label>
+            <input type="file" multiple accept="image/*,video/*" capture="environment" className="hidden" onChange={onFilesSelected} />
+          </label>
+
+          {/* Plus menu for other files */}
+          <div className="relative">
+            {plusOpen && (
+              <div className="fixed inset-0 z-20" onClick={() => setPlusOpen(false)} />
+            )}
+            <button
+              type="button"
+              className="p-2 text-[--text-muted] hover:bg-[--bg-raised] dark:hover:bg-gray-700 rounded-full transition-colors"
+              onClick={() => setPlusOpen(o => !o)}
+              title="Allega file"
+            >
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+            {plusOpen && (
+              <div className="absolute bottom-full left-0 mb-2 bg-[--bg-card] dark:bg-gray-800 rounded-xl shadow-xl border border-gray-100 dark:border-gray-700 p-2 min-w-[180px] z-30">
+                <label className="flex items-center gap-3 px-3 py-2 hover:bg-[--bg-subtle] dark:hover:bg-gray-700 rounded-lg cursor-pointer text-[--text-muted] dark:text-gray-200">
+                  <span className="text-xl">🖼️</span>
+                  <span className="text-sm font-medium">Dalla galleria</span>
+                  <input type="file" multiple accept="image/*,video/*" className="hidden" onChange={(e) => { onFilesSelected(e); setPlusOpen(false) }} />
+                </label>
+                <label className="flex items-center gap-3 px-3 py-2 hover:bg-[--bg-subtle] dark:hover:bg-gray-700 rounded-lg cursor-pointer text-[--text-muted] dark:text-gray-200">
+                  <span className="text-xl">📄</span>
+                  <span className="text-sm font-medium">Documento</span>
+                  <input type="file" multiple className="hidden" onChange={(e) => { onFilesSelected(e); setPlusOpen(false) }} />
+                </label>
+                <button
+                  type="button"
+                  className="flex items-center gap-3 px-3 py-2 hover:bg-[--bg-subtle] dark:hover:bg-gray-700 rounded-lg w-full text-left text-[--text-muted] dark:text-gray-200"
+                  onClick={() => { onSendLocation(); setPlusOpen(false) }}
+                >
+                  <span className="text-xl">📍</span>
+                  <span className="text-sm font-medium">Posizione</span>
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="flex-1 relative bg-gray-100 dark:bg-gray-800 rounded-2xl flex items-center px-3 py-1 border border-transparent focus-within:border-green-500 transition-colors">
+        <div className="flex-1 relative bg-[--bg-raised] dark:bg-gray-800 rounded-2xl flex items-center px-3 py-1 border border-transparent focus-within:border-green-500 transition-colors">
           <textarea
             ref={textareaRef}
             value={text}
             onChange={(e) => onTextChange(e.target.value)}
             placeholder="Scrivi un messaggio..."
-            className="w-full bg-transparent border-none focus:ring-0 resize-none max-h-32 py-3 text-sm text-gray-900 dark:text-white placeholder-gray-500"
+            className="w-full bg-transparent border-none focus:ring-0 resize-none max-h-32 py-3 text-sm text-[--text-base] dark:text-white placeholder-gray-500"
             rows={1}
             style={{ minHeight: '44px' }}
             onFocus={() => {
-              window.setTimeout(() => scrollToBottom(false), 50)
+              // Scroll to bottom when the keyboard opens.
+              // Wait for the actual visualViewport resize (keyboard fully open) instead of
+              // a hardcoded timeout — this is the correct signal on both iOS and Android.
+              const vv = window.visualViewport
+              if (vv) {
+                let handled = false
+                const onVVResize = () => {
+                  handled = true
+                  vv.removeEventListener('resize', onVVResize)
+                  requestAnimationFrame(() => scrollToBottom(false))
+                }
+                vv.addEventListener('resize', onVVResize)
+                // Fallback: keyboard already open, or resize doesn't fire (desktop)
+                window.setTimeout(() => {
+                  if (!handled) {
+                    vv.removeEventListener('resize', onVVResize)
+                    scrollToBottom(false)
+                  }
+                }, 500)
+              } else {
+                window.setTimeout(() => scrollToBottom(false), 300)
+              }
             }}
             onKeyDown={(e) => {
               if (mentionOpen) {
@@ -921,8 +1095,8 @@ function ChatComposer(props: {
           />
 
           {mentionOpen && mentionCandidates.length > 0 && (
-            <div className="absolute left-3 right-3 bottom-full mb-2 bg-white border border-gray-200 rounded-xl shadow-xl z-30 overflow-hidden">
-              <div className="px-3 py-2 text-[11px] text-gray-500 border-b bg-gray-50">Tagga un partecipante</div>
+            <div className="absolute left-3 right-3 bottom-full mb-2 bg-[--bg-card] border border-[--border-base] rounded-xl shadow-xl z-30 overflow-hidden">
+              <div className="px-3 py-2 text-[11px] text-[--text-muted] border-b bg-[--bg-subtle]">Tagga un partecipante</div>
               <div className="max-h-44 overflow-y-auto">
                 {mentionCandidates.map((m, idx) => (
                   <button
@@ -932,10 +1106,10 @@ function ChatComposer(props: {
                       ev.preventDefault()
                       applyMention(m)
                     }}
-                    className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center justify-between ${idx === mentionIndex ? 'bg-gray-100' : ''}`}
+                    className={`w-full text-left px-3 py-2 text-sm hover:bg-[--bg-subtle] flex items-center justify-between ${idx === mentionIndex ? 'bg-[--bg-raised]' : ''}`}
                   >
                     <span className="truncate">{m.name}</span>
-                    <span className="text-xs text-gray-400">@</span>
+                    <span className="text-xs text-[--text-muted]">@</span>
                   </button>
                 ))}
               </div>
@@ -956,64 +1130,23 @@ function ChatComposer(props: {
           </button>
         ) : (
           <button
-            onMouseDown={startRecording}
-            onMouseUp={stopRecording}
-            onMouseLeave={cancelRecording}
-            onTouchStart={startRecording}
-            onTouchEnd={stopRecording}
-            className={`p-3 rounded-full transition-all shadow-sm ${isRecording ? 'bg-red-500 text-white scale-110 animate-pulse' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+            type="button"
+            onClick={startRecording}
+            className="p-3 rounded-full bg-[--bg-raised] text-[--text-muted] hover:bg-[--bg-raised] active:bg-red-100 active:text-red-600 transition-colors shadow-sm"
+            title="Registra messaggio vocale"
           >
-            {isRecording ? (
-              <span className="font-mono text-xs">{formatTime(recordingTime)}</span>
-            ) : (
-              <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
-                <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
-                <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
-              </svg>
-            )}
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+              <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+            </svg>
           </button>
         )}
       </div>
-      {isRecording && (
-        <div className="text-center text-xs text-red-500 mt-1 animate-pulse">Rilascia per inviare, esci per annullare</div>
-      )}
+      </div>{/* end NORMAL COMPOSER */}
     </div>
   )
 }
 
-// Components
-const Menu: React.FC<{ message: ChatMessage; onReply: () => void; onCopy: () => void; onDelete: () => void; canEdit: boolean }>
-  = ({ onReply, onCopy, onDelete, canEdit }) => {
-  const [open, setOpen] = useState(false)
-  return (
-    <div className="relative">
-      <button
-        className="w-6 h-6 flex items-center justify-center rounded-full bg-black/20 text-white hover:bg-black/40 backdrop-blur-sm"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(o => !o) }}
-      >
-        ⌄
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 top-7 bg-white border border-gray-100 rounded-lg shadow-xl text-sm min-w-[160px] z-30 overflow-hidden py-1">
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center gap-2" onClick={() => { onReply(); setOpen(false) }}>
-              <span>↩️</span> Rispondi
-            </button>
-            <button className="w-full text-left px-4 py-2 hover:bg-gray-50 flex items-center gap-2" onClick={() => { onCopy(); setOpen(false) }}>
-              <span>📋</span> Copia
-            </button>
-            {canEdit && (
-              <button className="w-full text-left px-4 py-2 hover:bg-red-50 text-red-600 flex items-center gap-2" onClick={() => { onDelete(); setOpen(false) }}>
-                <span>🗑️</span> Elimina
-              </button>
-            )}
-          </div>
-        </>
-      )}
-    </div>
-  )
-}
 
 const EmojiPicker: React.FC<{ onPick: (emoji: string) => void }> = ({ onPick }) => {
   const [open, setOpen] = useState(false)
@@ -1022,7 +1155,7 @@ const EmojiPicker: React.FC<{ onPick: (emoji: string) => void }> = ({ onPick }) 
     <div className="relative">
       <button
         type="button"
-        className="p-2 text-gray-500 hover:text-gray-700 transition-colors"
+        className="p-2 text-[--text-muted] hover:text-[--text-muted] transition-colors"
         onClick={() => setOpen(o => !o)}
       >
         😊
@@ -1030,13 +1163,68 @@ const EmojiPicker: React.FC<{ onPick: (emoji: string) => void }> = ({ onPick }) 
       {open && (
         <>
           <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
-          <div className="absolute right-0 bottom-10 bg-white border border-gray-200 rounded-xl shadow-xl p-3 grid grid-cols-4 gap-2 text-2xl z-30 w-64">
+          <div className="absolute right-0 bottom-10 bg-[--bg-card] border border-[--border-base] rounded-xl shadow-xl p-3 grid grid-cols-4 gap-2 text-2xl z-30 w-64">
             {common.map(c => (
-              <button key={c} className="hover:bg-gray-100 rounded p-1 transition-colors" onClick={() => { onPick(c); setOpen(false) }}>{c}</button>
+              <button key={c} className="hover:bg-[--bg-raised] rounded p-1 transition-colors" onClick={() => { onPick(c); setOpen(false) }}>{c}</button>
             ))}
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+// ── FilePreviewThumb ─────────────────────────────────────────────────────────
+// Shows a thumbnail preview of a file before sending (in the composer).
+const FilePreviewThumb: React.FC<{ file: File; onRemove: () => void }> = ({ file, onRemove }) => {
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (file.type.startsWith('image/') || file.type.startsWith('video/')) {
+      const url = URL.createObjectURL(file)
+      setPreviewUrl(url)
+      return () => URL.revokeObjectURL(url)
+    }
+  }, [file])
+
+  const isImage = file.type.startsWith('image/')
+  const isVideo = file.type.startsWith('video/')
+  const isAudio = file.type.startsWith('audio/')
+
+  return (
+    <div className="relative shrink-0 w-20 h-20 rounded-xl overflow-hidden border border-[--border-base] bg-[--bg-raised] dark:bg-gray-800 dark:border-gray-700">
+      {previewUrl && isImage && (
+        <img src={previewUrl} alt={file.name} className="w-full h-full object-cover" />
+      )}
+      {previewUrl && isVideo && (
+        <>
+          <video src={previewUrl} className="w-full h-full object-cover" muted preload="metadata" />
+          <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+            <svg viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M8 5v14l11-7z"/></svg>
+          </div>
+        </>
+      )}
+      {isAudio && (
+        <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-primary-600">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor">
+            <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z" />
+            <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z" />
+          </svg>
+          <span className="text-[10px] text-center px-1 truncate w-full">{(file.size / 1024).toFixed(0)}KB</span>
+        </div>
+      )}
+      {!previewUrl && !isAudio && (
+        <div className="w-full h-full flex flex-col items-center justify-center gap-1 text-[--text-muted]">
+          <span className="text-2xl">📄</span>
+          <span className="text-[10px] px-1 truncate w-full text-center">{file.name.slice(-10)}</span>
+        </div>
+      )}
+      <button
+        onClick={onRemove}
+        className="absolute top-1 right-1 bg-black/60 text-white rounded-full w-5 h-5 flex items-center justify-center text-xs leading-none hover:bg-black/80"
+      >
+        ×
+      </button>
     </div>
   )
 }

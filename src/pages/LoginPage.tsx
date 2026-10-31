@@ -2,11 +2,16 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '../hooks'
 import { auth } from '../firebase/config'
 import { getAuth } from 'firebase/auth'
+import { Link } from 'react-router-dom'
 
 const LoginPage = () => {
   const { signInWithGoogle } = useAuth()
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  const fromInvite = (() => {
+    try { return (sessionStorage.getItem('postLoginRedirect') || '').includes('/farms/join/') } catch { return false }
+  })()
 
   const handleGoogleLogin = async () => {
     setIsLoading(true)
@@ -26,16 +31,20 @@ const LoginPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-primary-100 flex items-center justify-center px-4">
-      <div className="max-w-md w-full bg-white rounded-lg shadow-xl p-8">
+    <div className="fixed inset-0 overflow-y-auto bg-gradient-to-br from-primary-50 to-primary-100 dark:from-[#0f172a] dark:to-[#1e293b] flex items-center justify-center px-4 py-8">
+      <div className="max-w-md w-full bg-[--bg-card] rounded-lg shadow-xl p-8">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">GVNApp</h1>
-          <p className="text-gray-600">Il tuo hub sociale per eventi e spese di gruppo</p>
+          <h1 className="text-3xl font-bold text-[--text-base] mb-2">GVNApp</h1>
+          <p className="text-[--text-muted]">
+            {fromInvite
+              ? 'Accedi per unirti alla fattoria del tuo amico.'
+              : 'La fattoria dei tuoi amici.'}
+          </p>
         </div>
 
         <div className="space-y-6">
           <div className="text-center">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4">
+            <h2 className="text-xl font-semibold text-[--text-base] mb-4">
               Accedi per continuare
             </h2>
           </div>
@@ -43,7 +52,7 @@ const LoginPage = () => {
           <button
             onClick={handleGoogleLogin}
             disabled={isLoading}
-            className="w-full flex items-center justify-center px-4 py-3 border border-gray-300 rounded-lg shadow-sm bg-white text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center px-4 py-3 border border-[--border-base] rounded-lg shadow-sm bg-[--bg-card] text-[--text-muted] hover:bg-[--bg-subtle] focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <svg className="w-5 h-5 mr-3" viewBox="0 0 24 24">
               <path
@@ -67,41 +76,43 @@ const LoginPage = () => {
           </button>
 
           {error && (
-            <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-              <p className="text-sm text-red-600">{error}</p>
+            <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+              <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
             </div>
           )}
 
           <div className="text-center">
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-[--text-muted]">
               Accedendo accetti i nostri{' '}
-              <a href="#" className="text-primary-600 hover:text-primary-500">
+              <Link to="/legal/terms" className="text-primary-600 hover:text-primary-500">
                 Termini di Servizio
-              </a>{' '}
+              </Link>{' '}
               e la{' '}
-              <a href="#" className="text-primary-600 hover:text-primary-500">
+              <Link to="/legal/privacy" className="text-primary-600 hover:text-primary-500">
                 Privacy Policy
-              </a>
+              </Link>
             </p>
           </div>
         </div>
 
-        <div className="mt-8 text-center">
-          <div className="grid grid-cols-3 gap-4 text-sm text-gray-600">
-            <div className="text-center">
-              <div className="text-2xl mb-1">📅</div>
-              <div>Eventi</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl mb-1">💰</div>
-              <div>Spese</div>
-            </div>
-            <div className="text-center">
-              <div className="text-2xl mb-1">📊</div>
-              <div>Sondaggi</div>
+        {!fromInvite && (
+          <div className="mt-8 text-center">
+            <div className="grid grid-cols-3 gap-4 text-sm text-[--text-muted]">
+              <div className="text-center">
+                <div className="text-2xl mb-1">📅</div>
+                <div>Eventi</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl mb-1">💬</div>
+                <div>Chat</div>
+              </div>
+              <div className="text-center">
+                <div className="text-2xl mb-1">🗳️</div>
+                <div>Sondaggi</div>
+              </div>
             </div>
           </div>
-        </div>
+        )}
 
         {/* Debug toggle */}
         <LoginDebugPanel />
@@ -169,10 +180,10 @@ const LoginDebugPanel = () => {
     <div className="mt-6">
       <button
         onClick={() => setOpen(o => !o)}
-        className="text-xs text-gray-500 hover:text-gray-700 underline"
+        className="text-xs text-[--text-muted] hover:text-[--text-base] underline"
       >{open ? 'Nascondi diagnostica login' : 'Mostra diagnostica login'}</button>
       {open && (
-        <div className="mt-3 p-3 rounded-lg bg-gray-50 border border-gray-200 text-[11px] leading-relaxed font-mono space-y-1 max-h-64 overflow-auto">
+        <div className="mt-3 p-3 rounded-lg bg-[--bg-subtle] border border-[--border-base] text-[11px] leading-relaxed font-mono space-y-1 max-h-64 overflow-auto">
           <div><strong>UserAgent:</strong> {navigator.userAgent}</div>
           <div><strong>Location:</strong> {location.origin}</div>
           <div><strong>SW:</strong> {swInfo ? (swInfo.active ? `attivo (${swInfo.scriptURL?.split('/').pop()})` : 'non attivo') : 'n/d'}</div>
@@ -188,9 +199,10 @@ const LoginDebugPanel = () => {
             <button onClick={resetCaches} className="px-2 py-1 rounded bg-red-600 text-white">Reset cache</button>
             <button onClick={()=>{ try { sessionStorage.removeItem('postLoginRedirect'); alert('Redirect pulito') } catch {} }} className="px-2 py-1 rounded bg-gray-200">Clear redirect</button>
           </div>
-          <div className="text-gray-500 pt-1">Se vedi ⚠️ sostituisci i valori placeholder in .env.local con quelli reali dalla Firebase Console.</div>
+          <div className="text-[--text-muted] pt-1">Se vedi ⚠️ sostituisci i valori placeholder in .env.local con quelli reali dalla Firebase Console.</div>
         </div>
       )}
     </div>
   )
 }
+

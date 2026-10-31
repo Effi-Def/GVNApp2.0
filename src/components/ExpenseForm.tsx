@@ -1,16 +1,18 @@
 import { useState, useEffect, useMemo } from 'react'
+import { formatEuro, splitEqually } from '../utils/expenseUtils'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
 import { Expense } from '../types'
 import { useAuthStore } from '../stores/useAuthStore'
 import { useAppStore } from '../stores/AppStore'
-import { filterSelectableEvents, getUserKeys } from '../utils/events'
+import { getSelectableEvents, getUserKeys } from '../utils/events'
 
 const expenseSchema = z.object({
   title: z.string().min(1, 'Il titolo è obbligatorio'),
   amount: z.coerce.number().min(0.01, 'Inserisci un importo valido'),
-  eventId: z.string().optional(),
+  eventId: z.string().min(1, 'Seleziona un evento'),
+  paidBy: z.string().min(1, 'Indica chi ha pagato'),
   participants: z.array(z.object({
     userId: z.string(),
     name: z.string(),
@@ -21,21 +23,27 @@ const expenseSchema = z.object({
 
 type ExpenseFormData = z.infer<typeof expenseSchema>
 
+const withEqualShares = <T extends { amount: number }>(participants: T[], amount: number): T[] => {
+  const shares = splitEqually(amount, participants.length)
+  return participants.map((p, i) => ({ ...p, amount: shares[i] }))
+}
+
 interface ExpenseFormProps {
   expense?: Expense // Per la modifica
+  defaultEventId?: string
   onSubmit: (expenseData: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void>
   onClose: () => void
   isLoading?: boolean
 }
 
-const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseFormProps) => {
+const ExpenseForm = ({ expense, defaultEventId, onSubmit, onClose, isLoading = false }: ExpenseFormProps) => {
   const { user } = useAuthStore()
-  const { events } = useAppStore()
+  const { events, farmIds } = useAppStore()
   const [availableParticipants, setAvailableParticipants] = useState<{ userId: string, name: string }[]>([])
 
   const selectableEvents = useMemo(() => {
-    return filterSelectableEvents(events, getUserKeys(user))
-  }, [events, user])
+    return getSelectableEvents(events, { userKeys: getUserKeys(user), farmIds: Array.isArray(farmIds) ? farmIds : [] })
+  }, [events, user, farmIds])
 
   const {
     register,
@@ -47,8 +55,9 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
     resolver: zodResolver(expenseSchema) as any,
     defaultValues: {
       title: expense?.title || '',
-      amount: expense?.amount || 0,
-      eventId: expense?.eventId || '',
+      amount: expense?.amount || undefined,
+      eventId: expense?.eventId || defaultEventId || '',
+      paidBy: expense?.paidBy || user?.id || '',
       participants: expense?.participants || []
     }
   })
@@ -56,6 +65,17 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
   const selectedEventId = watch('eventId')
   const currentAmount = watch('amount')
   const currentParticipants = watch('participants')
+  const currentPayer = watch('paidBy')
+
+  // Chi può aver pagato: i partecipanti dell'evento, più chi sta inserendo la spesa
+  const payerOptions = useMemo(() => {
+    const options = new Map(availableParticipants.map(p => [p.userId, p.name]))
+    if (user?.id && !options.has(user.id)) options.set(user.id, user.displayName || 'Tu')
+    if (expense?.paidBy && !options.has(expense.paidBy)) {
+      options.set(expense.paidBy, expense.participants.find(p => p.userId === expense.paidBy)?.name || 'Altro partecipante')
+    }
+    return Array.from(options, ([userId, name]) => ({ userId, name: userId === user?.id ? `${name} (tu)` : name }))
+  }, [availableParticipants, user?.id, user?.displayName, expense])
 
   // Quando si seleziona un evento, aggiorna i partecipanti disponibili
   useEffect(() => {
@@ -70,14 +90,12 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
         
         // Se è una nuova spesa (o se la lista partecipanti è vuota), seleziona automaticamente tutti
         if (!expense && currentParticipants.length === 0) {
-          const amount = currentAmount || 0
-          const splitAmount = participants.length > 0 ? amount / participants.length : 0
-          setValue('participants', participants.map(p => ({
+          setValue('participants', withEqualShares(participants.map(p => ({
             userId: p.userId,
             name: p.name,
-            amount: splitAmount,
+            amount: 0,
             settled: false
-          })))
+          })), currentAmount || 0))
         }
       }
     } else {
@@ -88,31 +106,23 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
   // Quando cambia l'importo, ricalcola gli split
   useEffect(() => {
     if (currentParticipants.length > 0) {
-      const amount = currentAmount || 0
-      const splitAmount = amount / currentParticipants.length
-      
-      // Evita loop infinito se i valori sono già corretti (con tolleranza per float)
-      const needsUpdate = currentParticipants.some(p => Math.abs(p.amount - splitAmount) > 0.01)
-      
-      if (needsUpdate) {
-        setValue('participants', currentParticipants.map(p => ({
-          ...p,
-          amount: splitAmount
-        })))
+      const next = withEqualShares(currentParticipants, currentAmount || 0)
+
+      // Evita loop infinito se i valori sono già corretti
+      if (next.some((p, i) => p.amount !== currentParticipants[i].amount)) {
+        setValue('participants', next)
       }
     }
   }, [currentAmount]) // Rimosso currentParticipants dalle dipendenze per evitare loop
 
   // Funzioni per gestire la selezione dei partecipanti
   const selectAllParticipants = () => {
-    const amount = currentAmount || 0
-    const splitAmount = availableParticipants.length > 0 ? amount / availableParticipants.length : 0
-    setValue('participants', availableParticipants.map(p => ({
+    setValue('participants', withEqualShares(availableParticipants.map(p => ({
       userId: p.userId,
       name: p.name,
-      amount: splitAmount,
+      amount: 0,
       settled: false
-    })))
+    })), currentAmount || 0))
   }
 
   const deselectAllParticipants = () => {
@@ -140,13 +150,7 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
     }
 
     // Ricalcola split
-    const amount = currentAmount || 0
-    const splitAmount = newParticipants.length > 0 ? amount / newParticipants.length : 0
-    
-    setValue('participants', newParticipants.map(p => ({
-      ...p,
-      amount: splitAmount
-    })))
+    setValue('participants', withEqualShares(newParticipants, currentAmount || 0))
   }
 
   const onFormSubmit = async (data: ExpenseFormData) => {
@@ -156,11 +160,12 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
       const expenseData: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'> = {
         title: data.title.trim(),
         amount: data.amount,
-        paidBy: user.id,
+        paidBy: data.paidBy,
+        createdBy: expense?.createdBy || user.id,
         participants: data.participants,
-        eventId: data.eventId || undefined,
+        eventId: data.eventId,
         // Popola participantIds per le regole di sicurezza
-        participantIds: [user.id, ...data.participants.map(p => p.userId)]
+        participantIds: [...new Set([user.id, data.paidBy, ...data.participants.map(p => p.userId)])]
       }
 
       await onSubmit(expenseData)
@@ -178,16 +183,16 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
   }, [])
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-t-2xl sm:rounded-lg shadow-xl w-full max-w-md h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
-        <div className="p-6 pb-[calc(6rem+env(safe-area-inset-bottom))]">
+    <div className="fixed inset-0 !mt-0 bg-black/50 flex items-end sm:items-center justify-center z-[70] p-4">
+      <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-lg shadow-xl w-full max-w-md max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
+        <div className="p-6">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">
+            <h2 className="text-xl font-semibold text-[--text-base]">
               {expense ? 'Modifica Spesa' : 'Nuova Spesa'}
             </h2>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600"
+              className="text-[--text-muted] hover:text-[--text-muted]"
               disabled={isLoading}
             >
               ✕
@@ -197,15 +202,15 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
           <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-6">
             {/* Title */}
             <div>
-              <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="title" className="block text-sm font-medium text-[--text-muted] mb-1">
                 Titolo *
               </label>
               <input
                 type="text"
                 id="title"
                 {...register('title')}
-                className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                  errors.title ? 'border-red-300' : 'border-gray-300'
+                className={`w-full px-3 py-2 border rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                  errors.title ? 'border-red-300' : 'border-[--border-base]'
                 }`}
                 placeholder="Es. Cena al ristorante"
                 disabled={isLoading}
@@ -217,7 +222,7 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
 
             {/* Amount */}
             <div>
-              <label htmlFor="amount" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="amount" className="block text-sm font-medium text-[--text-muted] mb-1">
                 Importo totale *
               </label>
               <div className="relative">
@@ -226,13 +231,13 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                   step="0.01"
                   id="amount"
                   {...register('amount')}
-                  className={`w-full px-3 py-2 pr-8 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                    errors.amount ? 'border-red-300' : 'border-gray-300'
+                  className={`w-full px-3 py-2 pr-8 border rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                    errors.amount ? 'border-red-300' : 'border-[--border-base]'
                   }`}
                   placeholder="0.00"
                   disabled={isLoading}
                 />
-                <span className="absolute right-3 top-2 text-gray-500">€</span>
+                <span className="absolute right-3 top-2 text-[--text-muted]">€</span>
               </div>
               {errors.amount && (
                 <p className="mt-1 text-sm text-red-600">{errors.amount.message}</p>
@@ -241,29 +246,53 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
 
             {/* Event Selection */}
             <div>
-              <label htmlFor="eventId" className="block text-sm font-medium text-gray-700 mb-1">
-                Evento (opzionale)
+              <label htmlFor="eventId" className="block text-sm font-medium text-[--text-muted] mb-1">
+                Evento *
               </label>
               <select
                 id="eventId"
                 {...register('eventId')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
-                disabled={isLoading}
+                className="w-full px-3 py-2 border border-[--border-base] rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500"
+                disabled={isLoading || !!defaultEventId}
               >
-                <option value="">Nessun evento specifico</option>
+                <option value="">Seleziona un evento</option>
                 {selectableEvents.map(event => (
                   <option key={event.id} value={event.id}>
                     {event.title} - {new Date(event.date).toLocaleDateString('it-IT')}
                   </option>
                 ))}
               </select>
+              {errors.eventId && (
+                <p className="mt-1 text-sm text-red-600">{errors.eventId.message}</p>
+              )}
+            </div>
+
+            {/* Payer */}
+            <div>
+              <label htmlFor="paidBy" className="block text-sm font-medium text-[--text-muted] mb-1">
+                Chi ha pagato *
+              </label>
+              <select
+                id="paidBy"
+                {...register('paidBy')}
+                value={currentPayer}
+                className="w-full px-3 py-2 border border-[--border-base] rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500"
+                disabled={isLoading}
+              >
+                {payerOptions.map(option => (
+                  <option key={option.userId} value={option.userId}>{option.name}</option>
+                ))}
+              </select>
+              {errors.paidBy && (
+                <p className="mt-1 text-sm text-red-600">{errors.paidBy.message}</p>
+              )}
             </div>
 
             {/* Participants Section */}
             {availableParticipants.length > 0 && (
               <div>
                 <div className="flex justify-between items-center mb-3">
-                  <label className="block text-sm font-medium text-gray-700">
+                  <label className="block text-sm font-medium text-[--text-muted]">
                     Partecipanti alla spesa *
                   </label>
                   <div className="flex space-x-2">
@@ -277,14 +306,14 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                     <button
                       type="button"
                       onClick={deselectAllParticipants}
-                      className="text-xs px-2 py-1 bg-gray-100 text-gray-700 rounded hover:bg-gray-200"
+                      className="text-xs px-2 py-1 bg-[--bg-raised] text-[--text-muted] rounded hover:bg-[--bg-raised]"
                     >
                       Nessuno
                     </button>
                   </div>
                 </div>
                 
-                <div className="space-y-2 max-h-32 overflow-y-auto border border-gray-200 rounded-md p-2">
+                <div className="space-y-2 max-h-32 overflow-y-auto border border-[--border-base] rounded-md p-2">
                   {availableParticipants.map(participant => {
                     const isSelected = currentParticipants.some(p => p.userId === participant.userId)
                     const selectedParticipant = currentParticipants.find(p => p.userId === participant.userId)
@@ -298,11 +327,11 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                             onChange={() => toggleParticipant(participant)}
                             className="mr-2 text-primary-600 focus:ring-primary-500"
                           />
-                          <span className="text-sm text-gray-700">{participant.name}</span>
+                          <span className="text-sm text-[--text-muted]">{participant.name}</span>
                         </label>
                         {isSelected && selectedParticipant && (
-                          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded">
-                            {selectedParticipant.amount.toFixed(2)}€
+                          <span className="text-xs text-[--text-muted] bg-[--bg-raised] px-2 py-1 rounded">
+                            {formatEuro(selectedParticipant.amount)}
                           </span>
                         )}
                       </div>
@@ -311,8 +340,8 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                 </div>
                 
                 {currentParticipants.length > 0 && (
-                  <div className="mt-2 text-xs text-gray-600">
-                    Totale: {currentParticipants.length} persone × {currentParticipants.length > 0 ? (currentAmount / currentParticipants.length).toFixed(2) : '0.00'}€ ciascuno
+                  <div className="mt-2 text-xs text-[--text-muted]">
+                    {currentParticipants.length === 1 ? '1 persona' : `${currentParticipants.length} persone`} · totale {formatEuro(currentParticipants.reduce((sum, p) => sum + p.amount, 0))}
                   </div>
                 )}
                 
@@ -326,18 +355,18 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
             {availableParticipants.length === 0 && (
               <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
                 <p className="text-sm text-yellow-800">
-                  💡 <strong>Suggerimento:</strong> Seleziona un evento per scegliere automaticamente i partecipanti dalla lista degli invitati.
+                  💡 <strong>Obbligatorio:</strong> Seleziona un evento per scegliere i partecipanti dalla lista degli invitati.
                 </p>
               </div>
             )}
 
-            {/* Fixed action bar with safe-area */}
-            <div className="fixed left-1/2 -translate-x-1/2 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[60] w-full max-w-md px-6">
-              <div className="bg-white border rounded-xl shadow-md px-4 py-3 flex space-x-3">
+            {/* Action bar */}
+            <div className="sticky bottom-0 z-10 pt-3 pb-[env(safe-area-inset-bottom)]">
+              <div className="bg-[--bg-card] border border-[--border-base] rounded-xl shadow-md px-4 py-3 flex space-x-3">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  className="flex-1 px-4 py-2 text-sm font-medium text-[--text-muted] bg-[--bg-card] border border-[--border-base] rounded-md hover:bg-[--bg-subtle] focus:outline-none focus:ring-2 focus:ring-primary-500"
                   disabled={isLoading}
                 >
                   Annulla
@@ -345,7 +374,7 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
                 <button
                   type="submit"
                   className="flex-1 px-4 py-2 text-sm font-medium text-white bg-primary-600 border border-transparent rounded-md hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 disabled:opacity-50"
-                  disabled={isLoading}
+                  disabled={isLoading || !selectedEventId}
                 >
                   {isLoading ? 'Salvando...' : (expense ? 'Aggiorna' : 'Crea')} Spesa
                 </button>
@@ -359,3 +388,4 @@ const ExpenseForm = ({ expense, onSubmit, onClose, isLoading = false }: ExpenseF
 }
 
 export default ExpenseForm
+

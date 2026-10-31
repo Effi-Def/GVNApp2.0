@@ -90,10 +90,10 @@ const PublicEvent = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[--bg-page] flex items-center justify-center">
         <div className="text-center">
           <div className="text-5xl mb-3">📅</div>
-          <div className="text-gray-600">Caricamento evento…</div>
+          <div className="text-[--text-muted]">Caricamento evento…</div>
         </div>
       </div>
     )
@@ -101,10 +101,10 @@ const PublicEvent = () => {
 
   if (!loading && !event) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen bg-[--bg-page] flex items-center justify-center">
         <div className="text-center">
           <div className="text-5xl mb-3">🤷‍♂️</div>
-          <div className="text-gray-700 font-medium">{error || 'Evento non trovato'}</div>
+          <div className="text-[--text-base] font-medium">{error || 'Evento non trovato'}</div>
           <div className="mt-3"><button onClick={() => navigate('/')} className="text-green-700 hover:underline">Vai alla Home</button></div>
         </div>
       </div>
@@ -139,56 +139,55 @@ const PublicEvent = () => {
   const participantsCount = event?.participantsCount ?? 0
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b border-gray-200">
+    <div className="min-h-screen bg-[--bg-page]">
+      <header className="sticky top-0 z-10 bg-[--bg-card]/80 backdrop-blur border-b border-[--border-base]">
         <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="text-base font-semibold text-gray-900">Invito evento</div>
-          <button onClick={() => navigate('/')} className="text-sm text-gray-600 hover:text-gray-800">Apri app</button>
+          <div className="text-base font-semibold text-[--text-base]">Sei stato invitato 🎉</div>
+          <button onClick={() => navigate('/')} className="text-sm text-[--text-muted] hover:text-[--text-base]">Apri app</button>
         </div>
       </header>
 
       <main className="max-w-3xl mx-auto px-4 py-6">
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-5">
+          <div className="bg-[--bg-card] rounded-2xl shadow-sm border border-[--border-base] p-5">
           <div className="flex items-center gap-2 mb-2">
             <span className="text-2xl">📅</span>
-            <h1 className="text-xl sm:text-2xl font-bold text-gray-900">{event.title}</h1>
+            <h1 className="text-xl sm:text-2xl font-bold text-[--text-base]">{event.title}</h1>
           </div>
-          <div className="text-sm text-neutral-600 space-y-1 mb-4">
+          <div className="text-sm text-[--text-muted] space-y-1 mb-4">
             <div>📍 {event.location || 'Luogo da definire'}</div>
             <div>🗓️ {formatRange(event)}</div>
-            {/* Intentionally omitting description and creator details */}
           </div>
 
-          <div className="mt-2 p-3 rounded-lg bg-gray-50 border border-gray-200 text-sm text-gray-700">
+          {event.description ? (
+            <div className="mb-4 text-sm text-[--text-base] leading-relaxed border-l-2 border-[--border-base] pl-3">
+              {event.description}
+            </div>
+          ) : null}
+
+          <div className="mt-2 p-3 rounded-xl bg-[--bg-subtle] border border-[--border-base] text-sm font-medium text-[--text-base]">
             {participantsCount > 0 ? (
-              <div>👥 {participantsCount} partecipanti (nomi nascosti per privacy)</div>
+              <div>👥 {participantsCount} {participantsCount === 1 ? 'persona partecipa' : 'persone partecipano'} già — unisciti!</div>
             ) : (
-              <div>👥 Nessun partecipante ancora</div>
+              <div>✨ Sii il primo a confermare la tua presenza</div>
             )}
           </div>
 
-          <div className="mt-5 flex flex-col sm:flex-row gap-2">
+          <div className="mt-5">
             <button
               onClick={() => {
-                // Persist the target so after login we jump to the event summary
                 if (id) sessionStorage.setItem('postLoginRedirect', `/events/${id}/summary`)
                 navigate('/')
-              }} 
-              className="flex-1 gvn-btn-primary bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+              }}
+              className="w-full px-4 py-3.5 rounded-2xl bg-neutral-900 text-white text-base font-semibold hover:bg-neutral-700 transition"
             >
-              Accedi per partecipare
+              Accedi e partecipa →
             </button>
-            <a
-              href={`/`} 
-              className="flex-1 text-center px-4 py-2 rounded-lg border border-gray-300 text-gray-800 hover:bg-gray-50"
-            >
-              Scopri di più nell'app
-            </a>
+            <p className="mt-2 text-center text-xs text-[--text-muted]">Gratuito · Accedi con Google in un tap</p>
           </div>
         </div>
       </main>
 
-      <footer className="py-6 text-center text-xs text-gray-500">
+      <footer className="py-6 text-center text-xs text-[--text-muted]">
         GVNApp • Condivisione sicura
       </footer>
     </div>

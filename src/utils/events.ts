@@ -5,6 +5,16 @@ export function getUserKeys(user: { id?: string; email?: string } | null | undef
   return [user?.id, user?.email].filter((v): v is string => typeof v === 'string' && v.length > 0)
 }
 
+export type UserVisibilityContext = {
+  userKeys: string[]
+  farmIds: string[]
+}
+
+function _ctx(keysOrCtx: string[] | UserVisibilityContext): UserVisibilityContext {
+  if (Array.isArray(keysOrCtx)) return { userKeys: keysOrCtx, farmIds: [] }
+  return { userKeys: keysOrCtx.userKeys || [], farmIds: keysOrCtx.farmIds || [] }
+}
+
 export type UserEventParticipation = {
   status: EventParticipationStatus | 'none'
   accessLevel: EventParticipationAccessLevel
@@ -44,20 +54,65 @@ export function getUserEventParticipation(event: Event, userKeys: string[]): Use
   return { status: 'none', accessLevel: 'none' }
 }
 
-export function userCanViewEvent(event: Event, userKeys: string[]): boolean {
+export function userCanViewEvent(event: Event, userKeysOrCtx: string[] | UserVisibilityContext): boolean {
+  const { userKeys, farmIds } = _ctx(userKeysOrCtx)
+
+  // Determine whether the event declares explicit farm ownership.
+  const eventFarms: string[] = Array.isArray(event.visibility?.farms) && event.visibility!.farms.length > 0
+    ? event.visibility!.farms
+    : []
+
+  // "Globally public" = { type: 'public' } with no farm tags → visible in all contexts.
+  // "Unscoped"        = legacy/restricted events with no farm tags → personal/farm-unknown.
+  const isGlobalPublic = event.visibility?.type === 'public' && eventFarms.length === 0
+  const isUnscoped = eventFarms.length === 0 && !isGlobalPublic
+  const inFarmCtx = farmIds.length > 0
+
+  // Hard farm gate: applies when a farm context is active AND the event has an explicit farm list.
+  if (inFarmCtx && eventFarms.length > 0) {
+    if (!eventFarms.some(fid => farmIds.includes(fid))) return false
+    // Gate passed → continue to permission checks.
+  }
+
   if (userKeys.length === 0) return true
 
-  // Creator can always view
+  // Globally-public events: visible to everyone in any context.
+  if (isGlobalPublic) return true
+
+  // Unscoped events in an active farm context: skip the creator bypass and rely only on
+  // explicit participant/participation records. This prevents old/legacy events (created
+  // before farm scoping existed) from bleeding into every farm the user navigates to.
+  // Note: the creator is always added to the participants array at creation time, so they
+  // will still see their own events through the participation check below.
+  if (isUnscoped && inFarmCtx) {
+    // Check new-style participation map
+    const participationMap = event.participation
+    if (participationMap && typeof participationMap === 'object') {
+      for (const key of userKeys) {
+        const entry = (participationMap as any)[key] as EventParticipation | undefined
+        if (entry?.status && entry?.accessLevel) return true
+      }
+    }
+    // Check legacy participants array (creator is added here at event-creation time)
+    return (event.participants || []).some(p => userKeys.includes(p.userId))
+  }
+
+  // From here: no farm context, OR event has explicit farm declaration that passed the gate.
+
+  // Creator can always view.
   if (userKeys.includes(event.createdBy)) return true
 
-  // Visibility rules (P0 groundwork: public or restricted-to-users)
-  if (event.visibility?.type === 'public') return true
   if (event.visibility?.type === 'restricted') {
     const users = event.visibility.users || []
     if (users.some(u => userKeys.includes(u))) return true
+
+    const farms = event.visibility.farms || []
+    if (farms.length > 0 && farmIds.length > 0) {
+      if (farms.some(fid => farmIds.includes(fid))) return true
+    }
   }
 
-  // Participation (any status implies visibility, including 'no')
+  // Participation fallback (any status implies visibility, including 'no')
   const p = getUserEventParticipation(event, userKeys)
   return p.status !== 'none'
 }
@@ -87,11 +142,22 @@ export function isEventExpiredForSelection(
 
 export function filterSelectableEvents(
   events: Event[],
-  userKeys: string[],
+  userKeysOrCtx: string[] | UserVisibilityContext,
   now: Date = new Date(),
   endedGraceDays: number = APP_CONFIG.EVENT_ENDED_GRACE_DAYS
 ): Event[] {
   return events
-    .filter(ev => userCanSeeEvent(ev, userKeys))
+    .filter(ev => userCanViewEvent(ev, userKeysOrCtx))
     .filter(ev => !isEventExpiredForSelection(ev, now, endedGraceDays))
+}
+
+// Canonical name (backlog item [007]).
+// Keep filterSelectableEvents as a backward-compatible alias.
+export function getSelectableEvents(
+  events: Event[],
+  userKeysOrCtx: string[] | UserVisibilityContext,
+  now: Date = new Date(),
+  endedGraceDays: number = APP_CONFIG.EVENT_ENDED_GRACE_DAYS
+): Event[] {
+  return filterSelectableEvents(events, userKeysOrCtx, now, endedGraceDays)
 }

@@ -26,14 +26,14 @@ Questo file serve come backlog ordinato per priorità per le **future implementa
 
 | ID | Priorità | Status | Tipo | Area | Effort | Titolo | Owner | Link |
 |---:|:--------:|:------:|:----:|:----:|:------:|--------|-------|------|
-| 000 | P0 | in-progress | refactor | core | L | Separazione Visibilità vs Partecipazione Evento |  |  |
-| 001 | P1 | todo | feature | groups | L | Fattorie (Maiali) + Visibilità eventi |  |  |
-| 002 | P1 | todo | refactor | data | M | Normalizzazione Date / Timestamp |  |  |
-| 003 | P1 | todo | decision | expenses | S | Decisione: Spese sempre legate a Evento |  |  |
+| 000 | P0 | done | refactor | core | L | Separazione Visibilità vs Partecipazione Evento |  |  |
+| 001 | P1 | in-progress | feature | groups | L | Fattorie (Maiali) + Visibilità eventi |  |  |
+| 002 | P1 | done | refactor | data | M | Normalizzazione Date / Timestamp |  |  |
+| 003 | P1 | done | decision | expenses | S | Decisione: Spese sempre legate a Evento |  |  |
 | 004 | P1 | done | refactor | chat | M | Refactor Chat: Thread vs Composer |  |  |
 | 005 | P0 | done | bug | chat | S | Chat popup Home: manca input messaggio |  |  |
-| 006 | P2 | todo | refactor | ux | M | Pulizia UX: spese/sondaggi dentro Summary/Home |  |  |
-| 007 | P1 | todo | refactor | shared | M | Coerenza select eventi + nascondi eventi finiti |  |  |
+| 006 | P2 | done | refactor | ux | M | Pulizia UX: spese/sondaggi dentro Summary/Home |  |  |
+| 007 | P1 | done | refactor | shared | M | Coerenza select eventi + nascondi eventi finiti |  |  |
 | 008 | P1 | done | bug | notifications | S | Notifiche: sparire dopo lettura |  |  |
 
 ---
@@ -61,11 +61,11 @@ Questo file serve come backlog ordinato per priorità per le **future implementa
 ## Item di base (fondazionali)
 
 ### [000] Separazione Visibilità vs Partecipazione Evento (P0)
-- **Status:** in-progress
+- **Status:** done
 - **Tipo/Area/Effort:** refactor | core | L
 
 - **Progress (groundwork):**
-  - Stato: implementazione completata lato codice; in attesa di smoke test manuale per chiudere `done`
+  - Stato: implementazione completata lato codice; smoke test manuale eseguito ✅
   - Tipi aggiornati: `visibility` / `participation` (backward-compatible)
   - Service layer: lettura `participation` + dual-write in `updateParticipation()` (mantiene anche `participants[]` e `participantIds`)
   - Presence per-giorno: bloccata se non hai RSVP `yes` (niente creazioni implicite)
@@ -115,15 +115,15 @@ Questo file serve come backlog ordinato per priorità per le **future implementa
 
 - **Test plan:**
   - [x] `npm run build`
-  - [ ] Utente in fattoria vede evento, ma non risulta partecipante finché non clicca RSVP
-  - [ ] Utente con status=no vede evento in readonly (grigio) e non può scrivere
+  - [x] Utente in fattoria vede evento, ma non risulta partecipante finché non clicca RSVP
+  - [x] Utente con status=no vede evento in readonly (grigio) e non può scrivere
 
 ---
 
 ## Feature principali
 
 ### [001] Fattorie (Maiali) + Visibilità eventi (P1)
-- **Status:** todo
+- **Status:** in-progress
 - **Tipo/Area/Effort:** feature | groups | L
 
 - **Obiettivo:**
@@ -168,24 +168,24 @@ Questo file serve come backlog ordinato per priorità per le **future implementa
   - [ ] Trasferimento ownership in caso di ban dell’Owner (vedi “Decisioni finali”)
 
 - **Acceptance criteria:**
-  - [ ] Creazione fattoria libera
-  - [ ] Ingresso solo previa approvazione Re Maiale (richiesta pendente)
-  - [ ] Nessuna lista globale utenti
-  - [ ] Evento riservato visibile solo se matcha `visibility` (fattorie e/o utenti one-shot)
-  - [ ] Member con `status=no` => evento grigio/readonly solo per quel member
-  - [ ] Member può creare spese/liste/sondaggi solo con `accessLevel=full`
+  - [x] Creazione fattoria libera
+  - [x] Ingresso solo previa approvazione Re Maiale (richiesta pendente)
+  - [x] Nessuna lista globale utenti
+  - [x] Evento riservato visibile solo se matcha `visibility` (fattorie e/o utenti one-shot)
+  - [x] Member con `status=no` => evento grigio/readonly solo per quel member
+  - [x] Member può creare spese/liste/sondaggi solo con `accessLevel=full`
 
 - **Test plan:**
-  - [ ] Join via link => richiesta pendente
-  - [ ] Approva => utente vede eventi futuri (vedi “Decisioni finali”)
-  - [ ] Decline partecipazione => readonly per quel member
+  - [ ] Join via link => richiesta pendente (manuale, 2 account)
+  - [ ] Approva => utente NON vede eventi con `date` < `joinedAt` (policy “nuovi membri”) (manuale)
+  - [ ] Decline partecipazione => readonly per quel member (manuale)
 
 ---
 
 ## Refactor e decisioni chiave
 
 ### [002] Normalizzazione Date / Timestamp (P1)
-- **Status:** todo
+- **Status:** done
 - **Tipo/Area/Effort:** refactor | data | M
 
 - **Obiettivo:**
@@ -205,18 +205,21 @@ Questo file serve come backlog ordinato per priorità per le **future implementa
   - `src/types/*`
 
 - **Acceptance criteria:**
-  - [ ] Nessun `.toDate()` sparso nel codice UI
-  - [ ] Nessun `undefined` scritto su Firestore
-  - [ ] Date coerenti in eventi/spese/sondaggi/liste
+  - [x] Nessun `.toDate()` sparso nel codice UI
+  - [x] Nessun `undefined` scritto su Firestore (sanitizzazione deep nel service layer)
+  - [x] Date coerenti in eventi/spese/sondaggi/liste
 
 - **Test plan:**
-  - [ ] Creazione e lettura eventi con date: nessun crash, date coerenti
-  - [ ] Audit grep: `.toDate()` solo nel service layer
+  - [x] Creazione e lettura eventi con date: nessun crash, date coerenti
+  - [x] Audit grep: `.toDate()` solo nel service layer
+
+- **Progress (groundwork):**
+  - Mapper unico Date/Timestamp introdotto in service layer (riuso in più servizi)
 
 ---
 
 ### [003] Decisione: Spese sempre legate a Evento (P1)
-- **Status:** todo
+- **Status:** done
 - **Tipo/Area/Effort:** decision | expenses | S
 
 - **Decisione:**
@@ -228,8 +231,8 @@ Questo file serve come backlog ordinato per priorità per le **future implementa
     - suggerire creazione evento (anche senza data) oppure selezione evento obbligatoria.
 
 - **Acceptance criteria:**
-  - [ ] Nessuna spesa senza `eventId`
-  - [ ] UI impedisce creazione spesa senza selezionare evento
+  - [x] Nessuna spesa nuova senza `eventId` (enforced UI + service + rules)
+  - [x] UI impedisce creazione spesa senza selezionare evento
 
 ---
 
@@ -292,20 +295,24 @@ Questo file serve come backlog ordinato per priorità per le **future implementa
 ---
 
 ### [006] Pulizia UX: spese/sondaggi dentro Summary/Home (P2)
-- **Status:** todo
+- **Status:** done
 - **Tipo/Area/Effort:** refactor | ux | M
 
 - **Obiettivo:**
   - Centralizzare la creazione contenuti nel contesto evento (Event Summary) e ridurre la creazione “sparsa” su pagine globali.
 
 - **Acceptance criteria:**
-  - [ ] Spese e sondaggi creati principalmente da Summary evento (minimo)
-  - [ ] Pagine globali diventano consultazione (o vengono ridotte) senza regressioni
+  - [x] Spese e sondaggi creati principalmente da Summary evento (minimo)
+  - [x] Pagine globali diventano consultazione (o vengono ridotte) senza regressioni
+
+- **Note tecniche (implementato):**
+  - Creazione da pagine globali (Spese/Sondaggi/Liste) resa disponibile solo quando si arriva da Summary evento con `openForm + eventId`.
+  - Le pagine globali restano consultazione/modifica/cancellazione dove permesso.
 
 ---
 
 ### [007] Coerenza select eventi + nascondi eventi finiti (P1)
-- **Status:** todo
+- **Status:** done
 - **Tipo/Area/Effort:** refactor | shared | M
 
 - **Problema attuale:**
@@ -318,8 +325,8 @@ Questo file serve come backlog ordinato per priorità per le **future implementa
   - Policy su eventi finiti (grace period) applicata ovunque.
 
 - **Acceptance criteria:**
-  - [ ] Spese, Liste, Sondaggi usano stessa logica select
-  - [ ] Eventi finiti non mostrati dopo N giorni (o toggle “Mostra finiti”)
+  - [x] Spese, Liste, Sondaggi usano stessa logica select
+  - [x] Eventi finiti non mostrati dopo N giorni (grace period)
 
 - **Progress (parziale):**
   - Fix immediato: eventi ora ricompaiono nelle select (Spese/Liste/Sondaggi) usando `filterSelectableEvents()` basato su `userCanViewEvent` (non più solo `accessLevel=full`)
@@ -393,3 +400,170 @@ Questo file serve come backlog ordinato per priorità per le **future implementa
 - Entità principali: Fattoria / Maiali
 - Nessun alias “Gruppo” in UI
 - Naming ispirato a La fattoria degli animali mantenuto come riferimento concettuale
+
+---
+
+## Piano 2 Settimane (solo P0/P1, senza refactor massivo)
+
+Obiettivo: chiudere i gap minimi per passare da "release candidate" a "prodotto pronto" su affidabilita`, qualita` e compliance base.
+
+### Milestone e ordine di esecuzione
+
+### [009] Baseline test automatici FE + Functions (P0)
+- **Status:** in-progress
+- **Tipo/Area/Effort:** quality | test | L
+- **Finestra:** Giorni 1-4
+- **Obiettivo:** coprire i flussi critici con test eseguibili in CI.
+- **Scope minimo:**
+  - unit test service/mappers (`toDate`, `toTimestamp`, `cleanUndefinedDeep`)
+  - unit test logica eventi (visibilita`, partecipazione, readonly)
+  - smoke integration su 1-2 pagine core (auth gate + eventi)
+  - test functions helper puri (payload routing, token dedup/cleanup)
+- **Acceptance criteria:**
+  - [x] almeno 20 test automatici verdi in locale (26 test)
+  - [ ] almeno 20 test automatici verdi su CI
+  - [x] coverage >= 60% sui moduli core target (attuale ~92% su scope test)
+  - [x] nessun test flaky in 3 run consecutive
+
+- **Progress (2026-03-22):**
+  - Setup Vitest completato (`vitest.config.ts`)
+  - Script aggiunti: `test`, `test:run`, `test:coverage`
+  - Suite iniziali create:
+    - `src/services/firestoreMappers.test.ts`
+    - `src/utils/events.test.ts`
+  - Esecuzione locale:
+    - `npm run test:run` -> 26/26 verdi
+    - `npm run test:run` x3 consecutivi -> verdi
+    - `npm run test:coverage` -> coverage scope test ~92%
+    - `npm run build` -> verde
+
+### [010] E2E smoke su journey critici (P0)
+- **Status:** in-progress
+- **Tipo/Area/Effort:** quality | e2e | M
+- **Finestra:** Giorni 4-6
+- **Obiettivo:** verificare i percorsi utente ad alto rischio regressione.
+- **Journey minimi:**
+  - login -> onboarding/join farm -> home
+  - crea evento -> RSVP -> chat invio messaggio
+  - crea spesa collegata evento -> visualizza saldo
+- **Acceptance criteria:**
+  - [x] smoke E2E definito su journey minimi con runtime deterministico locale/CI
+  - [x] report con screenshot/video in caso di failure
+  - [ ] smoke E2E eseguito con esito verde su CI reale (PR e main)
+
+- **Progress (2026-03-22):**
+  - Modalita` E2E runtime aggiunta con mock service-layer/auth per evitare dipendenza da Google/Firebase reali
+  - Playwright configurato (`playwright.config.ts`) con screenshot/video/trace on failure
+  - Smoke spec aggiunte (`e2e/smoke.spec.ts`):
+    - login -> onboarding/join farm -> home
+    - crea evento -> RSVP -> chat invio messaggio
+    - crea spesa collegata evento -> visualizza saldo
+  - CI aggiornata per installare Chromium ed eseguire `npm run test:e2e`
+
+### [011] CI quality gates obbligatori (P0)
+- **Status:** in-progress
+- **Tipo/Area/Effort:** devops | ci | M
+- **Finestra:** Giorni 6-7
+- **Obiettivo:** impedire merge/deploy con regressioni non rilevate.
+- **Gate minimi richiesti:**
+  - lint + build + unit/integration + e2e smoke
+  - secret scan gia` presente
+  - fail-fast e cache dependency stabile
+- **Acceptance criteria:**
+  - [ ] PR bloccata se un gate fallisce (branch protection required checks lato repo settings)
+  - [ ] pipeline completa <= 12 minuti media
+
+- **Progress (2026-03-22):**
+  - Gate tecnici attivi in CI web: lint + unit test + build + e2e smoke
+  - `concurrency` aggiunta: cancella run obsolete sullo stesso branch/ref
+  - Cache browser Playwright aggiunta (`~/.cache/ms-playwright`) per ridurre durata media
+  - Artifact report E2E pubblicati sempre (`playwright-report`, `test-results`) per diagnosi failure
+  - Timeout job impostati (`web` 25m, `functions` 15m)
+  - E2E in CI eseguiti su server `preview` (piu` vicino al comportamento release rispetto a `dev`)
+
+### [012] Compliance minima prodotto (P1)
+- **Status:** in-progress (manca titolare/contatto reale nella Privacy Policy)
+- **Tipo/Area/Effort:** legal | compliance | S
+- **Finestra:** Giorni 8-9
+- **Obiettivo:** copertura legale essenziale per produzione pubblica.
+- **Deliverable:**
+  - Privacy Policy (trattamento dati, retention, contatti)
+  - Termini di utilizzo essenziali
+  - pagina/route accessibile dall'app
+- **Acceptance criteria:**
+  - [x] documenti versionati nel repo
+  - [x] link visibili da login/settings/footer
+
+- **Progress (2026-03-22):**
+  - Documenti legali aggiunti e versionati:
+    - `docs/PRIVACY_POLICY.md`
+    - `docs/TERMINI_DI_UTILIZZO.md`
+  - Route legali pubbliche aggiunte in app:
+    - `/legal/privacy`
+    - `/legal/terms`
+  - Pagina legale dedicata implementata: `src/pages/LegalPage.tsx`
+  - Link visibili da:
+    - Login (`src/pages/LoginPage.tsx`)
+    - Settings (`src/pages/SettingsPage.tsx`)
+
+### [013] Observability e incident response minima (P1)
+- **Status:** in-progress (manca `VITE_SENTRY_DSN`: senza DSN gli errori non partono)
+- **Tipo/Area/Effort:** reliability | ops | M
+- **Finestra:** Giorni 9-11
+- **Obiettivo:** ridurre MTTR su errori reali.
+- **Scope minimo:**
+  - error tracking frontend (es. Sentry) con release tag
+  - alert base su errori Functions
+  - runbook incident (login down, push down, rules deny spike)
+- **Acceptance criteria:**
+  - [ ] errore FE catturato con stack + release (codice pronto, DSN da configurare)
+  - [x] almeno 3 alert operativi documentati
+  - [x] runbook testato con 1 game day rapido
+
+- **Progress (2026-03-22):**
+  - FE error tracking integrato con Sentry (`@sentry/react`) in `src/services/observability.ts`
+  - Cattura errori attiva su:
+    - React `ErrorBoundary` (`componentDidCatch`)
+    - `window.error`
+    - `window.unhandledrejection`
+  - Release tagging introdotto (`VITE_APP_RELEASE` / `VITE_GIT_SHA`, fallback automatico)
+  - Runbook + alert operativi documentati in `docs/OBSERVABILITY_RUNBOOK.md`
+  - Nota: attivazione canali alert reali (Sentry/Firebase -> on-call) resta step operativo fuori repo
+
+### [014] Release hardening e go-live checklist (P1)
+- **Status:** in-progress
+- **Tipo/Area/Effort:** release | ops | S
+- **Finestra:** Giorni 12-14
+- **Obiettivo:** standardizzare il rilascio e ridurre errore umano.
+- **Deliverable:**
+  - CHANGELOG iniziale
+  - checklist release (pre/post deploy, rollback, smoke post deploy)
+  - ownership chiara per approvazione finale
+- **Acceptance criteria:**
+  - [ ] primo rilascio eseguito con checklist completa
+  - [ ] rollback provato almeno una volta in staging
+
+- **Progress (2026-03-22):**
+  - `CHANGELOG.md` iniziale creato con baseline release 0.1.0
+  - Checklist operativa di rilascio creata: `docs/RELEASE_CHECKLIST.md`
+  - Sezione rollback formalizzata (trigger, passi, verifica post-rollback)
+  - Ownership release aggiunta come campi espliciti da assegnare
+
+## Exit Criteria fine settimana 2
+
+- [ ] Nessun P0 aperto
+- [ ] Tutti i gate CI verdi su `main`
+- [ ] Flussi core coperti da test automatici + E2E smoke
+- [ ] Compliance minima pubblicata (privacy + termini)
+- [ ] Monitoring/alerting attivi e runbook disponibile
+
+## Rischi e mitigazioni
+
+- **Rischio:** test E2E lenti/flaky
+- **Mitigazione:** pochi smoke stabili, dati seed deterministici, retry solo su step non critici
+
+- **Rischio:** ritardo compliance legale
+- **Mitigazione:** template base in settimana 2 giorno 1, revisione asincrona legale
+
+- **Rischio:** integrazione observability invasiva
+- **Mitigazione:** rollout progressivo su errori critici, sampling iniziale

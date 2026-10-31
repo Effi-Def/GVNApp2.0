@@ -4,6 +4,7 @@ export default {
     "./index.html",
     "./src/**/*.{js,ts,jsx,tsx}",
   ],
+  darkMode: 'class', // Toggle via class="dark" on <html>
   theme: {
     extend: {
       colors: {
@@ -43,12 +44,23 @@ export default {
           800: '#262626',
           900: '#171717',
         },
+        // Semantic surface tokens — used in UI components
+        surface: {
+          DEFAULT: '#ffffff',
+          subtle: '#f5f5f5',
+          raised: '#fafafa',
+        },
       },
       fontFamily: {
         'sans': ['Inter', 'system-ui', 'sans-serif'],
         'display': ['Poppins', 'system-ui', 'sans-serif'],
       },
+      boxShadow: {
+        'card': '0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.06)',
+        'card-hover': '0 4px 12px 0 rgb(0 0 0 / 0.10), 0 2px 4px -1px rgb(0 0 0 / 0.08)',
+      },
     },
   },
   plugins: [],
 }
+

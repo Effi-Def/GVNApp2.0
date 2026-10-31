@@ -1,13 +1,16 @@
 import { useState, useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
-import { listService, eventService } from '../services/firestore'
-import { useAuthStore } from '../stores/useAuthStore'
+import { listService } from '../services/firestore'
+import { refreshActiveFarmData, useAuthStore } from '../stores/useAuthStore'
+import { useAppStore } from '../stores/AppStore'
+import { useActiveFarmStore } from '../stores/useActiveFarmStore'
 import { ShoppingList, Event, ListType, ListItem } from '../types'
-import { filterSelectableEvents, getUserKeys } from '../utils/events'
+import { getSelectableEvents, getUserEventParticipation, getUserKeys } from '../utils/events'
+import AdvancedSection from '../components/AdvancedSection'
 
 const ListsPage = () => {
   const { user } = useAuthStore()
-  const location = useLocation() as any
+  const location = useLocation()
   const [lists, setLists] = useState<ShoppingList[]>([])
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
@@ -20,10 +23,14 @@ const ListsPage = () => {
   const [openFormAssignees, setOpenFormAssignees] = useState<number | null>(null)
   const dateInputsRef = useRef<Record<string, HTMLInputElement | null>>({})
   const itemInputRefs = useRef<Record<number, HTMLInputElement | null>>({})
-  const handledNavStateRef = useRef(false)
+  const handledNavStateRef = useRef<string>('')
+
 
   const currentUserId = user?.id || 'anonymous'
   const userKeys = getUserKeys(user)
+  const activeFarmId = useActiveFarmStore(s => s.activeFarmId)
+  const storeEvents = useAppStore(s => s.events)
+  const storeLists = useAppStore(s => s.lists)
 
   const [formData, setFormData] = useState({
     title: '',
@@ -40,24 +47,14 @@ const ListsPage = () => {
     const load = async () => {
       try {
         setLoading(true)
-        const [lsRes, evsRes] = await Promise.allSettled([
-          listService.getAll(),
-          eventService.getAll(),
-        ])
-
-        const evs: Event[] = evsRes.status === 'fulfilled' ? evsRes.value : []
-        if (evsRes.status === 'rejected') {
-          console.error('❌ Error loading events:', evsRes.reason)
+        if (user?.id && (storeEvents?.length || 0) === 0 && (storeLists?.length || 0) === 0) {
+          await refreshActiveFarmData()
         }
 
-        const ls: ShoppingList[] = lsRes.status === 'fulfilled' ? lsRes.value : []
-        if (lsRes.status === 'rejected') {
-          console.error('❌ Error loading lists:', lsRes.reason)
-        }
-
-        // Mostra liste per eventi a cui partecipo o non collegate
-        const myEvents = filterSelectableEvents(evs, userKeys)
+        const evs: Event[] = storeEvents || []
+        const myEvents = getSelectableEvents(evs, { userKeys, farmIds: activeFarmId ? [activeFarmId] : [] })
         setEvents(myEvents)
+        const ls = storeLists || []
         const myIds = new Set(myEvents.map(e => e.id))
         setLists(ls.filter(l => !l.eventId || myIds.has(l.eventId)))
       } finally {
@@ -65,17 +62,18 @@ const ListsPage = () => {
       }
     }
     load()
-  }, [currentUserId])
+  }, [currentUserId, activeFarmId, storeEvents, storeLists])
 
   // Supporto navigazione dal Summary evento: apri form e pre-seleziona l'evento
   useEffect(() => {
-    if (handledNavStateRef.current) return
     const st = location?.state
     const eventId = st?.eventId as string | undefined
     const openForm = !!st?.openForm
     if (!openForm || !eventId) return
     if (!events.some(e => e.id === eventId)) return
-    handledNavStateRef.current = true
+    const navKey = `${eventId}:${openForm}`
+    if (handledNavStateRef.current === navKey) return
+    handledNavStateRef.current = navKey
     setShowForm(true)
     setEditingList(null)
     setFormData(prev => ({
@@ -89,6 +87,24 @@ const ListsPage = () => {
       type: 'shopping',
     }))
   }, [location?.state, events])
+
+  // Auto-open create form when ?create=1
+  useEffect(() => {
+    const params = new URLSearchParams(location?.search || '')
+    const shouldCreate = params.get('create') === '1'
+    if (!shouldCreate) return
+    setEditingList(null)
+    setShowForm(true)
+    setFormData({
+      title: '',
+      description: '',
+      items: [''],
+      todoDueDates: [''],
+      todoAssignees: [[]],
+      eventId: '',
+      type: 'shopping',
+    })
+  }, [location?.search])
 
   // Prevent background scroll on mobile when modal is open
   useEffect(() => {
@@ -235,6 +251,19 @@ const ListsPage = () => {
       alert('Inserisci un titolo per la lista')
       return
     }
+
+    if (formData.eventId) {
+      const selectedEvent = events.find(ev => ev.id === formData.eventId)
+      if (!selectedEvent) {
+        alert('Evento non valido')
+        return
+      }
+      const p = getUserEventParticipation(selectedEvent, userKeys)
+      if (p.accessLevel !== 'full') {
+        alert('Non hai i permessi per creare o modificare liste in questo evento')
+        return
+      }
+    }
     if (submitting) return
     setSubmitting(true)
     try {
@@ -327,34 +356,41 @@ const ListsPage = () => {
 
   if (loading) {
     return (
-      <div className="p-6 max-w-4xl mx-auto">
+      <div className="pt-16 px-6 pb-6 max-w-4xl mx-auto">
         <div className="text-center py-12">
           <div className="text-6xl mb-4">📋</div>
-          <h3 className="text-xl font-semibold text-gray-600 mb-2">Caricamento liste...</h3>
-          <p className="text-gray-500">Connessione a Firebase in corso</p>
+          <h3 className="text-xl font-semibold text-[--text-muted] mb-2">Caricamento liste...</h3>
+          <p className="text-[--text-muted]">Connessione a Firebase in corso</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="p-6 max-w-4xl mx-auto">
+    <div className="pt-16 px-4 pb-6 max-w-4xl mx-auto">
       {/* Header */}
-      <div className="mb-8">
+      <div className="mb-5">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-800 mb-2">Liste 📋</h1>
-            <p className="text-gray-600">Gestisci liste condivise per spesa e organizzazione</p>
+            <h1 className="text-xl font-bold text-[--text-base] mb-0.5">Liste 📋</h1>
+            <p className="text-sm text-[--text-muted]">Gestisci liste condivise per spesa e organizzazione</p>
           </div>
+          <button
+            onClick={() => { setEditingList(null); setShowForm(true) }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 hover:bg-green-600 active:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            <span className="text-base leading-none font-bold">+</span>
+            <span>Nuova</span>
+          </button>
         </div>
         {/* Filtri */}
         <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3">
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">Evento:</span>
+            <span className="text-sm font-medium text-[--text-muted]">Evento:</span>
             <select
               value={selectedEvent}
               onChange={(e) => setSelectedEvent(e.target.value)}
-              className="px-3 py-1 rounded-lg border border-gray-300 text-sm focus:outline-none focus:border-green-500"
+              className="px-3 py-1 rounded-lg border border-[--border-base] text-sm focus:outline-none focus:border-green-500"
             >
               <option value="all">Tutti gli eventi</option>
               {events.map(ev => (
@@ -363,11 +399,11 @@ const ListsPage = () => {
             </select>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-700">Tipo:</span>
+            <span className="text-sm font-medium text-[--text-muted]">Tipo:</span>
             <select
               value={selectedType}
               onChange={(e) => setSelectedType(e.target.value as 'all' | ListType)}
-              className="px-3 py-1 rounded-lg border border-gray-300 text-sm focus:outline-none focus:border-green-500"
+              className="px-3 py-1 rounded-lg border border-[--border-base] text-sm focus:outline-none focus:border-green-500"
             >
               <option value="all">Tutti</option>
               <option value="shopping">Shopping</option>
@@ -387,30 +423,30 @@ const ListsPage = () => {
           .map(list => {
             const stats = getListStats(list)
             return (
-              <div key={list.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <div key={list.id} className="bg-[--bg-card] rounded-xl shadow-sm border border-[--border-base] p-6">
                 <div className="flex items-start justify-between mb-4">
                   <div className="flex-1">
-                    <h3 className="text-xl font-semibold text-gray-800 mb-2">{list.title}</h3>
+                    <h3 className="text-xl font-semibold text-[--text-base] mb-2">{list.title}</h3>
                     {list.description && (
-                      <p className="text-gray-600 mb-3">{list.description}</p>
+                      <p className="text-[--text-muted] mb-3">{list.description}</p>
                     )}
-                    <div className="flex items-center flex-wrap gap-2 text-xs text-gray-500 mb-4">
+                    <div className="flex items-center flex-wrap gap-2 text-xs text-[--text-muted] mb-4">
                       <span>📅 {formatDate(list.createdAt)}</span>
                       <span>📊 {stats.completed}/{stats.total} ({stats.percentage}%)</span>
-                      <span className="px-1.5 py-0.5 bg-gray-100 text-gray-700 text-[10px] rounded-full">🏷️ {list.type === 'transport' ? 'macchine' : list.type === 'lodging' ? 'stanze' : (list.type || 'shopping')}</span>
+                      <span className="px-1.5 py-0.5 bg-[--bg-raised] text-[--text-muted] text-[10px] rounded-full">🏷️ {list.type === 'transport' ? 'macchine' : list.type === 'lodging' ? 'stanze' : (list.type || 'shopping')}</span>
                       {list.eventId && (
                         <span className="px-1.5 py-0.5 bg-blue-100 text-blue-700 text-[10px] rounded-full">
                           📅 {events.find(e => e.id === list.eventId)?.title || 'Evento'}
                         </span>
                       )}
                       <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-medium ${
-                        list.shared ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                        list.shared ? 'bg-blue-100 text-blue-700' : 'bg-[--bg-raised] text-[--text-muted]'
                       }`}>
                         {list.shared ? 'Condivisa' : 'Privata'}
                       </span>
                     </div>
                     {/* Barra di progresso */}
-                    <div className="w-full bg-gray-200 rounded-full h-2 mb-4">
+                    <div className="w-full bg-[--bg-raised] rounded-full h-2 mb-4">
                       <div
                         className="bg-green-500 h-2 rounded-full transition-all duration-500"
                         style={{ width: `${stats.percentage}%` }}
@@ -444,11 +480,11 @@ const ListsPage = () => {
                 {/* Elementi della lista */}
                 <div className="space-y-2">
                   {list.items.map(item => (
-                    <div key={item.id} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-gray-50 transition-colors">
+                    <div key={item.id} className="flex items-center space-x-3 p-3 rounded-lg hover:bg-[--bg-subtle] transition-colors">
                       <button
                         onClick={() => toggleItemCompletion(list.id, item.id)}
                         className={`flex-shrink-0 w-6 h-6 rounded-full border-2 transition-all duration-200 ${
-                          item.completed ? 'bg-green-500 border-green-500' : 'border-gray-300 hover:border-green-500'
+                          item.completed ? 'bg-green-500 border-green-500' : 'border-[--border-base] hover:border-green-500'
                         }`}
                       >
                         {item.completed && (
@@ -457,10 +493,10 @@ const ListsPage = () => {
                           </svg>
                         )}
                       </button>
-                      <span className={`flex-1 ${item.completed ? 'line-through text-gray-500' : 'text-gray-800'}`}>
+                      <span className={`flex-1 ${item.completed ? 'line-through text-[--text-muted]' : 'text-[--text-base]'}`}>
                         {item.text}
                         {(list.type === 'transport' || list.type === 'lodging') && (
-                          <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-700 align-middle">
+                          <span className="ml-2 text-[11px] px-1.5 py-0.5 rounded-full bg-[--bg-raised] text-[--text-muted] align-middle">
                             {(item.assignees?.length || 0)}/{item.capacity || (list.type === 'transport' ? 5 : 2)}
                           </span>
                         )}
@@ -473,9 +509,9 @@ const ListsPage = () => {
                           <button
                             onClick={() => updateListItem(list.id, item.id, { status: cycleStatus(item.status) })}
                             className={`text-xs px-2 py-1 rounded-full border ${
-                              item.status === 'done' ? 'bg-green-100 text-green-700 border-green-200' :
-                              item.status === 'in-progress' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' :
-                              'bg-gray-100 text-gray-700 border-gray-200'
+                              item.status === 'done' ? 'bg-green-500/10 text-green-600 border-green-200' :
+                              item.status === 'in-progress' ? 'bg-yellow-500/10 text-yellow-600 border-yellow-200' :
+                              'bg-[--bg-raised] text-[--text-muted] border-[--border-base]'
                             }`}
                             title="Cambia stato"
                           >
@@ -503,10 +539,10 @@ const ListsPage = () => {
                               if (input && typeof input.showPicker === 'function') input.showPicker()
                               else input?.click()
                             }}
-                            className={`text-[10px] px-2 py-1 rounded border hover:bg-gray-50 ${
+                            className={`text-[10px] px-2 py-1 rounded border hover:bg-[--bg-subtle] ${
                               item.dueDate && isPastDate(item.dueDate as Date)
-                                ? 'border-red-300 text-red-700 bg-red-50'
-                                : 'border-gray-300 text-gray-700'
+                                ? 'bg-red-500/10 border-red-500/30 text-red-600'
+                                : 'border-[--border-base] text-[--text-muted]'
                             }`}
                             title="Scadenza"
                           >
@@ -515,16 +551,16 @@ const ListsPage = () => {
                           <div className="relative">
                             <button
                               onClick={() => setOpenAssignees(prev => (prev && prev.listId === list.id && prev.itemId === item.id) ? null : { listId: list.id, itemId: item.id })}
-                              className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              className="text-xs px-2 py-1 rounded border border-[--border-base] text-[--text-muted] hover:bg-[--bg-subtle]"
                               title="Assegna utenti"
                             >
                               👤 {(item.assignees?.length || 0)}
                             </button>
                             {openAssignees && openAssignees.listId === list.id && openAssignees.itemId === item.id && (
-                              <div className="absolute right-0 top-8 z-20 w-64 max-h-64 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg p-3">
+                              <div className="absolute right-0 top-8 z-20 w-64 max-h-64 overflow-auto bg-[--bg-card] border border-[--border-base] rounded-lg shadow-lg p-3">
                                 <div className="flex items-center justify-between mb-2">
-                                  <div className="text-sm font-medium text-gray-700">Assegna partecipanti</div>
-                                  <button onClick={() => setOpenAssignees(null)} className="text-gray-500 hover:text-gray-700">✖</button>
+                                  <div className="text-sm font-medium text-[--text-muted]">Assegna partecipanti</div>
+                                  <button onClick={() => setOpenAssignees(null)} className="text-[--text-muted] hover:text-[--text-muted]">✖</button>
                                 </div>
                                 {list.eventId ? (
                                   <div className="space-y-2">
@@ -557,7 +593,7 @@ const ListsPage = () => {
                                     })}
                                   </div>
                                 ) : (
-                                  <div className="text-xs text-gray-500">Nessun evento collegato. Aggiungi manualmente dal form o collega un evento.</div>
+                                  <div className="text-xs text-[--text-muted]">Nessun evento collegato. Aggiungi manualmente dal form o collega un evento.</div>
                                 )}
                                 <div className="mt-3 border-t pt-2">
                                   <button
@@ -589,7 +625,7 @@ const ListsPage = () => {
                                   const name = prompt('Rinomina stanza:', item.text)
                                   if (name && name.trim()) updateListItem(list.id, item.id, { text: name.trim() })
                                 }}
-                                className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                                className="text-xs px-2 py-1 rounded border border-[--border-base] text-[--text-muted] hover:bg-[--bg-subtle]"
                                 title="Rinomina stanza"
                               >✏️</button>
                               <button
@@ -598,7 +634,7 @@ const ListsPage = () => {
                                   if ((item.assignees?.length || 0) >= cap) return
                                   updateListItem(list.id, item.id, { capacity: cap + 1 })
                                 }}
-                                className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                                className="text-xs px-2 py-1 rounded border border-[--border-base] text-[--text-muted] hover:bg-[--bg-subtle]"
                                 title="Aggiungi posto"
                               >➕</button>
                               <button
@@ -608,7 +644,7 @@ const ListsPage = () => {
                                   if (cap <= 1 || cap - 1 < assigned) return
                                   updateListItem(list.id, item.id, { capacity: cap - 1 })
                                 }}
-                                className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                                className="text-xs px-2 py-1 rounded border border-[--border-base] text-[--text-muted] hover:bg-[--bg-subtle]"
                                 title="Rimuovi posto"
                               >➖</button>
                               <button
@@ -628,16 +664,16 @@ const ListsPage = () => {
                           <div className="relative">
                             <button
                               onClick={() => setOpenAssignees(prev => (prev && prev.listId === list.id && prev.itemId === item.id) ? null : { listId: list.id, itemId: item.id })}
-                              className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              className="text-xs px-2 py-1 rounded border border-[--border-base] text-[--text-muted] hover:bg-[--bg-subtle]"
                               title="Assegna partecipanti"
                             >
                               👤 {(item.assignees?.length || 0)}
                             </button>
                             {openAssignees && openAssignees.listId === list.id && openAssignees.itemId === item.id && (
-                              <div className="absolute right-0 top-8 z-20 w-64 max-h-64 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg p-3">
+                              <div className="absolute right-0 top-8 z-20 w-64 max-h-64 overflow-auto bg-[--bg-card] border border-[--border-base] rounded-lg shadow-lg p-3">
                                 <div className="flex items-center justify-between mb-2">
-                                  <div className="text-sm font-medium text-gray-700">Assegna partecipanti</div>
-                                  <button onClick={() => setOpenAssignees(null)} className="text-gray-500 hover:text-gray-700">✖</button>
+                                  <div className="text-sm font-medium text-[--text-muted]">Assegna partecipanti</div>
+                                  <button onClick={() => setOpenAssignees(null)} className="text-[--text-muted] hover:text-[--text-muted]">✖</button>
                                 </div>
                                 {list.eventId ? (
                                   <div className="space-y-2">
@@ -687,11 +723,11 @@ const ListsPage = () => {
                                     })()}
                                   </div>
                                 ) : (
-                                  <div className="text-xs text-gray-500">Nessun evento collegato. Aggiungi manualmente dal form o collega un evento.</div>
+                                  <div className="text-xs text-[--text-muted]">Nessun evento collegato. Aggiungi manualmente dal form o collega un evento.</div>
                                 )}
                                 {list.type === 'transport' && (
                                   <div className="mt-3 border-t pt-2">
-                                    <label className="block text-xs text-gray-600 mb-1">Guidatore:</label>
+                                    <label className="block text-xs text-[--text-muted] mb-1">Guidatore:</label>
                                     <select
                                       value={item.driver ? (item.driver.userId || item.driver.userName) : ''}
                                       onChange={(e) => {
@@ -706,7 +742,7 @@ const ListsPage = () => {
                                           updateListItem(list.id, item.id, { driver: { userId: found.userId, userName: found.userName } })
                                         }
                                       }}
-                                      className="w-full px-2 py-1 border border-gray-300 rounded-lg text-sm"
+                                      className="w-full px-2 py-1 border border-[--border-base] rounded-lg text-sm"
                                     >
                                       <option value="">Nessuno</option>
                                       {(item.assignees || []).map(a => (
@@ -771,7 +807,7 @@ const ListsPage = () => {
                         name="newItem"
                         type="text"
                         placeholder="Aggiungi nuovo elemento..."
-                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500 text-sm"
+                        className="flex-1 px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-green-500 text-sm"
                       />
                       <button
                         type="submit"
@@ -789,19 +825,21 @@ const ListsPage = () => {
         {lists.filter(l => selectedEvent === 'all' || l.eventId === selectedEvent).length === 0 && (
           <div className="text-center py-12">
             <div className="text-6xl mb-4">📋</div>
-            <h3 className="text-xl font-semibold text-gray-600 mb-2">Nessuna lista</h3>
-            <p className="text-gray-500">Crea la prima lista per organizzare le attività di gruppo</p>
+            <h3 className="text-xl font-semibold text-[--text-muted] mb-2">Nessuna lista</h3>
+            <p className="text-[--text-muted]">
+              Tocca + Nuova per creare la prima lista della fattoria.
+            </p>
           </div>
         )}
       </div>
 
       {/* Modal Form */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-4 z-[70]">
-          <div className="bg-white rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
-            <div className="p-6 pb-[calc(6rem+env(safe-area-inset-bottom))]">
+        <div className="fixed inset-0 !mt-0 bg-black/50 flex items-end sm:items-center justify-center p-4 z-[70]">
+          <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
+            <div className="p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800">
+                <h2 className="text-xl font-bold text-[--text-base]">
                   {editingList ? 'Modifica Lista' : 'Nuova Lista'}
                 </h2>
                 <button
@@ -818,7 +856,7 @@ const ListsPage = () => {
                       type: 'shopping'
                     })
                   }}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="text-[--text-muted] hover:text-[--text-muted]"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -828,41 +866,28 @@ const ListsPage = () => {
 
               <form onSubmit={handleSubmitList} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-[--text-muted] mb-1">
                     Titolo lista
                   </label>
                   <input
                     type="text"
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500"
+                    className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-green-500"
                     placeholder="Es. Lista della spesa"
                     required
                   />
                 </div>
 
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Descrizione (opzionale)
-                  </label>
-                  <textarea
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500"
-                    rows={3}
-                    placeholder="Aggiungi dettagli alla lista..."
-                  />
-                </div>
-
                 {/* Tipo lista */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label className="block text-sm font-medium text-[--text-muted] mb-1">
                     Tipo lista
                   </label>
                   <select
                     value={formData.type}
                     onChange={(e) => setFormData({ ...formData, type: e.target.value as ListType })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500"
+                    className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-green-500"
                   >
                     <option value="shopping">Shopping</option>
                     <option value="todo">To-do</option>
@@ -871,64 +896,82 @@ const ListsPage = () => {
                   </select>
                 </div>
 
-                {/* Evento collegato (opzionale) */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Evento collegato (opzionale)
-                  </label>
-                  <select
-                    value={formData.eventId}
-                    onChange={(e) => setFormData({ ...formData, eventId: e.target.value })}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500"
-                  >
-                    <option value="">Nessun evento specifico</option>
-                    {events.map(ev => (
-                      <option key={ev.id} value={ev.id}>{ev.title}</option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Collega la lista a un evento specifico
-                  </p>
-                  {/* Generatore slot per Macchine/Stanze */}
-                  {(formData.type === 'transport' || formData.type === 'lodging') && formData.eventId && (
-                    <div className="mt-3 p-3 rounded-lg border bg-gray-50">
-                      {(() => {
-                        const ev = events.find(e => e.id === formData.eventId)
-                        const participants = (ev?.participants || []).filter(p => p.status === 'yes')
-                        const count = participants.length || 0
-                        const denom = formData.type === 'transport' ? 5 : 2
-                        const slots = Math.ceil((count || 0) / denom) || 1
-                        const label = formData.type === 'transport' ? `Genera ${slots} auto (cap. ${denom})` : `Genera ${slots} stanze (cap. ${denom})`
-                        return (
-                          <div className="flex items-center justify-between gap-3">
-                            <span className="text-sm text-gray-700">Partecipanti confermati: <strong>{count}</strong></span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                if (!ev) return
-                                const denomLocal = formData.type === 'transport' ? 5 : 2
-                                const slotsLocal = Math.ceil(((ev.participants || []).filter(p => p.status === 'yes').length || 0) / denomLocal) || 1
-                                const items = Array.from({ length: slotsLocal }, (_, i) => formData.type === 'transport' ? `Auto ${i + 1}` : `Room ${101 + i}`)
-                                setFormData(prev => ({
-                                  ...prev,
-                                  items,
-                                  todoAssignees: items.map(() => []),
-                                  todoDueDates: items.map(() => ''),
-                                }))
-                              }}
-                              className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700"
-                            >
-                              {label}
-                            </button>
-                          </div>
-                        )
-                      })()}
+                <AdvancedSection storageKey="gvn.advanced.listCreate" title="Avanzate">
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-medium text-[--text-muted] mb-1">
+                        Descrizione (opzionale)
+                      </label>
+                      <textarea
+                        value={formData.description}
+                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                        className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-green-500"
+                        rows={3}
+                        placeholder="Aggiungi dettagli alla lista..."
+                      />
                     </div>
-                  )}
-                </div>
+
+                    {/* Evento collegato (opzionale) */}
+                    <div>
+                      <label className="block text-sm font-medium text-[--text-muted] mb-1">
+                        Evento collegato (opzionale)
+                      </label>
+                      <select
+                        value={formData.eventId}
+                        onChange={(e) => setFormData({ ...formData, eventId: e.target.value })}
+                        className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-green-500"
+                      >
+                        <option value="">Nessun evento specifico</option>
+                        {events.map(ev => (
+                          <option key={ev.id} value={ev.id}>{ev.title}</option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-[--text-muted] mt-1">
+                        Collega la lista a un evento specifico
+                      </p>
+
+                      {/* Generatore slot per Macchine/Stanze */}
+                      {(formData.type === 'transport' || formData.type === 'lodging') && formData.eventId && (
+                        <div className="mt-3 p-3 rounded-lg border bg-[--bg-subtle]">
+                          {(() => {
+                            const ev = events.find(e => e.id === formData.eventId)
+                            const participants = (ev?.participants || []).filter(p => p.status === 'yes')
+                            const count = participants.length || 0
+                            const denom = formData.type === 'transport' ? 5 : 2
+                            const slots = Math.ceil((count || 0) / denom) || 1
+                            const label = formData.type === 'transport' ? `Genera ${slots} auto (cap. ${denom})` : `Genera ${slots} stanze (cap. ${denom})`
+                            return (
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-sm text-[--text-muted]">Partecipanti confermati: <strong>{count}</strong></span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    if (!ev) return
+                                    const denomLocal = formData.type === 'transport' ? 5 : 2
+                                    const slotsLocal = Math.ceil(((ev.participants || []).filter(p => p.status === 'yes').length || 0) / denomLocal) || 1
+                                    const items = Array.from({ length: slotsLocal }, (_, i) => formData.type === 'transport' ? `Auto ${i + 1}` : `Room ${101 + i}`)
+                                    setFormData(prev => ({
+                                      ...prev,
+                                      items,
+                                      todoAssignees: items.map(() => []),
+                                      todoDueDates: items.map(() => ''),
+                                    }))
+                                  }}
+                                  className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+                                >
+                                  {label}
+                                </button>
+                              </div>
+                            )
+                          })()}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </AdvancedSection>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                  <label className="block text-sm font-medium text-[--text-muted] mb-2">
                     Elementi della lista
                   </label>
                   {formData.items.map((item, index) => (
@@ -957,7 +1000,7 @@ const ListsPage = () => {
                             }
                           }}
                           ref={(el) => { itemInputRefs.current[index] = el }}
-                          className="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:border-green-500"
+                          className="flex-1 px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-green-500"
                           placeholder={`Elemento ${index + 1}`}
                         />
                         {formData.items.length > 1 && (
@@ -995,8 +1038,8 @@ const ListsPage = () => {
                               />
                               <label
                                 htmlFor={`todo-date-${index}`}
-                                className={`text-[10px] px-2 py-1 rounded border hover:bg-gray-50 cursor-pointer ${
-                                  isPastISO(formData.todoDueDates[index]) ? 'border-red-300 text-red-700 bg-red-50' : 'border-gray-300 text-gray-700'
+                                className={`text-[10px] px-2 py-1 rounded border hover:bg-[--bg-subtle] cursor-pointer ${
+                                  isPastISO(formData.todoDueDates[index]) ? 'bg-red-500/10 border-red-500/30 text-red-600' : 'border-[--border-base] text-[--text-muted]'
                                 }`}
                               >
                                 📅 {formData.todoDueDates[index] ? (() => { const parts = formData.todoDueDates[index].split('-'); const d = parts[2]; const m = parts[1]; return `${d}/${m}` })() : 'Data'}
@@ -1007,15 +1050,15 @@ const ListsPage = () => {
                             <button
                               type="button"
                               onClick={() => setOpenFormAssignees(prev => prev === index ? null : index)}
-                              className="text-[10px] px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                              className="text-[10px] px-2 py-1 rounded border border-[--border-base] text-[--text-muted] hover:bg-[--bg-subtle]"
                             >
                               👤 {(formData.todoAssignees[index] || []).length}
                             </button>
                             {openFormAssignees === index && (
-                              <div className="absolute z-30 right-0 top-8 w-64 max-h-64 overflow-auto bg-white border border-gray-200 rounded-lg shadow-lg p-3">
+                              <div className="absolute z-30 right-0 top-8 w-64 max-h-64 overflow-auto bg-[--bg-card] border border-[--border-base] rounded-lg shadow-lg p-3">
                                 <div className="flex items-center justify-between mb-2">
-                                  <div className="text-sm font-medium text-gray-700">Assegna partecipanti</div>
-                                  <button onClick={() => setOpenFormAssignees(null)} className="text-gray-500 hover:text-gray-700">✖</button>
+                                  <div className="text-sm font-medium text-[--text-muted]">Assegna partecipanti</div>
+                                  <button onClick={() => setOpenFormAssignees(null)} className="text-[--text-muted] hover:text-[--text-muted]">✖</button>
                                 </div>
                                 {formData.eventId ? (
                                   <div className="space-y-2">
@@ -1052,7 +1095,7 @@ const ListsPage = () => {
                                     })}
                                   </div>
                                 ) : (
-                                  <div className="text-xs text-gray-500">Nessun evento collegato. Aggiungi manualmente.</div>
+                                  <div className="text-xs text-[--text-muted]">Nessun evento collegato. Aggiungi manualmente.</div>
                                 )}
                                 <div className="mt-3 border-t pt-2">
                                   <button
@@ -1091,19 +1134,19 @@ const ListsPage = () => {
                   <button
                     type="button"
                     onClick={addFormItem}
-                    className="w-full py-2 border-2 border-dashed border-gray-300 rounded-lg text-gray-600 hover:border-green-500 hover:text-green-600 transition-colors"
+                    className="w-full py-2 border-2 border-dashed border-[--border-base] rounded-lg text-[--text-muted] hover:border-green-500 hover:text-green-600 transition-colors"
                   >
                     + Aggiungi elemento
                   </button>
                   {formData.type === 'todo' && (
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-xs text-[--text-muted] mt-2">
                       Suggerimento: per le liste To-do puoi modificare stato, scadenza e assegnatari direttamente dalla lista dopo il salvataggio.
                     </p>
                   )}
                 </div>
                 {/* Fixed action bar: guaranteed above mobile bottom UI */}
-                <div className="fixed left-1/2 -translate-x-1/2 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[60] w-full max-w-md px-6">
-                  <div className="bg-white border rounded-xl shadow-md px-4 py-3 flex space-x-3">
+                <div className="sticky bottom-0 z-10 pt-3 pb-[env(safe-area-inset-bottom)]">
+                  <div className="bg-[--bg-card] border border-[--border-base] rounded-xl shadow-md px-4 py-3 flex space-x-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -1111,7 +1154,7 @@ const ListsPage = () => {
                       setEditingList(null)
                       setFormData({ title: '', description: '', items: [''], todoDueDates: [''], todoAssignees: [[]], eventId: '', type: 'shopping' })
                     }}
-                    className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
+                    className="flex-1 px-4 py-2 border border-[--border-base] text-[--text-muted] rounded-lg hover:bg-[--bg-subtle] transition-colors"
                     disabled={submitting}
                   >
                     Annulla
@@ -1130,22 +1173,10 @@ const ListsPage = () => {
           </div>
         </div>
       )}
-
-      {/* Bottone Mobile */}
-      <div className="fixed bottom-28 right-6 md:bottom-8 z-40">
-        <button
-          onClick={() => setShowForm(true)}
-          className="bg-green-500 hover:bg-green-600 text-white p-4 rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 hover:scale-110 ring-4 ring-green-100"
-          title="Crea nuova lista"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
-      </div>
     </div>
   )
 }
 
 export default ListsPage
  
+

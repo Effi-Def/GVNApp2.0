@@ -7,6 +7,7 @@ import { storage } from '../firebase/config'
 import { ref, getDownloadURL, listAll } from 'firebase/storage'
 import { loadCachedAvatars, saveCachedAvatars, prefetchImages } from '../utils/avatarCache'
 import AdvancedSection from '../components/AdvancedSection'
+import ExportDataButton from '../components/ExportDataButton'
 import { useDarkMode, ThemePreference } from '../hooks/useDarkMode'
 
 // ── Shared section card ────────────────────────────────────────────────────
@@ -179,7 +180,13 @@ const SettingsPage: React.FC = () => {
             🔔 Notifiche
           </button>
           <button type="button" className={btnSecondary} onClick={() => navigate('/settings/farms')}>
-            🐷 Gruppi
+            🐷 Fattorie
+          </button>
+          <button type="button" className={btnSecondary} onClick={() => navigate('/legal/privacy')}>
+            Privacy
+          </button>
+          <button type="button" className={btnSecondary} onClick={() => navigate('/legal/terms')}>
+            Termini
           </button>
           <button
             type="button"
@@ -197,6 +204,14 @@ const SettingsPage: React.FC = () => {
             🚪 Logout
           </button>
         </div>
+      </Section>
+
+      {/* ── Privacy & Dati ── */}
+      <Section title="Privacy e dati">
+        <p className="text-sm text-[--text-muted]">
+          Scarica una copia di tutti i tuoi dati personali archiviati nell'app (GDPR Art. 20).
+        </p>
+        <ExportDataButton />
       </Section>
 
       {/* ── Sezione avanzata ── */}

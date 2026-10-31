@@ -144,16 +144,16 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
         // Stronger green for better visibility
         return { label: 'bg-green-100 text-green-800 hover:bg-green-200', dot: 'bg-green-600 hover:bg-green-700' }
       case 'maybe':
-        return { label: 'bg-gray-50 text-gray-700 hover:bg-gray-100', dot: 'bg-gray-400 hover:bg-gray-500' }
+        return { label: 'bg-[--bg-subtle] text-[--text-muted] hover:bg-[--bg-raised]', dot: 'bg-gray-400 hover:bg-[--bg-subtle]0' }
       case 'no':
-        return { label: 'bg-gray-100 text-gray-700 hover:bg-gray-200', dot: 'bg-gray-500 hover:bg-gray-600' }
+        return { label: 'bg-[--bg-raised] text-[--text-muted] hover:bg-[--bg-raised]', dot: 'bg-[--bg-subtle]0 hover:bg-gray-600' }
       default: // none → nuovo
         return { label: 'bg-red-50 text-red-700 hover:bg-red-100', dot: 'bg-red-500 hover:bg-red-600' }
     }
   }
 
   return (
-    <div className={`bg-white rounded-xl shadow-sm border border-gray-200 ${compact ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
+    <div className={`bg-[--bg-card] rounded-xl shadow-sm border border-[--border-base] ${compact ? 'p-3 sm:p-4' : 'p-4 sm:p-6'}`}>
       <div className={`flex items-center justify-between ${compact ? 'mb-2' : 'mb-4'}`}>
         {/* Left controls */}
         <div className="flex items-center gap-1">
@@ -161,7 +161,7 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
             type="button"
             aria-label="Mese precedente"
             onClick={() => changeMonth(-1)}
-            className={`rounded-md border border-gray-200 ${compact ? 'p-1' : 'p-1.5'} hover:bg-gray-50`}
+            className={`rounded-md border border-[--border-base] ${compact ? 'p-1' : 'p-1.5'} hover:bg-[--bg-subtle]`}
             title="Mese precedente"
           >
             ‹
@@ -170,14 +170,14 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
             type="button"
             aria-label="Mese successivo"
             onClick={() => changeMonth(1)}
-            className={`rounded-md border border-gray-200 ${compact ? 'p-1' : 'p-1.5'} hover:bg-gray-50`}
+            className={`rounded-md border border-[--border-base] ${compact ? 'p-1' : 'p-1.5'} hover:bg-[--bg-subtle]`}
             title="Mese successivo"
           >
             ›
           </button>
         </div>
 
-        <h2 className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-gray-900 capitalize`}>{monthLabel}</h2>
+        <h2 className={`${compact ? 'text-base' : 'text-lg'} font-semibold text-[--text-base] capitalize`}>{monthLabel}</h2>
 
         {/* Right controls */}
         <div className="flex items-center gap-1">
@@ -185,7 +185,7 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
             type="button"
             aria-label="Mese precedente"
             onClick={() => changeMonth(-1)}
-            className={`rounded-md border border-gray-200 ${compact ? 'p-1' : 'p-1.5'} hover:bg-gray-50`}
+            className={`rounded-md border border-[--border-base] ${compact ? 'p-1' : 'p-1.5'} hover:bg-[--bg-subtle]`}
             title="Mese precedente"
           >
             ‹
@@ -194,7 +194,7 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
             type="button"
             aria-label="Oggi"
             onClick={goToToday}
-            className={`rounded-md border border-gray-200 ${compact ? 'px-2 py-1 text-[10px]' : 'px-2.5 py-1.5 text-xs'} hover:bg-gray-50 hidden lg:inline`}
+            className={`rounded-md border border-[--border-base] ${compact ? 'px-2 py-1 text-[10px]' : 'px-2.5 py-1.5 text-xs'} hover:bg-[--bg-subtle] hidden lg:inline`}
             title="Torna al mese corrente"
           >
             Oggi
@@ -203,7 +203,7 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
             type="button"
             aria-label="Mese successivo"
             onClick={() => changeMonth(1)}
-            className={`rounded-md border border-gray-200 ${compact ? 'p-1' : 'p-1.5'} hover:bg-gray-50`}
+            className={`rounded-md border border-[--border-base] ${compact ? 'p-1' : 'p-1.5'} hover:bg-[--bg-subtle]`}
             title="Mese successivo"
           >
             ›
@@ -212,7 +212,7 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
       </div>
 
       {/* Weekdays header */}
-      <div className={`grid grid-cols-7 ${compact ? 'gap-1.5' : 'gap-2'} text-center text-[10px] sm:text-xs font-medium text-gray-500 ${compact ? 'mb-1.5' : 'mb-2'}`}>
+      <div className={`grid grid-cols-7 ${compact ? 'gap-1.5' : 'gap-2'} text-center text-[10px] sm:text-xs font-medium text-[--text-muted] ${compact ? 'mb-1.5' : 'mb-2'}`}>
         {weekdays.map((w) => (
           <div key={w}>{w}</div>
         ))}
@@ -245,12 +245,12 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
           }
 
           const bgClass = !inMonth
-            ? 'bg-gray-50 border-gray-200/60 text-gray-400'
+            ? 'bg-[--bg-subtle] border-[--border-base]/60 text-[--text-muted]'
             : dayColor === 'red'
             ? 'bg-red-50 border-red-200'
             : dayColor === 'green'
             ? 'bg-green-100 border-green-300'
-            : 'bg-white border-gray-200'
+            : 'bg-[--bg-card] border-[--border-base]'
 
           const handleDayClick = () => {
             if (dayEvents.length === 0) {
@@ -316,13 +316,13 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
               {/* Balloon chooser with list and + (all sizes) */}
               {openDay === key && dayEvents.length >= 1 && (
                 <div
-                  className="absolute left-1/2 -translate-x-1/2 bottom-1 z-30 bg-white border border-gray-200 rounded-md shadow-lg p-2 space-y-2
+                  className="absolute left-1/2 -translate-x-1/2 bottom-1 z-30 bg-[--bg-card] border border-[--border-base] rounded-md shadow-lg p-2 space-y-2
                              w-[92vw] sm:w-[85vw] md:w-[75vw] lg:w-[60vw] xl:w-[50vw] max-w-5xl min-w-[18rem]
                              max-h-[80vh] overflow-auto"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex items-center justify-between gap-2 px-1 py-0.5">
-                    <span className="text-[11px] text-gray-600">{dayEvents.length} evento{dayEvents.length > 1 ? 'i' : ''}</span>
+                    <span className="text-[11px] text-[--text-muted]">{dayEvents.length} evento{dayEvents.length > 1 ? 'i' : ''}</span>
                     {onCreateEvent && (
                       <button
                         onClick={() => { onCreateEvent(startOfDay(d)); setOpenDay(null) }}
@@ -361,3 +361,4 @@ const MonthCalendar = ({ events, onSelectEvent, date, compact = false, onMonthCh
 }
 
 export default MonthCalendar
+

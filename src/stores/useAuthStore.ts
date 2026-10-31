@@ -3,6 +3,7 @@ import { User } from '../types'
 import { auth } from '../firebase/config'
 import { signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth'
 import { useActiveFarmStore } from './useActiveFarmStore'
+import { useNotificationsStore } from './useNotificationsStore'
 import { getUserKeys, userCanViewEvent } from '../utils/events'
 import { eventService, expenseService, pollService, listService, userPrivateService } from '../services/firestore'
 import { useAppStore } from './AppStore'
@@ -38,7 +39,9 @@ export const useAuthStore = create<AuthState>((set) => ({
   
   logout: async () => {
     try {
+      const prevUserId = useAuthStore.getState().user?.id || null
       await signOut(auth)
+      clearUserData(prevUserId)
       set({ user: null })
     } catch (error) {
       console.error('Errore durante il logout:', error)
@@ -178,7 +181,7 @@ async function _doRefreshActiveFarmData() {
 }
 
 // Funzione per pulire i dati al logout
-export function clearUserData() {
+export function clearUserData(userId?: string | null) {
   const { setEvents, setExpenses, setPolls, setLists } = useAppStore.getState()
   setEvents([])
   setExpenses([])
@@ -193,5 +196,21 @@ export function clearUserData() {
       farms: [],
       activeFarmId: null,
     })
+  } catch {}
+
+  try {
+    useNotificationsStore.getState().reset()
+  } catch {}
+
+  // Clear persisted caches to avoid cross-account state bleed on shared devices.
+  try {
+    localStorage.removeItem('gvn-app-store')
+    localStorage.removeItem('gvn-notifications-storage')
+    localStorage.removeItem('gvn-chat-lastread') // legacy key (pre user-scoped migration)
+    if (userId) {
+      localStorage.removeItem(`gvn.activeFarm.${userId}`)
+      localStorage.removeItem(`gvn-chat-lastread:${userId}`)
+      localStorage.removeItem(`gvn-notification-settings:${userId}`)
+    }
   } catch {}
 }

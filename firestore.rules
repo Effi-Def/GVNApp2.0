@@ -2,6 +2,11 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     // Helper functions
+    /** Returns true when the updated document's reactions map has ≤ 8 keys. */
+    function reactionsOk(data) {
+      return !('reactions' in data) || data.reactions.size() <= 8;
+    }
+
     function isSignedIn() {
       return request.auth != null;
     }
@@ -10,14 +15,103 @@ service cloud.firestore {
       return request.auth.uid == userId;
     }
 
+    function userFarmIds() {
+      return exists(/databases/$(database)/documents/userPrivate/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/userPrivate/$(request.auth.uid)).data.farmIds
+        : [];
+    }
+
     function isParticipant(data) {
       return ('participantIds' in data) && (request.auth.uid in data.participantIds);
+    }
+
+    function eventCutoffTime(data) {
+      // Use the event's start date as the visibility cutoff for new farm members.
+      // Legacy events without `date` fall back to request.time so they are always
+      // visible (permissive): createdAt is not a reliable proxy for the event date.
+      return ('date' in data) ? data.date : request.time;
+    }
+
+    function canViewFarmEvent(data, farmId) {
+      return exists(/databases/$(database)/documents/farms/$(farmId)/members/$(request.auth.uid)) &&
+        (
+          ('joinedAt' in get(/databases/$(database)/documents/farms/$(farmId)/members/$(request.auth.uid)).data) &&
+          (eventCutoffTime(data) >= get(/databases/$(database)/documents/farms/$(farmId)/members/$(request.auth.uid)).data.joinedAt)
+        );
+    }
+
+    function canViewViaAnyFarm(data, farms) {
+      // Firestore rules don't support loops: unroll a bounded number of farm ids.
+      return (farms is list) && (
+        (farms.size() > 0 && canViewFarmEvent(data, farms[0])) ||
+        (farms.size() > 1 && canViewFarmEvent(data, farms[1])) ||
+        (farms.size() > 2 && canViewFarmEvent(data, farms[2])) ||
+        (farms.size() > 3 && canViewFarmEvent(data, farms[3])) ||
+        (farms.size() > 4 && canViewFarmEvent(data, farms[4])) ||
+        (farms.size() > 5 && canViewFarmEvent(data, farms[5])) ||
+        (farms.size() > 6 && canViewFarmEvent(data, farms[6])) ||
+        (farms.size() > 7 && canViewFarmEvent(data, farms[7])) ||
+        (farms.size() > 8 && canViewFarmEvent(data, farms[8])) ||
+        (farms.size() > 9 && canViewFarmEvent(data, farms[9]))
+      );
     }
 
     function isVisibleByVisibility(data) {
       return ('visibility' in data) && (
         (data.visibility.type == 'public') ||
-        (data.visibility.type == 'restricted' && ('users' in data.visibility) && (request.auth.uid in data.visibility.users))
+        (
+          data.visibility.type == 'restricted' && (
+            (('users' in data.visibility) && (request.auth.uid in data.visibility.users)) ||
+            (
+              ('farms' in data.visibility) &&
+              // quick intersection check + joinedAt cutoff per farm
+              ((data.visibility.farms is list) && data.visibility.farms.hasAny(userFarmIds())) &&
+              canViewViaAnyFarm(data, data.visibility.farms)
+            )
+          )
+        )
+      );
+    }
+
+    function validVisibilityOnWrite(data) {
+      // If visibility includes farms, the writer must be a member of those farms.
+      return !('visibility' in data) ||
+        (data.visibility.type == 'public') ||
+        !('farms' in data.visibility) ||
+        (
+          (data.visibility.farms is list) &&
+          data.visibility.farms.size() <= 10 &&
+          data.visibility.farms.hasOnly(userFarmIds())
+        );
+    }
+
+    function isFarmMember(farmId) {
+      return exists(/databases/$(database)/documents/farms/$(farmId)/members/$(request.auth.uid));
+    }
+
+    // Allow a user to add themselves as a member using a valid invite token.
+    // The client must include `inviteToken` in the member document so the rule can validate it.
+    function canSelfJoinWithToken(farmId, memberId) {
+      let providedToken = request.resource.data.get('inviteToken', null);
+      return memberId == request.auth.uid
+        && request.resource.data.get('role', '') == 'member'
+        && request.resource.data.get('accessLevel', '') == 'full'
+        && providedToken != null
+        && exists(/databases/$(database)/documents/farmInvites/$(providedToken))
+        && get(/databases/$(database)/documents/farmInvites/$(providedToken)).data.farmId == farmId
+        && get(/databases/$(database)/documents/farmInvites/$(providedToken)).data.active == true;
+    }
+
+    function isFarmOwner(farmId) {
+      return (
+        (
+          exists(/databases/$(database)/documents/farms/$(farmId)) &&
+          get(/databases/$(database)/documents/farms/$(farmId)).data.ownerId == request.auth.uid
+        ) ||
+        (
+          exists(/databases/$(database)/documents/farms/$(farmId)/members/$(request.auth.uid)) &&
+          get(/databases/$(database)/documents/farms/$(farmId)/members/$(request.auth.uid)).data.role == 'owner'
+        )
       );
     }
 
@@ -36,7 +130,41 @@ service cloud.firestore {
     }
 
     function isSharedWith(data) {
-      return ('sharedWith' in data) && (request.auth.uid in data.sharedWith);
+      return ('sharedWith' in data) && (
+        ((data.sharedWith is list) && data.sharedWith.hasAny([request.auth.uid])) ||
+        ((data.sharedWith is map) && (request.auth.uid in data.sharedWith))
+      );
+    }
+
+    function canReadEventById(eventId) {
+      return exists(/databases/$(database)/documents/events/$(eventId)) && (
+        // Match the main /events/{eventId} read logic
+        (get(/databases/$(database)/documents/events/$(eventId)).data.publicShareEnabled == true) ||
+        isVisibleByVisibility(get(/databases/$(database)/documents/events/$(eventId)).data) ||
+        isParticipant(get(/databases/$(database)/documents/events/$(eventId)).data) ||
+        (get(/databases/$(database)/documents/events/$(eventId)).data.createdBy == request.auth.uid) ||
+        !('participantIds' in get(/databases/$(database)/documents/events/$(eventId)).data)
+      );
+    }
+
+    function canWriteEventContent(eventId) {
+      return exists(/databases/$(database)/documents/events/$(eventId)) && (
+        // creator
+        (get(/databases/$(database)/documents/events/$(eventId)).data.createdBy == request.auth.uid) ||
+        // participation map (preferred)
+        (
+          ('participation' in get(/databases/$(database)/documents/events/$(eventId)).data) &&
+          (request.auth.uid in get(/databases/$(database)/documents/events/$(eventId)).data.participation) &&
+          (get(/databases/$(database)/documents/events/$(eventId)).data.participation[request.auth.uid].accessLevel == 'full') &&
+          (get(/databases/$(database)/documents/events/$(eventId)).data.participation[request.auth.uid].status != 'no')
+        ) ||
+        // legacy participantIds
+        (
+          !('participation' in get(/databases/$(database)/documents/events/$(eventId)).data) &&
+          ('participantIds' in get(/databases/$(database)/documents/events/$(eventId)).data) &&
+          (request.auth.uid in get(/databases/$(database)/documents/events/$(eventId)).data.participantIds)
+        )
+      );
     }
 
     // Allow a signed-in user to join an event by adding themselves to participantIds/participants.
@@ -51,14 +179,41 @@ service cloud.firestore {
         (!('participantIds' in resource.data) || request.resource.data.participantIds.hasAll(resource.data.participantIds)) &&
         // If participantIds existed, only one new id can be added (the caller)
         (!('participantIds' in resource.data) || request.resource.data.participantIds.size() == resource.data.participantIds.size() + 1) &&
-        // Non-participants may only touch these fields while joining
-        request.resource.data.diff(resource.data).changedKeys().hasOnly(['participants', 'participantIds', 'participation', 'updatedAt']);
+        // Non-participants may only touch these fields while joining (affectedKeys covers added+changed+removed)
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants', 'participantIds', 'participation', 'updatedAt']);
     }
-    
+
+    // Helper: check if authenticated user can read the given list document (and its items)
+    function canReadList(listId) {
+      let d = get(/databases/$(database)/documents/lists/$(listId)).data;
+      return d.createdBy == request.auth.uid
+        || isSharedWith(d)
+        || (('eventId' in d) && canReadEventById(d.eventId));
+    }
+
+    // Helper: check if authenticated user can modify the given list document (and its items)
+    function canModifyList(listId) {
+      let d = get(/databases/$(database)/documents/lists/$(listId)).data;
+      return d.createdBy == request.auth.uid
+        || isSharedWith(d)
+        || (('eventId' in d) && canWriteEventContent(d.eventId));
+    }
+
+    function canReadPollData(data) {
+      return (data.createdBy == request.auth.uid)
+        || (
+          ('eventId' in data) &&
+          (data.eventId is string) &&
+          (data.eventId.size() > 0) &&
+          canReadEventById(data.eventId)
+        );
+    }
+
     // Users collection
     match /users/{userId} {
-      // Anyone authenticated can read user profiles
-      allow read: if isSignedIn();
+      // Profiles are readable by id only: listing would expose a global user directory
+      allow get: if isSignedIn();
+      allow list: if false;
       // Users can only write their own profile
       allow write: if isSignedIn() && isOwner(userId);
 
@@ -70,6 +225,39 @@ service cloud.firestore {
         // Owner can mark as read / delete
         allow update, delete: if isSignedIn() && isOwner(userId);
       }
+    }
+
+    // Private per-user metadata (farm membership ids, etc.)
+    match /userPrivate/{userId} {
+      allow read, write: if isSignedIn() && isOwner(userId);
+    }
+
+    // Fattorie (farms)
+    match /farms/{farmId} {
+      allow read: if isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId));
+      allow create: if isSignedIn() && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isSignedIn() && isFarmOwner(farmId);
+
+      match /members/{memberId} {
+        allow read: if isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId));
+        allow create, update: if isSignedIn() && (isFarmOwner(farmId) || canSelfJoinWithToken(farmId, memberId));
+        allow delete: if isSignedIn() && (isFarmOwner(farmId) || memberId == request.auth.uid);
+      }
+
+      match /joinRequests/{requestId} {
+        allow create: if isSignedIn() && requestId == request.auth.uid && request.resource.data.userId == request.auth.uid;
+        allow read: if isSignedIn() && (isFarmOwner(farmId) || requestId == request.auth.uid);
+        allow update: if isSignedIn() && (isFarmOwner(farmId) || requestId == request.auth.uid);
+        allow delete: if false;
+      }
+    }
+
+    // Invite tokens (document id = token)
+    match /farmInvites/{tokenId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid && isFarmOwner(request.resource.data.farmId);
+      allow delete: if isSignedIn() && isFarmOwner(resource.data.farmId);
+      allow update: if false;
     }
     
     // Events collection
@@ -83,13 +271,31 @@ service cloud.firestore {
         resource.data.createdBy == request.auth.uid ||
         !('participantIds' in resource.data)
       );
-      // Anyone authenticated can create events
-      allow create: if isSignedIn();
-      // Creator can do anything, participants can update their participation
-      allow update: if isSignedIn() && 
+      // Anyone authenticated can create events, but farm visibility can only target farms they belong to
+      allow create: if isSignedIn() && validVisibilityOnWrite(request.resource.data);
+      // Creator has full control; full-access participants may also edit event content;
+      // any other participant is limited to participation/RSVP/date-vote fields only.
+      allow update: if isSignedIn() &&
         (
-          resource.data.createdBy == request.auth.uid || 
-          isParticipant(resource.data) ||
+          // Event creator: full update + farm-visibility validation
+          (resource.data.createdBy == request.auth.uid && validVisibilityOnWrite(request.resource.data)) ||
+          // Full-access participants (status != 'no') may edit event content
+          (
+            isParticipant(resource.data) &&
+            ('participation' in resource.data) &&
+            (request.auth.uid in resource.data.participation) &&
+            (resource.data.participation[request.auth.uid].accessLevel == 'full') &&
+            (resource.data.participation[request.auth.uid].status != 'no') &&
+            validVisibilityOnWrite(request.resource.data)
+          ) ||
+          // Any participant may only touch participation/RSVP/date-vote fields (no content edits)
+          (
+            isParticipant(resource.data) &&
+            request.resource.data.diff(resource.data).changedKeys().hasOnly(
+              ['participants', 'participantIds', 'participation', 'updatedAt', 'chatLastActivityAt', 'dateVotes']
+            )
+          ) ||
+          // First-time self-join
           canJoinEvent()
         );
       allow delete: if isSignedIn() && resource.data.createdBy == request.auth.uid;
@@ -97,30 +303,53 @@ service cloud.firestore {
     
     // Event participants subcollection
     match /events/{eventId}/participants/{participantId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+      allow read: if isSignedIn() && canReadEventById(eventId);
+      allow create: if isSignedIn() && isOwner(participantId);
+      allow update, delete: if isSignedIn() && (
+        isOwner(participantId) ||
+        get(/databases/$(database)/documents/events/$(eventId)).data.createdBy == request.auth.uid
+      );
     }
     
     // Event messages subcollection (chat)
     match /events/{eventId}/messages/{messageId} {
       allow read, create: if isSignedIn() && canChatEvent(get(/databases/$(database)/documents/events/$(eventId)).data);
-      
-      allow update, delete: if isSignedIn() && 
+
+      // Author can edit/delete their own message within 15 minutes.
+      // Any chat participant can toggle reactions (only `reactions` field changes,
+      // max 8 distinct emoji enforced via reactionsOk()).
+      allow update: if isSignedIn() && (
+        (resource.data.userId == request.auth.uid
+          && request.time < resource.data.createdAt + duration.value(15, 'm'))
+        || (canChatEvent(get(/databases/$(database)/documents/events/$(eventId)).data)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+          && reactionsOk(request.resource.data))
+      );
+      allow delete: if isSignedIn() &&
         resource.data.userId == request.auth.uid &&
         request.time < resource.data.createdAt + duration.value(15, 'm');
+
+      // Threaded replies
+      match /replies/{replyId} {
+        allow read: if isSignedIn() && canChatEvent(get(/databases/$(database)/documents/events/$(eventId)).data);
+        allow create: if isSignedIn()
+          && canChatEvent(get(/databases/$(database)/documents/events/$(eventId)).data)
+          && request.resource.data.userId == request.auth.uid;
+        allow update, delete: if isSignedIn()
+          && resource.data.userId == request.auth.uid
+          && request.time < resource.data.createdAt + duration.value(15, 'm');
+      }
     }
     
-    // Chats collection (if used elsewhere)
+    // Chats collection — LEGACY, no longer used. All chat is via events/{eventId}/messages.
+    // Locked to prevent unintentional writes from old clients.
     match /chats/{chatId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
+      allow read, write: if false;
     }
     
-    // Chat messages subcollection (if used elsewhere)
+    // Chat messages subcollection — LEGACY
     match /chats/{chatId}/messages/{messageId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow read, write: if false;
     }
     
     // Expenses collection
@@ -130,7 +359,15 @@ service cloud.firestore {
         resource.data.paidBy == request.auth.uid ||
         !('participantIds' in resource.data)
       );
-      allow create: if isSignedIn();
+      // The payer can be another participant when the creator can write on the event
+      allow create: if isSignedIn() &&
+        (request.resource.data.paidBy == request.auth.uid ||
+          (request.resource.data.createdBy == request.auth.uid &&
+           canWriteEventContent(request.resource.data.eventId))) &&
+        ('eventId' in request.resource.data) &&
+        (request.resource.data.eventId is string) &&
+        (request.resource.data.eventId.size() > 0) &&
+        exists(/databases/$(database)/documents/events/$(request.resource.data.eventId));
       allow update, delete: if isSignedIn() && 
         (resource.data.paidBy == request.auth.uid || 
          isParticipant(resource.data));
@@ -139,41 +376,73 @@ service cloud.firestore {
     // Lists collection
     match /lists/{listId} {
       allow read: if isSignedIn() && (
-        resource.data.createdBy == request.auth.uid ||
-        isSharedWith(resource.data)
+        (resource.data.createdBy == request.auth.uid) ||
+        isSharedWith(resource.data) ||
+        (('eventId' in resource.data) && canReadEventById(resource.data.eventId))
       );
-      allow create: if isSignedIn();
-      allow update, delete: if isSignedIn() && 
-        (resource.data.createdBy == request.auth.uid ||
-         isSharedWith(resource.data));
+
+      allow create: if isSignedIn() && (
+        (request.resource.data.createdBy == request.auth.uid) &&
+        (!('eventId' in request.resource.data) || canWriteEventContent(request.resource.data.eventId))
+      );
+
+      allow update, delete: if isSignedIn() && (
+        (resource.data.createdBy == request.auth.uid) ||
+        isSharedWith(resource.data) ||
+        (('eventId' in resource.data) && canWriteEventContent(resource.data.eventId))
+      );
     }
     
-    // List items subcollection
+    // List items subcollection — inherits access control from the parent list
     match /lists/{listId}/items/{itemId} {
-      allow read: if isSignedIn();
-      allow write: if isSignedIn();
+      allow read: if isSignedIn() && canReadList(listId);
+      allow write: if isSignedIn() && canModifyList(listId);
     }
     
+    // Payment transactions collection
+    match /payments/{paymentId} {
+      // Only the payer or receiver can read their own payments
+      allow read: if isSignedIn() && (
+        resource.data.fromUserId == request.auth.uid ||
+        resource.data.toUserId == request.auth.uid
+      );
+      // Only the payer can create a payment on their own behalf
+      allow create: if isSignedIn() &&
+        request.resource.data.fromUserId == request.auth.uid;
+      // Only the payer can update/delete
+      allow update, delete: if isSignedIn() &&
+        resource.data.fromUserId == request.auth.uid;
+    }
+
     // Polls collection
     match /polls/{pollId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
+      allow read: if isSignedIn() && canReadPollData(resource.data);
+      // Creator must either have no eventId (personal poll) or have write access on the linked event.
+      allow create: if isSignedIn() &&
+        request.resource.data.createdBy == request.auth.uid &&
+        (
+          !('eventId' in request.resource.data) ||
+          request.resource.data.eventId == null ||
+          canWriteEventContent(request.resource.data.eventId)
+        );
       allow update, delete: if isSignedIn() && 
         resource.data.createdBy == request.auth.uid;
     }
     
     // Poll votes subcollection
     match /polls/{pollId}/votes/{voteId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn() &&
+        exists(/databases/$(database)/documents/polls/$(pollId)) &&
+        canReadPollData(get(/databases/$(database)/documents/polls/$(pollId)).data);
       allow create: if isSignedIn() && isOwner(voteId);
       allow update, delete: if isSignedIn() && isOwner(voteId);
     }
     
-    // Notifications collection
+    // Notifications collection (top-level) — written server-side by Cloud Functions only
     match /notifications/{notificationId} {
       allow read: if isSignedIn() && 
         resource.data.userId == request.auth.uid;
-      allow create: if isSignedIn();
+      allow create: if false; // Must be created by Cloud Functions, not the client
       allow update, delete: if isSignedIn() && 
         resource.data.userId == request.auth.uid;
     }
@@ -186,7 +455,83 @@ service cloud.firestore {
     // Public events (read-only for unauthenticated users)
     match /publicEvents/{eventId} {
       allow read: if true;
-      allow write: if isSignedIn();
+      // Must be written server-side (Cloud Functions/Admin SDK bypasses rules).
+      allow write: if false;
+    }
+
+    // ── Farm channels ──────────────────────────────────────────────────────
+    // channels/{channelId}: visible to all farm members; create/archive by owner only.
+    match /farms/{farmId}/channels/{channelId} {
+      allow read: if isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId));
+
+      // Owner creates; isArchived must be false on creation.
+      allow create: if isFarmOwner(farmId)
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.isArchived == false
+        && request.resource.data.keys().hasOnly([
+             'farmId', 'name', 'description', 'createdAt', 'createdBy',
+             'isDefault', 'isArchived', 'lastMessageAt', 'lastMessagePreview'
+           ]);
+
+      // Owner may rename/archive; any member may bump lastMessageAt after sending.
+      allow update: if
+        (isFarmOwner(farmId)
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['name', 'description', 'isArchived', 'updatedAt']))
+        || (isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId))
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['lastMessageAt', 'lastMessagePreview', 'updatedAt']));
+
+      allow delete: if false; // archive instead
+
+      // ── Channel messages ──────────────────────────────────────────────
+      match /messages/{msgId} {
+        allow read: if isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId));
+        allow create: if isSignedIn()
+          && (isFarmMember(farmId) || isFarmOwner(farmId))
+          && request.resource.data.userId == request.auth.uid;
+        // Author: edit within 15 min. Any farm member: toggle reactions only (max 8 types).
+        allow update: if isSignedIn() && (
+          (resource.data.userId == request.auth.uid
+            && request.time < resource.data.createdAt + duration.value(15, 'm'))
+          || ((isFarmMember(farmId) || isFarmOwner(farmId))
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reactions'])
+            && reactionsOk(request.resource.data))
+        );
+        allow delete: if isSignedIn()
+          && resource.data.userId == request.auth.uid
+          && request.time < resource.data.createdAt + duration.value(15, 'm');
+
+        // Threaded replies
+        match /replies/{replyId} {
+          allow read: if isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId));
+          allow create: if isSignedIn()
+            && (isFarmMember(farmId) || isFarmOwner(farmId))
+            && request.resource.data.userId == request.auth.uid;
+          allow update, delete: if isSignedIn()
+            && resource.data.userId == request.auth.uid
+            && request.time < resource.data.createdAt + duration.value(15, 'm');
+        }
+      }
+
+      // ── Presence: read receipts ───────────────────────────────────────
+      match /participants/{uid} {
+        allow read: if isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId));
+        allow write: if isSignedIn() && request.auth.uid == uid;
+      }
+
+      // ── Presence: typing indicators ──────────────────────────────────
+      match /typing/{uid} {
+        allow read: if isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId));
+        allow write: if isSignedIn() && request.auth.uid == uid;
+      }
+    }
+
+    // ── Per-user channel read timestamps ───────────────────────────────────
+    // Stored under userPrivate/{uid}/channelReads/{channelId} so that the
+    // unread-badge logic does not need a global query across all channels.
+    match /userPrivate/{userId}/channelReads/{channelId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
     }
   }
 }
