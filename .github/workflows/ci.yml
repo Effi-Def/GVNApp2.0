@@ -7,10 +7,16 @@ on:
       - main
       - master
 
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   web:
     name: Web Build and Lint
-    runs-on: ubuntu-latest
+    # Playwright 1.58 does not support ubuntu-latest (26.04) yet
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,15 +30,53 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+
       - name: Lint
         run: npm run lint
 
+      - name: Test
+        run: npm run test:run
+
+      # Placeholder values: the E2E smoke uses the mock runtime, never a real Firebase project
       - name: Build
         run: npm run build
+        env:
+          VITE_E2E: '1'
+          VITE_FIREBASE_API_KEY: demo-api-key
+          VITE_FIREBASE_AUTH_DOMAIN: demo-gvnapp.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: demo-gvnapp
+          VITE_FIREBASE_STORAGE_BUCKET: demo-gvnapp.appspot.com
+          VITE_FIREBASE_MESSAGING_SENDER_ID: '000000000000'
+          VITE_FIREBASE_APP_ID: 1:000000000000:web:demo
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+
+      - name: E2E Smoke
+        run: npm run test:e2e
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report
+            test-results
+          if-no-files-found: ignore
+          retention-days: 14
 
   functions:
     name: Functions Build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: functions

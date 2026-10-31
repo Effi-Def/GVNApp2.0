@@ -1,4 +1,5 @@
 import { Expense, PaymentTransaction } from '../types'
+import { roundTo2 } from '../services/firestoreMappers'
 
 export interface Balance {
   userId: string
@@ -23,25 +24,32 @@ export const calculateBalances = (expenses: Expense[], payments: PaymentTransact
     if (!participants || participants.length === 0) return
 
     // Payer gets credit for the full amount
-    balances[payerId] = (balances[payerId] || 0) + amount
+    balances[payerId] = roundTo2((balances[payerId] || 0) + amount)
 
     // Each participant (including payer if they are one) gets debit for their share
-    // Note: We assume equal split for now based on current app logic, 
-    // but we should respect expense.participants[i].amount if available/reliable
     participants.forEach(p => {
-      // Use the specific amount if calculated, otherwise split equally
-      const share = p.amount || (amount / participants.length)
-      balances[p.userId] = (balances[p.userId] || 0) - share
+      let share: number
+      if (expense.splitType === 'percentage' && typeof p.percentage === 'number') {
+        // Recalculate from stored percentage to avoid accumulated rounding drift
+        share = roundTo2(amount * p.percentage / 100)
+      } else if (p.amount > 0) {
+        // Equal or custom split: use the pre-computed per-person amount
+        share = p.amount
+      } else {
+        // Fallback: legacy data without pre-computed amounts → equal split
+        share = roundTo2(amount / participants.length)
+      }
+      balances[p.userId] = roundTo2((balances[p.userId] || 0) - share)
     })
   })
 
   // Process payments (settlements)
   payments.forEach(payment => {
     // Payer of the debt (fromUserId) gets credit (debt reduced)
-    balances[payment.fromUserId] = (balances[payment.fromUserId] || 0) + payment.amount
+    balances[payment.fromUserId] = roundTo2((balances[payment.fromUserId] || 0) + payment.amount)
     
     // Receiver of the debt payment (toUserId) gets debit (credit reduced)
-    balances[payment.toUserId] = (balances[payment.toUserId] || 0) - payment.amount
+    balances[payment.toUserId] = roundTo2((balances[payment.toUserId] || 0) - payment.amount)
   })
 
   return balances

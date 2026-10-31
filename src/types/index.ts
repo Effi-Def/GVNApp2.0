@@ -6,15 +6,33 @@ export interface User {
   createdAt: Date
 }
 
+export interface EventLocation {
+  address: string
+  lat: number
+  lon: number
+}
+
 export interface Event {
   id: string
   title: string
   description: string
   category: EventCategory
   date: Date
+  // Planning lifecycle (optional for backward compatibility)
+  status?: 'planning' | 'scheduled' | 'done' | 'canceled'
+  // When false, `date` is a placeholder (usually first proposed date)
+  dateFinalized?: boolean
+  // When planning with `proposedDates`, this stores the chosen YYYY-MM-DD
+  selectedDateKey?: string
+  finalizedAt?: Date
+  // MVP: multiple proposed dates (YYYY-MM-DD) with per-user vote
+  proposedDates?: string[]
+  dateVotes?: Record<string, string>
   endDate?: Date // Per viaggi: data di fine
   time: string
   location: string
+  // Geocoordinate opzionali per la visualizzazione mappa (OpenStreetMap/Nominatim)
+  locationGeo?: EventLocation
   createdBy: string
 
   // Visibility vs participation (groundwork for [000])
@@ -63,6 +81,72 @@ export interface EventVisibility {
   type: EventVisibilityType
   farms?: string[]
   users?: string[]
+}
+
+// 🐷 Fattorie (groups)
+export type FarmRole = 'owner' | 'member'
+
+export type FarmPrivacy = 'invite' | 'open'
+
+export interface Farm {
+  id: string
+  name: string
+  ownerId: string
+  iconEmoji?: string
+  privacy?: FarmPrivacy
+  inviteTokenId?: string
+  memberCount?: number
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface FarmMembership {
+  userId: string
+  role: FarmRole
+  accessLevel: 'full' | 'readonly' | 'none'
+  joinedAt: Date
+  displayName?: string
+  photoURL?: string
+}
+
+export type FarmJoinRequestStatus = 'pending' | 'approved' | 'denied'
+
+export interface FarmJoinRequest {
+  id: string
+  userId: string
+  status: FarmJoinRequestStatus
+  displayName?: string
+  photoURL?: string
+  createdAt: Date
+  updatedAt?: Date
+}
+
+// Private per-user metadata (NOT a global directory)
+export interface UserPrivate {
+  id: string
+  farmIds: string[]
+  farms?: Record<string, { role: FarmRole; joinedAt: Date }>
+  // Persisted per-user UI preference
+  lastActiveFarmId?: string
+  // Per-farm user settings (workspace-scoped preferences)
+  farmSettings?: Record<string, { themeKey?: FarmThemeKey }>
+  createdAt: Date
+  updatedAt: Date
+}
+
+export type FarmThemeKey = 'default' | 'cool' | 'warm'
+
+export interface Channel {
+  id: string
+  farmId: string
+  name: string              // without "#", e.g. "generale"
+  description?: string
+  createdAt: Date
+  createdBy: string
+  isDefault: boolean        // default channel cannot be archived
+  isArchived: boolean
+  lastMessageAt?: Date
+  lastMessagePreview?: string
 }
 
 export type EventParticipationStatus = 'yes' | 'maybe' | 'no' | 'left'
@@ -127,6 +211,8 @@ export interface PaymentTransaction {
   toUserName: string
   amount: number
   description?: string
+  // Optional scope for settlement: either per-event or per-farm
+  farmId?: string
   eventId?: string
   relatedExpenseIds?: string[] // Spese che questo pagamento sistema
   createdAt: Date
@@ -209,15 +295,21 @@ export interface Group {
 }
 
 // 💬 Chat per evento (v1)
-export type ChatReactionKey = 'like' | 'love' | 'fun'
+/**
+ * Any emoji character used as a reaction key.
+ * Legacy values 'like', 'love', 'fun' are still stored in Firestore for existing
+ * messages; the UI maps them via resolveEmoji() in ReactionPill.tsx.
+ */
+export type ChatReactionKey = string
 
 export interface ChatAttachment {
   id: string
   url: string
   name: string
-  type: 'image' | 'file' | 'audio'
+  type: 'image' | 'video' | 'file' | 'audio'
   size?: number
   contentType?: string
+  durationSeconds?: number // for audio/video
 }
 
 export interface ChatMessage {
@@ -237,7 +329,7 @@ export interface ChatMessage {
     title?: string // For titles
   }
   attachments?: ChatAttachment[]
-  reactions?: Partial<Record<ChatReactionKey, string[]>>
+  reactions?: Record<string, string[]>
   quoted?: {
     messageId: string
     textPreview?: string
@@ -246,4 +338,8 @@ export interface ChatMessage {
   createdAt: Date
   editedAt?: Date
   deleted?: boolean
+  // Threading — populated when the message has replies
+  replyCount?: number
+  lastReplyAt?: Date
+  lastReplyPreview?: string
 }

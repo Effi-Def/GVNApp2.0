@@ -1,0 +1,29 @@
+{
+  "rules": {
+    "presence": {
+      "$uid": {
+        // Any authenticated user can read presence nodes (needed for member lists).
+        ".read": "auth != null",
+        // Users can only write their own presence node.
+        ".write": "auth != null && auth.uid === $uid",
+        ".validate": "newData.hasChildren(['online', 'lastSeen'])",
+        "online": { ".validate": "newData.isBoolean()" },
+        "lastSeen": { ".validate": "newData.isNumber()" },
+        "$other": { ".validate": false }
+      }
+    },
+    "typing": {
+      "$chatKey": {
+        "$uid": {
+          ".read": "auth != null",
+          ".write": "auth != null && auth.uid === $uid",
+          ".validate": "!newData.exists() || newData.hasChildren(['typing', 'updatedAt'])",
+          "typing": { ".validate": "newData.isBoolean()" },
+          "updatedAt": { ".validate": "newData.isNumber()" },
+          "$other": { ".validate": false }
+        }
+      }
+    },
+    "$other": { ".read": false, ".write": false }
+  }
+}

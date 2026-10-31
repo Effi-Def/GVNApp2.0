@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import EventChat from '../components/Chat/EventChat'
 import { useAppStore } from '../stores/AppStore'
@@ -10,11 +10,39 @@ import { getUserKeys, getUserEventParticipation, userCanChat } from '../utils/ev
 const EventChatPage = () => {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const { events } = useAppStore()
   const { user } = useAuthStore()
   const [event, setEvent] = useState<Event | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // ── Visual Viewport: resize container when software keyboard opens/closes ──
+  // On iOS Safari/PWA, `fixed inset-0` doesn't shrink when the keyboard opens
+  // because `window.innerHeight` stays constant. Only `visualViewport.height`
+  // reflects the actual visible area above the keyboard.
+  useEffect(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+
+    const update = () => {
+      const el = containerRef.current
+      if (!el) return
+      // Only apply to the fixed (mobile) element; on desktop it's md:relative
+      if (window.getComputedStyle(el).position === 'fixed') {
+        el.style.height = `${vv.height}px`
+        el.style.top = `${vv.offsetTop}px`
+      }
+    }
+
+    vv.addEventListener('resize', update)
+    vv.addEventListener('scroll', update)
+    update()
+
+    return () => {
+      vv.removeEventListener('resize', update)
+      vv.removeEventListener('scroll', update)
+    }
+  }, [])
 
   const meKeys = getUserKeys(user)
   const canChat = !!event && userCanChat(event, meKeys)
@@ -32,12 +60,13 @@ const EventChatPage = () => {
       if (!id) return
       try {
         setLoading(true)
-        const cached = events.find(e => e.id === id)
+        // Use imperative store access so this effect only re-runs when the
+        // event ID changes, not every time the global events list is refreshed.
+        const cached = useAppStore.getState().events.find(e => e.id === id)
         if (cached) {
           setEvent(cached)
         } else {
-          const all = await eventService.getAll()
-          const found = all.find(e => e.id === id) || null
+          const found = await eventService.getById(id)
           setEvent(found)
         }
         setError(null)
@@ -49,7 +78,7 @@ const EventChatPage = () => {
       }
     }
     load()
-  }, [id, events])
+  }, [id]) // intentionally omit `events` — we use imperative getState() to avoid re-runs on store refresh
 
   if (loading) {
     return <div className="p-6 max-w-4xl mx-auto">Caricamento chat...</div>
@@ -58,7 +87,7 @@ const EventChatPage = () => {
   if (!event) {
     return (
       <div className="p-6 max-w-4xl mx-auto space-y-3">
-        <p className="text-sm text-neutral-600">Evento non trovato.</p>
+        <p className="text-sm text-[--text-muted]">Evento non trovato.</p>
         <button onClick={() => navigate('/chats')} className="text-sm text-primary-600 hover:underline">← Torna alle chat</button>
       </div>
     )
@@ -67,12 +96,12 @@ const EventChatPage = () => {
   if (!canChat) {
     return (
       <div className="p-6 max-w-4xl mx-auto space-y-3">
-        <div className="bg-gray-50 border border-gray-200 text-gray-700 px-4 py-3 rounded-lg text-sm">
+        <div className="bg-[--bg-subtle] border border-[--border-base] text-[--text-muted] px-4 py-3 rounded-lg text-sm">
           La chat è disponibile solo dopo aver confermato la partecipazione (✅).
         </div>
         <div className="flex items-center gap-3">
           <button onClick={() => navigate(`/events/${event.id}/summary`)} className="text-sm text-primary-600 hover:underline">Vai al riepilogo evento</button>
-          <button onClick={() => navigate(-1)} className="text-sm text-neutral-600 hover:text-neutral-800">← Indietro</button>
+          <button onClick={() => navigate(-1)} className="text-sm text-[--text-muted] hover:text-[--text-base]">← Indietro</button>
         </div>
       </div>
     )
@@ -82,13 +111,17 @@ const EventChatPage = () => {
     return (
       <div className="p-6 max-w-4xl mx-auto space-y-3">
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">{error}</div>
-        <button onClick={() => navigate(-1)} className="text-sm text-neutral-600 hover:text-neutral-800">← Indietro</button>
+        <button onClick={() => navigate(-1)} className="text-sm text-[--text-muted] hover:text-[--text-base]">← Indietro</button>
       </div>
     )
   }
 
   return (
-    <div className="h-[100dvh] bg-white dark:bg-gray-900 max-w-screen-md mx-auto shadow-2xl flex flex-col">
+    <div
+      ref={containerRef}
+      className="fixed left-0 right-0 bg-[--bg-card] dark:bg-gray-900 flex flex-col overflow-hidden md:relative md:h-[100dvh] md:max-w-screen-md md:mx-auto md:shadow-2xl"
+      style={{ top: 0, height: '100dvh' }}
+    >
       <EventChat 
         eventId={event.id} 
         eventName={event.title}
@@ -101,3 +134,5 @@ const EventChatPage = () => {
 }
 
 export default EventChatPage
+
+

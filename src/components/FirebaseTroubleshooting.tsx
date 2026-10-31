@@ -69,7 +69,7 @@ const FirebaseTroubleshooting = () => {
   if (!import.meta.env.DEV) return null
 
   return (
-    <div className="fixed bottom-4 right-4 bg-white border border-gray-300 rounded-lg p-4 shadow-lg text-xs">
+    <div className="fixed bottom-4 right-4 bg-[--bg-card] border border-[--border-base] rounded-lg p-4 shadow-lg text-xs">
       <h3 className="font-bold mb-2">🔧 Firebase Debug</h3>
       <div className="space-y-1">
         <div className="flex items-center space-x-2">
@@ -105,3 +105,4 @@ const StatusIcon = ({ status }: { status: string }) => {
 }
 
 export default FirebaseTroubleshooting
+

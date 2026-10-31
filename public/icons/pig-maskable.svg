@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Simple, bold pig face designed to be readable at small sizes -->
+  <defs>
+    <clipPath id="maskable">
+      <circle cx="256" cy="256" r="256" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#maskable)">
+    <rect width="512" height="512" fill="#ffb7c5"/>
+    <!-- Ears -->
+    <path d="M70 120c30-40 90-55 120-10l-20 70c-40 10-80-10-100-60z" fill="#ff99ad"/>
+    <path d="M442 120c-30-40-90-55-120-10l20 70c40 10 80-10 100-60z" fill="#ff99ad"/>
+    <!-- Face -->
+    <circle cx="256" cy="280" r="160" fill="#ffc7d2"/>
+    <!-- Eyes -->
+    <circle cx="206" cy="250" r="14" fill="#2d2d2d"/>
+    <circle cx="306" cy="250" r="14" fill="#2d2d2d"/>
+    <!-- Snout -->
+    <ellipse cx="256" cy="320" rx="80" ry="60" fill="#ff99ad"/>
+    <circle cx="230" cy="320" r="10" fill="#2d2d2d"/>
+    <circle cx="282" cy="320" r="10" fill="#2d2d2d"/>
+  </g>
+</svg>

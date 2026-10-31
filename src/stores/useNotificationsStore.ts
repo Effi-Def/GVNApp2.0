@@ -17,6 +17,7 @@ interface NotificationsState {
   notifications: AppNotification[]
   setAll: (items: AppNotification[]) => void
   add: (n: Omit<AppNotification, 'id'> & { id?: string }) => void
+  reset: () => void
   markAsRead: (id: string) => void
   markAllAsRead: () => void
   markTypeAsRead: (type: AppNotification['type']) => void
@@ -29,6 +30,7 @@ export const useNotificationsStore = create<NotificationsState>()(
     (set, get) => ({
       notifications: [],
       setAll: (items) => set({ notifications: items }),
+      reset: () => set({ notifications: [] }),
       add: (n) => set(state => {
         // Evita duplicati
         const exists = state.notifications.some(existing => existing.id === n.id)

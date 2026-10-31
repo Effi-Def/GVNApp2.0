@@ -1,11 +1,12 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../stores/useAuthStore'
-import NotificationSystem from '../NotificationSystem'
 import { PigAvatar } from '../Avatar/PigAvatar'
 import { useUserSettingsStore } from '../../stores/UserSettingsStore'
 import { useNotificationsStore } from '../../stores/useNotificationsStore'
 import { markChatNotificationsAsRead } from '../../services/notifications'
 import { notificationService } from '../../services/notifications'
+import FarmSwitcher from '../FarmSwitcher'
+import { useDarkMode } from '../../hooks/useDarkMode'
 
 const Navbar = () => {
   const location = useLocation()
@@ -14,22 +15,21 @@ const Navbar = () => {
   const unread = useNotificationsStore(s => s.notifications.filter(n => !n.read && (n.type !== 'chat' || !!n.chatMention)).length)
   const unreadChat = useNotificationsStore(s => s.notifications.filter(n => !n.read && n.type === 'chat').length)
   const navigate = useNavigate()
+  const { isDark, toggle: toggleDark } = useDarkMode()
   const preferredName = (profile?.displayName && profile.displayName.trim().length > 0)
     ? profile.displayName
     : ((user?.displayName && user.displayName !== 'Utente') ? user.displayName : (user?.email ? user.email.split('@')[0] : 'Utente'))
 
   const navigation = [
     { name: 'Home', href: '/', icon: '🏠', emoji: '🏠' },
+    { name: 'Gruppo', href: '/farm', icon: '👥', emoji: '👥' },
     { name: 'Eventi', href: '/events', icon: '📅', emoji: '🎉' },
-    { name: 'Spese', href: '/expenses', icon: '💰', emoji: '💸' },
-    { name: 'Sondaggi', href: '/polls', icon: '📊', emoji: '🗳️' },
-    { name: 'Liste', href: '/lists', icon: '📋', emoji: '✅' },
   ]
 
   // Logout is available in the mobile "Altro" menu; not exposed in top navbar
 
   return (
-    <nav className="bg-white shadow-lg border-b border-neutral-200 fixed top-0 left-0 right-0 z-50 backdrop-blur-sm bg-white/95">
+    <nav className="bg-[--bg-card] shadow-lg border-b border-[--border-base] fixed top-0 left-0 right-0 z-50 backdrop-blur-sm bg-white/95">
       <div className="max-w-7xl mx-auto px-6 lg:px-8">
         <div className="flex justify-between items-center h-20">
           
@@ -40,7 +40,7 @@ const Navbar = () => {
                 <span className="text-white font-bold text-lg font-display">G</span>
               </div>
               <div className="flex flex-col">
-                <span className="text-xl font-bold font-display text-neutral-900 tracking-tight">GVNApp</span>
+                <span className="text-xl font-bold font-display text-[--text-base] tracking-tight">GVNApp</span>
               </div>
               {/* Piccola mascotte */}
               <span className="text-lg group-hover:animate-bounce transition-transform">
@@ -50,7 +50,7 @@ const Navbar = () => {
           </div>
 
           {/* Navigation Links - Centrata */}
-          <div className="hidden lg:flex items-center space-x-1 bg-neutral-50 rounded-2xl p-2">
+          <div className="hidden lg:flex items-center space-x-1 bg-[--bg-subtle] rounded-2xl p-2">
             {navigation.map((item) => (
               <Link
                 key={item.name}
@@ -58,7 +58,7 @@ const Navbar = () => {
                 className={`inline-flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
                   location.pathname === item.href
                     ? 'bg-primary-500 text-white shadow-md shadow-primary-500/25 transform scale-105'
-                    : 'text-neutral-600 hover:text-primary-600 hover:bg-white/80 hover:shadow-sm'
+                    : 'text-[--text-muted] hover:text-primary-600 hover:bg-white/80 hover:shadow-sm'
                 }`}
               >
                 <span className="mr-2 text-base">{item.emoji}</span>
@@ -69,10 +69,20 @@ const Navbar = () => {
 
           {/* User Menu - Redesigned */}
           <div className="flex items-center space-x-3 sm:space-x-4">
+            {/* Primary action */}
+            <button
+              type="button"
+              onClick={() => navigate('/events?create=1')}
+              className="hidden lg:inline-flex items-center px-4 py-2 rounded-xl bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 transition-colors"
+              title="Organizza un evento"
+            >
+              Organizza
+            </button>
+            <FarmSwitcher />
             {/* � Chats icon */}
             <Link
               to="/chats"
-              className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+              className="p-2 text-[--text-muted] hover:text-[--text-base] hover:bg-[--bg-raised] rounded-lg transition-colors"
               title="Chat"
               aria-label="Chat"
               onClick={async (e) => {
@@ -132,10 +142,23 @@ const Navbar = () => {
                 </span>
               )}
             </Link>
+            {/* 🌙 Dark mode toggle */}
+            <button
+              type="button"
+              onClick={toggleDark}
+              className="p-2 text-[--text-muted] dark:text-gray-300 hover:text-[--text-base] dark:hover:text-white hover:bg-[--bg-raised] dark:hover:bg-gray-800 rounded-lg transition-colors"
+              title={isDark ? 'Modalità chiara' : 'Modalità scura'}
+              aria-label={isDark ? 'Passa alla modalità chiara' : 'Passa alla modalità scura'}
+            >
+              {isDark
+                ? <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 3a9 9 0 100 18A9 9 0 0012 3zm0 2a7 7 0 110 14A7 7 0 0112 5zm0 1a6 6 0 100 12A6 6 0 0012 6z"/><path d="M12 2V1M12 23v-1M4.22 4.22l-.71-.71M20.49 20.49l-.71-.71M1 12H2M22 12h1M4.22 19.78l-.71.71M20.49 3.51l-.71.71"/></svg>
+                : <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/></svg>
+              }
+            </button>
             {/* ⚙️ Settings next to pig (visible on all sizes) */}
             <Link
               to="/settings"
-              className="p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+              className="p-2 text-[--text-muted] hover:text-[--text-base] hover:bg-[--bg-raised] rounded-lg transition-colors"
               title="Impostazioni"
               aria-label="Impostazioni"
               onClick={(e) => {
@@ -154,13 +177,8 @@ const Navbar = () => {
               </svg>
             </Link>
 
-            {/* Desktop inline notification system */}
-            <div className="hidden md:block">
-              <NotificationSystem userId={user?.id || ''} />
-            </div>
-
             {/* User pill (hide on xs to free space) */}
-            <div className="hidden sm:flex items-center space-x-3 bg-neutral-50 rounded-2xl p-2 pr-4">
+            <div className="hidden sm:flex items-center space-x-3 bg-[--bg-subtle] rounded-2xl p-2 pr-4">
               {user?.photoURL && (
                 <img
                   className="h-10 w-10 rounded-xl border-2 border-white shadow-sm"
@@ -169,10 +187,10 @@ const Navbar = () => {
                 />
               )}
               <div className="flex flex-col">
-                <span className="text-sm font-semibold text-neutral-900 truncate max-w-32" title={preferredName}>
+                <span className="text-sm font-semibold text-[--text-base] truncate max-w-32" title={preferredName}>
                   {preferredName}
                 </span>
-                <span className="text-xs text-neutral-500">Online</span>
+                <span className="text-xs text-[--text-muted]">Online</span>
               </div>
             </div>
           </div>
@@ -183,3 +201,4 @@ const Navbar = () => {
 }
 
 export default Navbar
+
