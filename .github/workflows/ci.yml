@@ -44,10 +44,17 @@ jobs:
       - name: Test
         run: npm run test:run
 
+      # Placeholder values: the E2E smoke uses the mock runtime, never a real Firebase project
       - name: Build
         run: npm run build
         env:
           VITE_E2E: '1'
+          VITE_FIREBASE_API_KEY: demo-api-key
+          VITE_FIREBASE_AUTH_DOMAIN: demo-gvnapp.firebaseapp.com
+          VITE_FIREBASE_PROJECT_ID: demo-gvnapp
+          VITE_FIREBASE_STORAGE_BUCKET: demo-gvnapp.appspot.com
+          VITE_FIREBASE_MESSAGING_SENDER_ID: '000000000000'
+          VITE_FIREBASE_APP_ID: 1:000000000000:web:demo
 
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium

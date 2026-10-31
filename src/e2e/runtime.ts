@@ -735,6 +735,9 @@ function patchPollAndListServices() {
     async getAll() {
       return []
     },
+    async getByEventId() {
+      return []
+    },
     async getForUserVisibleEvents() {
       return []
     },
