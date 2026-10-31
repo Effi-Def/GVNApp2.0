@@ -13,6 +13,7 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getCountFromServer,
   getDoc,
   getDocs,
   query,
@@ -177,8 +178,13 @@ describe('ideas: update', () => {
     await assertFails(updateDoc(ref(OUTSIDER), { interestedIds: arrayUnion(OUTSIDER) }))
   })
 
-  it('lets any member organize and reopen an idea', async () => {
+  it('refuses an unknown status', async () => {
+    await assertFails(updateDoc(ref(MEMBER), { status: 'archiviata' }))
+  })
+
+  it('lets any member organize, complete and reopen an idea', async () => {
     await assertSucceeds(updateDoc(ref(MEMBER), { status: 'organized', eventId: 'event-1', updatedAt: serverTimestamp() }))
+    await assertSucceeds(updateDoc(ref(MEMBER), { status: 'done', updatedAt: serverTimestamp() }))
     await assertSucceeds(updateDoc(ref(MEMBER), { status: 'open', eventId: deleteField(), updatedAt: serverTimestamp() }))
   })
 
@@ -304,6 +310,18 @@ describe('lists', () => {
   it('accepts a farm list only from a member of that farm', async () => {
     await assertSucceeds(setDoc(doc(db(MEMBER), 'lists', 'n1'), list({ createdBy: MEMBER, farmId: FARM })))
     await assertFails(setDoc(doc(db(OUTSIDER), 'lists', 'n2'), list({ createdBy: OUTSIDER, farmId: FARM })))
+  })
+})
+
+describe('chat unread count', () => {
+  const unread = (uid: string) => getCountFromServer(query(
+    collection(db(uid), 'events', 'event-1', 'messages'),
+    where('createdAt', '>', Timestamp.fromDate(new Date('2030-01-01T00:00:00.000Z'))),
+  ))
+
+  it('is available to who can chat and hidden from the others', async () => {
+    await assertSucceeds(unread(MEMBER))
+    await assertFails(unread(OUTSIDER))
   })
 })
 

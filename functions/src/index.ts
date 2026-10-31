@@ -378,6 +378,13 @@ export const onExpenseCreated = functions.firestore.document('expenses/{id}').on
   await sendFcmToUsers(userIds, 'expense', { notification: { title, body }, data: { click_action: data.eventId ? `/events/${data.eventId}/summary` : '/expenses' } }, snap.id)
 })
 
+async function getFarmMemberIds(farmId: string, excludeUserId?: string): Promise<string[]> {
+  const membersSnap = await db().collection('farms').doc(farmId).collection('members').get()
+  return membersSnap.docs
+    .map(d => (d.data()?.userId as string) || d.id)
+    .filter(uid => uid && uid !== excludeUserId)
+}
+
 export const onPollCreated = functions.firestore.document('polls/{id}').onCreate(async (snap: functions.firestore.DocumentSnapshot) => {
   const data = snap.data() as admin.firestore.DocumentData | undefined
   if (!data) return
@@ -387,6 +394,9 @@ export const onPollCreated = functions.firestore.document('polls/{id}').onCreate
     const evSnap = await db().doc(`events/${data.eventId}`).get()
     const evParts = (evSnap.data()?.participants || []).map((p: any) => p.userId)
     userIds = Array.from(new Set([...userIds, ...evParts]))
+  }
+  if (data.farmId) {
+    userIds = Array.from(new Set([...userIds, ...await getFarmMemberIds(data.farmId, data.createdBy)]))
   }
   const click = data.eventId ? `/events/${data.eventId}/summary` : '/polls'
   const title = 'Vota anche tu 🗳️'
@@ -403,11 +413,33 @@ export const onListCreated = functions.firestore.document('lists/{id}').onCreate
     const evParts = (evSnap.data()?.participants || []).map((p: any) => p.userId)
     userIds = Array.from(new Set([...userIds, ...evParts]))
   }
+  if (data.farmId) {
+    userIds = Array.from(new Set([...userIds, ...await getFarmMemberIds(data.farmId, data.createdBy)]))
+  }
   const click = data.eventId ? `/events/${data.eventId}/summary` : '/lists'
   const title = 'Lista pronta 📝'
   const body = data.title ? String(data.title) : 'C’è una nuova lista'
   await sendFcmToUsers(userIds, 'list', { notification: { title, body }, data: { click_action: click } }, snap.id)
 })
+
+const IDEA_INTEREST_THRESHOLD = 3
+
+// Tells the author once, the first time an open idea reaches the threshold
+export const onIdeaInterestChanged = functions.firestore
+  .document('farms/{farmId}/ideas/{ideaId}')
+  .onUpdate(async (change, context) => {
+    const before = change.before.data()
+    const after = change.after.data()
+    if (after.status !== 'open' || after.interestNotifiedAt || !after.createdBy) return
+    const beforeCount = Array.isArray(before.interestedIds) ? before.interestedIds.length : 0
+    const afterCount = Array.isArray(after.interestedIds) ? after.interestedIds.length : 0
+    if (beforeCount >= IDEA_INTEREST_THRESHOLD || afterCount < IDEA_INTEREST_THRESHOLD) return
+
+    await change.after.ref.update({ interestNotifiedAt: admin.firestore.FieldValue.serverTimestamp() })
+    const title = 'La tua idea piace 🐷'
+    const body = `“${after.title || 'La tua idea'}”: ${afterCount} ci stanno. Organizzate?`
+    await sendFcmToUsers([after.createdBy], 'event', { notification: { title, body }, data: { click_action: '/ideas' } }, context.params.ideaId)
+  })
 
 export const onChatMessageCreated = functions.firestore.document('events/{eventId}/messages/{messageId}').onCreate(async (snap, context) => {
   const message = snap.data()

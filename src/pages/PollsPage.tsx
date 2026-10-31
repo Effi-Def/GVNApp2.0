@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { pollService } from '../services/firestore'
 import { refreshActiveFarmData, useAuthStore } from '../stores/useAuthStore'
 import { useAppStore } from '../stores/AppStore'
 import { useActiveFarmStore } from '../stores/useActiveFarmStore'
-import { Poll, PollOption, PollVote, Event } from '../types'
+import { Poll, PollOption, PollVote, Event, IdeaEventPrefill } from '../types'
 import { getSelectableEvents, getUserEventParticipation, getUserKeys } from '../utils/events'
+import { getWinningDateOption } from '../utils/ideas'
 import AdvancedSection from '../components/AdvancedSection'
 
 // Format ISO date string (YYYY-MM-DD) as Italian readable
@@ -41,6 +42,8 @@ function getUpcomingWeekends(weekends = 3): { label: string; value: string }[] {
 const PollsPage = () => {
   const { user } = useAuthStore()
   const location = useLocation()
+  const navigate = useNavigate()
+  const [ideaPrefill, setIdeaPrefill] = useState<IdeaEventPrefill | null>(null)
   const [polls, setPolls] = useState<Poll[]>([])
   const [events, setEvents] = useState<Event[]>([])
   const [loading, setLoading] = useState(true)
@@ -75,6 +78,9 @@ const PollsPage = () => {
   const activeFarmId = useActiveFarmStore(s => s.activeFarmId)
   const storeEvents = useAppStore(s => s.events)
   const storePolls = useAppStore(s => s.polls)
+  const addPoll = useAppStore(s => s.addPoll)
+  const updatePoll = useAppStore(s => s.updatePoll)
+  const deletePoll = useAppStore(s => s.deletePoll)
 
   // Carica sondaggi e eventi
   useEffect(() => {
@@ -99,7 +105,11 @@ const PollsPage = () => {
         setEvents(myEvents)
         // Filtra i sondaggi ai soli eventi a cui partecipo
         const myIds = new Set(myEvents.map(e => e.id))
-        setPolls(pls.filter(p => p.eventId ? myIds.has(p.eventId) : (!p.farmId || p.farmId === activeFarmId)))
+        setPolls(
+          pls
+            .filter(p => p.eventId ? myIds.has(p.eventId) : (!p.farmId || p.farmId === activeFarmId))
+            .sort((a, b) => (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0))
+        )
       } catch (error) {
         console.error('❌ Error loading data:', error)
       } finally {
@@ -138,7 +148,8 @@ const PollsPage = () => {
     if (!shouldCreate) return
 
     const pollType: 'date' | 'generic' = params.get('type') === 'date' ? 'date' : 'generic'
-    const idea = location?.state?.idea as { title?: string; note?: string } | undefined
+    const idea = location?.state?.idea as IdeaEventPrefill | undefined
+    setIdeaPrefill(idea ?? null)
     setEditingPoll(null)
     setShowForm(true)
     setFormData({
@@ -279,6 +290,7 @@ const PollsPage = () => {
         eventId: formData.eventId || undefined,
         // Without an event the farm is what makes the poll visible to the others
         farmId: formData.eventId ? undefined : (activeFarmId || undefined),
+        idea: editingPoll ? undefined : (ideaPrefill ?? undefined),
         isActive: true,
         votingDurationHours: formData.votingDurationHours,
         votingEndsAt: new Date(Date.now() + formData.votingDurationHours * 60 * 60 * 1000)
@@ -290,10 +302,11 @@ const PollsPage = () => {
         setEditingPoll(null)
       } else {
         const newPoll = await pollService.create(pollData)
-        setPolls(prev => [newPoll, ...prev])
+        addPoll(newPoll)
       }
 
       // Reset form
+      setIdeaPrefill(null)
       setFormData({
         title: '',
         description: '',
@@ -349,10 +362,7 @@ const PollsPage = () => {
 
       await pollService.vote(pollId, newVote)
 
-      // Aggiorna lo stato locale
-      setPolls(prev => prev.map(p => 
-        p.id === pollId ? updatedPollData : p
-      ))
+      updatePoll(pollId, updatedPollData)
 
       console.log('✅ Vote recorded successfully')
     } catch (error) {
@@ -383,7 +393,7 @@ const PollsPage = () => {
 
     try {
       await pollService.delete(pollId)
-      setPolls(prev => prev.filter(p => p.id !== pollId))
+      deletePoll(pollId)
       console.log('✅ Poll deleted successfully')
     } catch (error) {
       console.error('❌ Error deleting poll:', error)
@@ -590,6 +600,19 @@ const PollsPage = () => {
                   )
                 })}
               </div>
+
+              {/* A votazione chiusa la data vincente diventa un evento */}
+              {!pollIsActive && !poll.eventId && poll.createdBy === currentUserId && getWinningDateOption(poll) && (
+                <button
+                  type="button"
+                  className="mt-4 w-full px-4 py-2.5 rounded-xl bg-[--text-base] text-[--bg-card] text-sm font-semibold"
+                  onClick={() => navigate(`/events?create=1&date=${getWinningDateOption(poll)}`, {
+                    state: { idea: poll.idea, pollId: poll.id },
+                  })}
+                >
+                  📅 Crea l’evento per {formatDateOption(getWinningDateOption(poll)!)}
+                </button>
+              )}
 
               {/* Stato del voto */}
               {userHasVoted ? (

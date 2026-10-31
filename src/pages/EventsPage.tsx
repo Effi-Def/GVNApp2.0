@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { eventService, farmService, ideaService } from '../services/firestore'
+import { eventService, farmService, ideaService, pollService } from '../services/firestore'
 import { db } from '../firebase/config'
 import { doc, getDoc, QueryDocumentSnapshot } from 'firebase/firestore'
 import { refreshActiveFarmData, useAuthStore } from '../stores/useAuthStore'
-import { Event, EventCategory, EventParticipant, EventPriority, FarmMembership } from '../types'
+import { Event, EventCategory, EventParticipant, EventPriority, FarmMembership, IdeaEventPrefill } from '../types'
 import { useUserSettingsStore } from '../stores/UserSettingsStore'
 import { useAppStore } from '../stores/AppStore'
 import { APP_CONFIG } from '../constants'
@@ -14,21 +14,12 @@ import AdvancedSection from '../components/AdvancedSection'
 import { useActiveFarmStore } from '../stores/useActiveFarmStore'
 import { useFarmContext } from '../contexts/FarmContext'
 
-type IdeaPrefill = {
-  id: string
-  farmId: string
-  title: string
-  note?: string
-  location?: string
-  category: EventCategory
-}
-
 const EventsPage = () => {
   const { user } = useAuthStore()
   const navigate = useNavigate()
   const location = useLocation()
   // Usa lo store centrale per avere eventi sincronizzati in tutta l'app
-  const { events, setEvents, addEvent, updateEvent, deleteEvent, expenses, polls, lists, setExpenses, setPolls, setLists } = useAppStore()
+  const { events, setEvents, addEvent, updateEvent, deleteEvent, expenses, polls, lists, setExpenses, setPolls, setLists, updatePoll } = useAppStore()
   const { notifications } = useUserSettingsStore()
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -36,7 +27,8 @@ const EventsPage = () => {
   const [submitting, setSubmitting] = useState(false)
   const [activeFarmMembers, setActiveFarmMembers] = useState<FarmMembership[]>([])
   const [quickPrefillDate, setQuickPrefillDate] = useState('')
-  const [ideaPrefill, setIdeaPrefill] = useState<IdeaPrefill | null>(null)
+  const [ideaPrefill, setIdeaPrefill] = useState<IdeaEventPrefill | null>(null)
+  const [sourcePollId, setSourcePollId] = useState<string | null>(null)
   const quickInitialValues = useMemo(() => ideaPrefill ? {
     title: ideaPrefill.title,
     description: ideaPrefill.note,
@@ -193,7 +185,9 @@ const EventsPage = () => {
     if (shouldCreate) {
       setEditingEvent(null)
       setShowForm(true)
-      setIdeaPrefill((location.state as { idea?: IdeaPrefill } | null)?.idea ?? null)
+      const navState = location.state as { idea?: IdeaEventPrefill; pollId?: string } | null
+      setIdeaPrefill(navState?.idea ?? null)
+      setSourcePollId(navState?.pollId ?? null)
       if (dateParam) {
         setQuickPrefillDate(dateParam)
       }
@@ -238,16 +232,22 @@ const EventsPage = () => {
       addEvent(newEvent)
       setShowForm(false)
       setQuickPrefillDate('')
-      if (ideaPrefill) {
+      if (ideaPrefill || sourcePollId) {
         const idea = ideaPrefill
+        const pollId = sourcePollId
         setIdeaPrefill(null)
+        setSourcePollId(null)
         // Drop the prefill from history: a reload must not offer the same event again
         navigate('/events', { replace: true })
         try {
-          await ideaService.markOrganized(idea.farmId, idea.id, newEvent.id)
+          if (idea) await ideaService.markOrganized(idea.farmId, idea.id, newEvent.id)
+          if (pollId) {
+            await pollService.update(pollId, { eventId: newEvent.id })
+            updatePoll(pollId, { eventId: newEvent.id })
+          }
         } catch (error) {
-          console.error('❌ Error linking idea to event:', error)
-          alert('Evento creato, ma l’idea risulta ancora da organizzare. Puoi riprovare da Cose da fare.')
+          console.error('❌ Error linking event to its origin:', error)
+          alert('Evento creato, ma non sono riuscito a collegarlo all’idea o al sondaggio.')
         }
       }
       console.log('✅ Quick event created successfully')
@@ -477,6 +477,7 @@ const EventsPage = () => {
               setEditingEvent(null)
               setQuickPrefillDate('')
               setIdeaPrefill(null)
+              setSourcePollId(null)
               setShowForm(true)
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-lg transition-colors"
@@ -640,6 +641,7 @@ const EventsPage = () => {
             setShowForm(false)
             setQuickPrefillDate('')
             setIdeaPrefill(null)
+            setSourcePollId(null)
           }}
           onSubmit={handleQuickCreateEvent}
           isLoading={submitting}

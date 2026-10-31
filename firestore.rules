@@ -232,7 +232,7 @@ service cloud.firestore {
         && (!('note' in data) || ((data.note is string) && data.note.size() <= 1000))
         && (!('location' in data) || ((data.location is string) && data.location.size() <= 200))
         && (!('link' in data) || ((data.link is string) && data.link.size() <= 500 && data.link.matches('^https?://.+')))
-        && (data.status in ['open', 'organized'])
+        && (data.status in ['open', 'organized', 'done'])
         && (!('eventId' in data) || (data.eventId is string))
         && (data.interestedIds is list) && data.interestedIds.size() <= 500;
     }

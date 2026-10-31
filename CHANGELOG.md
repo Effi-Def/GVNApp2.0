@@ -7,6 +7,10 @@
 - Link a Spese, Sondaggi e Liste nel menu, anche su tablet.
 - `functions/scripts/check-legacy-docs.cjs`: controllo in sola lettura dei documenti legacy.
 - Cose da fare: idee della fattoria con "Ci sto", da trasformare in evento o sondaggio; quando non c'e` niente in programma le piu` votate compaiono in Home.
+- "Salva come idea" dai messaggi della chat e stato "Fatta" per le idee.
+- A votazione chiusa, chi ha creato un sondaggio di date puo` creare l'evento con la data vincente.
+- Push all'autore quando un'idea raggiunge 3 "Ci sto"; push alla fattoria per sondaggi e liste senza evento.
+- Numero di messaggi non letti nell'elenco delle chat.
 
 ### Changed
 - Nomi coerenti in tutta l'app: Fattoria, Maiali e Re Maiale.

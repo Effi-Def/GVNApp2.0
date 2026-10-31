@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.sendTestPush = exports.exportUserData = exports.onEventDeleted = exports.onJoinRequestApproved = exports.publicEvent = exports.onReplyCreated = exports.onChatMessageCreated = exports.onListCreated = exports.onPollCreated = exports.onExpenseCreated = exports.onEventCreated = exports.onFarmCreated = void 0;
+exports.sendTestPush = exports.exportUserData = exports.onEventDeleted = exports.onJoinRequestApproved = exports.publicEvent = exports.onReplyCreated = exports.onChatMessageCreated = exports.onIdeaInterestChanged = exports.onListCreated = exports.onPollCreated = exports.onExpenseCreated = exports.onEventCreated = exports.onFarmCreated = void 0;
 const functions = require("firebase-functions");
 const admin = require("firebase-admin");
 let _adminInitialized = false;
@@ -357,6 +357,12 @@ exports.onExpenseCreated = functions.firestore.document('expenses/{id}').onCreat
     const body = [data.title || 'Spesa', amount].filter(Boolean).join(' • ');
     await sendFcmToUsers(userIds, 'expense', { notification: { title, body }, data: { click_action: data.eventId ? `/events/${data.eventId}/summary` : '/expenses' } }, snap.id);
 });
+async function getFarmMemberIds(farmId, excludeUserId) {
+    const membersSnap = await db().collection('farms').doc(farmId).collection('members').get();
+    return membersSnap.docs
+        .map(d => d.data()?.userId || d.id)
+        .filter(uid => uid && uid !== excludeUserId);
+}
 exports.onPollCreated = functions.firestore.document('polls/{id}').onCreate(async (snap) => {
     const data = snap.data();
     if (!data)
@@ -367,6 +373,9 @@ exports.onPollCreated = functions.firestore.document('polls/{id}').onCreate(asyn
         const evSnap = await db().doc(`events/${data.eventId}`).get();
         const evParts = (evSnap.data()?.participants || []).map((p) => p.userId);
         userIds = Array.from(new Set([...userIds, ...evParts]));
+    }
+    if (data.farmId) {
+        userIds = Array.from(new Set([...userIds, ...await getFarmMemberIds(data.farmId, data.createdBy)]));
     }
     const click = data.eventId ? `/events/${data.eventId}/summary` : '/polls';
     const title = 'Vota anche tu 🗳️';
@@ -383,10 +392,31 @@ exports.onListCreated = functions.firestore.document('lists/{id}').onCreate(asyn
         const evParts = (evSnap.data()?.participants || []).map((p) => p.userId);
         userIds = Array.from(new Set([...userIds, ...evParts]));
     }
+    if (data.farmId) {
+        userIds = Array.from(new Set([...userIds, ...await getFarmMemberIds(data.farmId, data.createdBy)]));
+    }
     const click = data.eventId ? `/events/${data.eventId}/summary` : '/lists';
     const title = 'Lista pronta 📝';
     const body = data.title ? String(data.title) : 'C’è una nuova lista';
     await sendFcmToUsers(userIds, 'list', { notification: { title, body }, data: { click_action: click } }, snap.id);
+});
+const IDEA_INTEREST_THRESHOLD = 3;
+// Tells the author once, the first time an open idea reaches the threshold
+exports.onIdeaInterestChanged = functions.firestore
+    .document('farms/{farmId}/ideas/{ideaId}')
+    .onUpdate(async (change, context) => {
+    const before = change.before.data();
+    const after = change.after.data();
+    if (after.status !== 'open' || after.interestNotifiedAt || !after.createdBy)
+        return;
+    const beforeCount = Array.isArray(before.interestedIds) ? before.interestedIds.length : 0;
+    const afterCount = Array.isArray(after.interestedIds) ? after.interestedIds.length : 0;
+    if (beforeCount >= IDEA_INTEREST_THRESHOLD || afterCount < IDEA_INTEREST_THRESHOLD)
+        return;
+    await change.after.ref.update({ interestNotifiedAt: admin.firestore.FieldValue.serverTimestamp() });
+    const title = 'La tua idea piace 🐷';
+    const body = `“${after.title || 'La tua idea'}”: ${afterCount} ci stanno. Organizzate?`;
+    await sendFcmToUsers([after.createdBy], 'event', { notification: { title, body }, data: { click_action: '/ideas' } }, context.params.ideaId);
 });
 exports.onChatMessageCreated = functions.firestore.document('events/{eventId}/messages/{messageId}').onCreate(async (snap, context) => {
     const message = snap.data();

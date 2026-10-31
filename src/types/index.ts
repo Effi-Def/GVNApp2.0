@@ -227,6 +227,7 @@ export interface Poll {
   createdBy: string
   eventId?: string
   farmId?: string // Fattoria che vede il sondaggio quando non è legato a un evento
+  idea?: IdeaEventPrefill // Idea da cui è nato il sondaggio
   votes: PollVote[]
   isActive: boolean  // Aggiungiamo stato attivo/chiuso
   createdAt: Date
@@ -250,7 +251,7 @@ export interface PollVote {
 }
 
 export type IdeaCategory = 'posto' | 'ristorante' | 'evento' | 'viaggio' | 'altro'
-export type IdeaStatus = 'open' | 'organized'
+export type IdeaStatus = 'open' | 'organized' | 'done'
 
 // "Cose da fare": idee della fattoria, prima che diventino un evento
 export interface Idea {
@@ -270,6 +271,16 @@ export interface Idea {
 }
 
 export type IdeaDraft = Pick<Idea, 'title' | 'category' | 'note' | 'link' | 'location'>
+
+// Ciò che serve per creare un evento da un'idea, anche passando da un sondaggio
+export interface IdeaEventPrefill {
+  id: string
+  farmId: string
+  title: string
+  note?: string
+  location?: string
+  category: EventCategory
+}
 
 export interface ShoppingList {
   id: string

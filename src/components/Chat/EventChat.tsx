@@ -1,9 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { chatService, eventService } from '../../services/firestore'
 import { ChatMessage, EventParticipant, EventParticipation } from '../../types'
 import { ChatDescriptor, eventDescriptor } from '../../types/chat'
 import { useAuthStore } from '../../stores/useAuthStore'
 import { useUserSettingsStore } from '../../stores/UserSettingsStore'
+import { messageToIdeaDraft } from '../../utils/ideas'
 import MessageBubble from './MessageBubble'
 import ThreadPanel from './ThreadPanel'
 
@@ -43,6 +45,7 @@ const EventChat: React.FC<Props> = ({ eventId: eventIdProp, chatDescriptor: desc
   // For backward-compat code that still references eventId (muted list, event participant load, etc.)
   const eventId = eventIdProp ?? ''
   const { user } = useAuthStore()
+  const navigate = useNavigate()
   const me = { id: user?.id || user?.email || '', name: user?.displayName || user?.email || 'Tu', photoURL: user?.photoURL }
 
   const meKeys = useMemo(() => {
@@ -423,6 +426,10 @@ const EventChat: React.FC<Props> = ({ eventId: eventIdProp, chatDescriptor: desc
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
+  const saveAsIdea = (m: ChatMessage) => {
+    if (m.text) navigate('/ideas?create=1', { state: { ideaDraft: messageToIdeaDraft(m.text) } })
+  }
+
   const toggleReaction = async (m: ChatMessage, emoji: string) => {
     if (!me.id) return
     const arr = (m.reactions || {})[emoji] || []
@@ -603,6 +610,7 @@ const EventChat: React.FC<Props> = ({ eventId: eventIdProp, chatDescriptor: desc
         onOpenThread={setOpenThread}
         onDelete={onDelete}
         onToggleReaction={toggleReaction}
+        onSaveAsIdea={saveAsIdea}
         canEditOrDelete={(m) => canEditOrDelete(m, me.id)}
         renderTicks={renderTicks}
         scrollToBottom={scrollToBottom}
@@ -679,6 +687,7 @@ function ChatThread(props: {
   onOpenThread: (m: ChatMessage) => void
   onDelete: (m: ChatMessage) => void
   onToggleReaction: (m: ChatMessage, emoji: string) => void
+  onSaveAsIdea: (m: ChatMessage) => void
   canEditOrDelete: (m: ChatMessage) => boolean
   renderTicks: (m: ChatMessage) => React.ReactNode
   scrollToBottom: (smooth?: boolean) => void
@@ -697,6 +706,7 @@ function ChatThread(props: {
     onOpenThread,
     onDelete,
     onToggleReaction,
+    onSaveAsIdea,
     canEditOrDelete,
     renderTicks,
     scrollToBottom,
@@ -795,6 +805,7 @@ function ChatThread(props: {
                 onOpenThread={onOpenThread}
                 onDelete={onDelete}
                 onToggleReaction={onToggleReaction}
+                onSaveAsIdea={onSaveAsIdea}
                 canEditOrDelete={canEditOrDelete}
                 renderTicks={renderTicks}
                 people={people}

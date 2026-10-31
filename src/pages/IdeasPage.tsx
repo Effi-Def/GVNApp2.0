@@ -8,8 +8,8 @@ import { useAppStore } from '../stores/AppStore'
 import { useAuthStore } from '../stores/useAuthStore'
 import type { FarmMembership, Idea, IdeaCategory, IdeaDraft } from '../types'
 import {
+  buildIdeaEventPrefill,
   getIdeaCategory,
-  getIdeaEventCategory,
   getIdeaLinkLabel,
   IDEA_CATEGORIES,
   normalizeIdeaLink,
@@ -53,8 +53,9 @@ const IdeasPage = () => {
   // Auto-open create form when ?create=1
   useEffect(() => {
     if (new URLSearchParams(location.search).get('create') !== '1') return
+    const draft = (location.state as { ideaDraft?: { title: string; note?: string } } | null)?.ideaDraft
     setEditingIdea(null)
-    setForm(EMPTY_FORM)
+    setForm(draft ? { ...EMPTY_FORM, title: draft.title, note: draft.note || '', category: 'altro' } : EMPTY_FORM)
     setFormError(null)
     setShowForm(true)
   }, [location.search])
@@ -79,6 +80,7 @@ const IdeasPage = () => {
   const matchesFilter = (idea: Idea) => filter === 'all' || idea.category === filter
   const openIdeas = rankOpenIdeas(ideas).filter(matchesFilter)
   const organizedIdeas = ideas.filter(idea => idea.status === 'organized').filter(matchesFilter)
+  const doneIdeas = ideas.filter(idea => idea.status === 'done').filter(matchesFilter)
 
   const personName = (userId: string) =>
     userId === currentUserId ? 'Tu' : memberNames.get(userId) || 'Un Maiale'
@@ -176,23 +178,17 @@ const IdeasPage = () => {
     void runAction(() => ideaService.reopen(activeFarmId, idea.id), 'Non sono riuscito a riaprire l’idea. Riprova.')
   }
 
+  const handleMarkDone = (idea: Idea) => {
+    if (!activeFarmId) return
+    void runAction(() => ideaService.markDone(activeFarmId, idea.id), 'Non sono riuscito ad aggiornare l’idea. Riprova.')
+  }
+
   const organizeWithDate = (idea: Idea) => {
-    navigate('/events?create=1', {
-      state: {
-        idea: {
-          id: idea.id,
-          farmId: idea.farmId,
-          title: idea.title,
-          note: idea.note,
-          location: idea.location,
-          category: getIdeaEventCategory(idea.category),
-        },
-      },
-    })
+    navigate('/events?create=1', { state: { idea: buildIdeaEventPrefill(idea) } })
   }
 
   const organizeWithPoll = (idea: Idea) => {
-    navigate('/polls?create=1&type=date', { state: { idea: { title: idea.title, note: idea.note } } })
+    navigate('/polls?create=1&type=date', { state: { idea: buildIdeaEventPrefill(idea) } })
   }
 
   const inputClass = 'w-full px-3 py-2 rounded-lg border border-[--border-base] bg-[--bg-card] text-[--text-base] focus:outline-none focus:border-primary-500'
@@ -255,7 +251,7 @@ const IdeasPage = () => {
           <div className="text-base font-semibold text-[--text-base] mb-1">Non riesco a caricare le idee</div>
           <div className="text-sm text-[--text-muted]">Controlla la connessione e riapri la pagina.</div>
         </div>
-      ) : openIdeas.length === 0 && organizedIdeas.length === 0 ? (
+      ) : openIdeas.length === 0 && organizedIdeas.length === 0 && doneIdeas.length === 0 ? (
         <div className="rounded-2xl border border-[--border-base] bg-[--bg-card] p-8 text-center">
           <div className="text-3xl mb-3">💡</div>
           {ideas.length === 0 ? (
@@ -374,6 +370,13 @@ const IdeasPage = () => {
                     >
                       📅 Ho una data
                     </button>
+                    <button
+                      type="button"
+                      className="flex-1 px-3 py-2.5 rounded-xl border border-[--border-base] text-[--text-base] text-sm font-semibold"
+                      onClick={() => handleMarkDone(idea)}
+                    >
+                      ✅ Già fatta
+                    </button>
                   </div>
                 )}
               </article>
@@ -388,6 +391,49 @@ const IdeasPage = () => {
               </summary>
               <div className="divide-y divide-[--border-base] border-t border-[--border-base]">
                 {organizedIdeas.map(idea => {
+                  const hasEvent = !!idea.eventId && events.some(e => e.id === idea.eventId)
+                  return (
+                    <div key={idea.id} className="flex items-center gap-3 px-4 py-3">
+                      <div className="shrink-0 text-base" aria-hidden>{getIdeaCategory(idea.category).emoji}</div>
+                      <div className="flex-1 min-w-0 text-sm font-medium text-[--text-base] break-words">{idea.title}</div>
+                      {hasEvent && (
+                        <button
+                          type="button"
+                          className="shrink-0 text-xs font-medium text-primary-600 underline"
+                          onClick={() => navigate(`/events/${idea.eventId}/summary`)}
+                        >
+                          Apri evento
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs font-medium text-[--text-base] underline"
+                        onClick={() => handleMarkDone(idea)}
+                      >
+                        Fatta
+                      </button>
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs text-[--text-muted] underline"
+                        onClick={() => handleReopen(idea)}
+                      >
+                        Riapri
+                      </button>
+                    </div>
+                  )
+                })}
+              </div>
+            </details>
+          )}
+
+          {doneIdeas.length > 0 && (
+            <details className="rounded-2xl border border-[--border-base] bg-[--bg-card] overflow-hidden group">
+              <summary className="px-4 py-3 text-sm font-medium text-[--text-muted] cursor-pointer select-none list-none flex items-center justify-between hover:bg-[--bg-subtle] transition">
+                <span>Fatte ✅ ({doneIdeas.length})</span>
+                <span className="text-xs group-open:rotate-180 transition-transform inline-block" aria-hidden>▾</span>
+              </summary>
+              <div className="divide-y divide-[--border-base] border-t border-[--border-base]">
+                {doneIdeas.map(idea => {
                   const hasEvent = !!idea.eventId && events.some(e => e.id === idea.eventId)
                   return (
                     <div key={idea.id} className="flex items-center gap-3 px-4 py-3">
@@ -424,7 +470,10 @@ const IdeasPage = () => {
           <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-[--text-base]">{editingIdea ? 'Modifica idea' : 'Nuova idea'}</h2>
+                <div className="min-w-0">
+                  <h2 className="text-xl font-bold text-[--text-base]">{editingIdea ? 'Modifica idea' : 'Nuova idea'}</h2>
+                  {activeFarm?.name && <p className="text-xs text-[--text-muted] mt-0.5">Fattoria: {activeFarm.name}</p>}
+                </div>
                 <button
                   type="button"
                   onClick={closeForm}

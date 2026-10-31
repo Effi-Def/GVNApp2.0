@@ -1,10 +1,13 @@
 import {
   collection,
+  getCountFromServer,
   getDocs,
   query,
   orderBy,
   limit,
   onSnapshot,
+  Timestamp,
+  where,
 } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { ChatAttachment, ChatMessage } from '../../types'
@@ -32,6 +35,16 @@ function mapMsg(d: any, contextId: string): ChatMessage {
 }
 
 export const chatReadService = {
+  /** Messages after the last read, counted by the server without downloading them. */
+  async getUnreadCount(eventId: string, lastReadAt: Date): Promise<number> {
+    const q = query(
+      collection(db, 'events', eventId, 'messages'),
+      where('createdAt', '>', Timestamp.fromDate(lastReadAt)),
+    )
+    const snap = await getCountFromServer(q)
+    return snap.data().count
+  },
+
   /** Generic listener — accepts any Firestore messages collection path. */
   listenPath(messagesPath: string, cb: (messages: ChatMessage[]) => void, onError?: (e: any) => void) {
     const segments = messagesPath.split('/')

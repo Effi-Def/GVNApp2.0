@@ -93,6 +93,65 @@ test('crea idea -> Ci sto -> organizza evento', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Apri evento' })).toBeVisible()
 })
 
+test('idea -> sondaggio date -> votazione chiusa -> evento', async ({ page }) => {
+  await page.clock.install({ time: new Date('2030-03-25T10:00:00.000Z') })
+  await primeRuntime(page, { scenario: 'seeded', auth: 'signed-in' })
+
+  await page.goto('/ideas?create=1')
+  await page.getByLabel('Cosa vi piacerebbe fare?').fill('Gita a Camogli')
+  await page.locator('form').getByRole('button', { name: 'Aggiungi', exact: true }).click()
+  await page.getByRole('article').getByRole('button', { name: 'Organizza', exact: true }).click()
+  await page.getByRole('button', { name: /Quando siete liberi/ }).click()
+
+  await expect(page.locator('input[type="text"]').first()).toHaveValue('Quando facciamo “Gita a Camogli”?')
+  const dateInputs = page.locator('form input[type="date"]')
+  await dateInputs.nth(0).fill('2030-04-06')
+  await dateInputs.nth(1).fill('2030-04-07')
+  await page.getByRole('button', { name: /Invia sondaggio/ }).click()
+
+  const main = page.getByRole('main')
+  await main.getByRole('button', { name: /domenica 7 aprile/ }).click()
+  await expect(main.getByText('Hai votato in questo sondaggio')).toBeVisible()
+  const createEvent = main.getByRole('button', { name: /Crea l’evento per domenica 7 aprile/ })
+  await expect(createEvent).toHaveCount(0)
+
+  await page.clock.fastForward(73 * 60 * 60 * 1000)
+  await createEvent.click()
+
+  await expect(page.getByLabel('Titolo')).toHaveValue('Gita a Camogli')
+  await expect(page.getByLabel('Data')).toHaveValue('2030-04-07')
+  await page.locator('form').getByRole('button', { name: 'Crea', exact: true }).click()
+  await expect(main.getByText('Gita a Camogli')).toBeVisible()
+
+  await page.getByRole('link', { name: 'Da fare' }).click()
+  await page.getByText(/Già organizzate \(1\)/).click()
+  await main.getByRole('button', { name: 'Fatta', exact: true }).click()
+  await expect(main.getByText(/Fatte ✅ \(1\)/)).toBeVisible()
+})
+
+test('messaggio in chat -> salva come idea', async ({ page }) => {
+  await primeRuntime(page, { scenario: 'seeded', auth: 'signed-in' })
+
+  await page.goto('/events/event-seeded/summary')
+  await page.getByRole('button', { name: /Sì/ }).click()
+  const openChatButton = page.getByRole('main').getByRole('button', { name: 'Apri chat', exact: true })
+  await expect(openChatButton).toBeEnabled()
+  await openChatButton.click()
+  await page.getByPlaceholder('Scrivi un messaggio...').fill('Dovremmo andare a Lisbona')
+  await page.getByPlaceholder('Scrivi un messaggio...').press('Enter')
+  await expect(page.getByPlaceholder('Scrivi un messaggio...')).toHaveValue('')
+
+  const message = page.getByRole('main').getByText('Dovremmo andare a Lisbona', { exact: true })
+  await expect(message).toBeVisible()
+  await message.hover()
+  await page.getByRole('button', { name: 'Opzioni messaggio' }).click()
+  await page.getByRole('button', { name: /Salva come idea/ }).click()
+
+  await expect(page.getByLabel('Cosa vi piacerebbe fare?')).toHaveValue('Dovremmo andare a Lisbona')
+  await page.locator('form').getByRole('button', { name: 'Aggiungi', exact: true }).click()
+  await expect(page.getByRole('article').getByText('Dovremmo andare a Lisbona')).toBeVisible()
+})
+
 test('crea lista -> avanza stato -> resta dopo aver cambiato pagina', async ({ page }) => {
   await primeRuntime(page, { scenario: 'seeded', auth: 'signed-in' })
 

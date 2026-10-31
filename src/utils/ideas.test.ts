@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { Idea } from '../types'
-import { getIdeaEventCategory, getIdeaLinkLabel, normalizeIdeaLink, rankOpenIdeas } from './ideas'
+import {
+  getIdeaEventCategory,
+  getIdeaLinkLabel,
+  getWinningDateOption,
+  messageToIdeaDraft,
+  normalizeIdeaLink,
+  rankOpenIdeas,
+} from './ideas'
 
 const makeIdea = (overrides: Partial<Idea>): Idea => ({
   id: 'idea',
@@ -52,6 +59,44 @@ describe('getIdeaEventCategory', () => {
     expect(getIdeaEventCategory('ristorante')).toBe('cena')
     expect(getIdeaEventCategory('viaggio')).toBe('viaggio')
     expect(getIdeaEventCategory('posto')).toBe('altro')
+  })
+})
+
+describe('messageToIdeaDraft', () => {
+  it('uses a short message as title', () => {
+    expect(messageToIdeaDraft('  Dovremmo andare a Lisbona ')).toEqual({ title: 'Dovremmo andare a Lisbona' })
+  })
+
+  it('cuts a long message and keeps it in the note', () => {
+    const text = 'x'.repeat(300)
+    const draft = messageToIdeaDraft(text)
+    expect(draft.title.length).toBeLessThanOrEqual(120)
+    expect(draft.note).toBe(text)
+  })
+
+  it('keeps the note within the allowed size', () => {
+    expect(messageToIdeaDraft('x'.repeat(5000)).note).toHaveLength(1000)
+  })
+})
+
+describe('getWinningDateOption', () => {
+  const options = [
+    { id: 'a', text: '2030-05-02', votes: 0 },
+    { id: 'b', text: '2030-05-01', votes: 0 },
+  ]
+  const vote = (optionId: string) => ({ userId: optionId, userName: 'x', optionId, votedAt: new Date() })
+
+  it('returns the most voted date', () => {
+    expect(getWinningDateOption({ options, votes: [vote('a'), vote('a'), vote('b')] })).toBe('2030-05-02')
+  })
+
+  it('prefers the earliest date on a tie', () => {
+    expect(getWinningDateOption({ options, votes: [vote('a'), vote('b')] })).toBe('2030-05-01')
+  })
+
+  it('returns null without votes or with options that are not dates', () => {
+    expect(getWinningDateOption({ options, votes: [] })).toBeNull()
+    expect(getWinningDateOption({ options: [{ id: 'a', text: 'Pizza', votes: 0 }], votes: [vote('a')] })).toBeNull()
   })
 })
 

@@ -34,7 +34,7 @@ function mapIdea(d: any): Idea {
     location: data.location,
     createdBy: data.createdBy || '',
     interestedIds: Array.isArray(data.interestedIds) ? data.interestedIds : [],
-    status: data.status === 'organized' ? 'organized' : 'open',
+    status: data.status === 'organized' || data.status === 'done' ? data.status : 'open',
     eventId: data.eventId,
     createdAt: toDateOrNow(data.createdAt),
     updatedAt: toDateOrNow(data.updatedAt),
@@ -97,6 +97,10 @@ export const ideaService = {
       eventId,
       updatedAt: Timestamp.now(),
     })
+  },
+
+  async markDone(farmId: string, ideaId: string): Promise<void> {
+    await updateDoc(ideaDoc(farmId, ideaId), { status: 'done', updatedAt: Timestamp.now() })
   },
 
   async reopen(farmId: string, ideaId: string): Promise<void> {

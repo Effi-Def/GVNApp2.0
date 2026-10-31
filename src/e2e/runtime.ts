@@ -875,6 +875,11 @@ function patchIdeaService() {
         idea.eventId = eventId
       })
     },
+    async markDone(_farmId: string, ideaId: string) {
+      changeIdea(ideaId, (idea) => {
+        idea.status = 'done'
+      })
+    },
     async reopen(_farmId: string, ideaId: string) {
       changeIdea(ideaId, (idea) => {
         idea.status = 'open'
@@ -892,6 +897,10 @@ function patchIdeaService() {
 
 function patchChatService() {
   Object.assign(chatService as object, {
+    async getUnreadCount(eventId: string, lastReadAt: Date) {
+      const messages = ensureDb().chats[eventId] || []
+      return messages.filter((message) => message.createdAt > lastReadAt).length
+    },
     listen(eventId: string, callback: MessageListener) {
       const db = ensureDb()
       return registerListener(messageListeners, eventId, callback, sortByNewest([...(db.chats[eventId] || [])]).reverse())

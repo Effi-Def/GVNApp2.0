@@ -1,4 +1,4 @@
-import type { EventCategory, Idea, IdeaCategory } from '../types'
+import type { EventCategory, Idea, IdeaCategory, IdeaEventPrefill, Poll } from '../types'
 
 export const IDEA_CATEGORIES: { value: IdeaCategory; label: string; emoji: string }[] = [
   { value: 'posto', label: 'Posto', emoji: '📍' },
@@ -7,6 +7,8 @@ export const IDEA_CATEGORIES: { value: IdeaCategory; label: string; emoji: strin
   { value: 'viaggio', label: 'Viaggio', emoji: '✈️' },
   { value: 'altro', label: 'Altro', emoji: '💡' },
 ]
+
+const IDEA_TITLE_MAX = 120
 
 const EVENT_CATEGORY_BY_IDEA: Record<IdeaCategory, EventCategory> = {
   posto: 'altro',
@@ -21,6 +23,22 @@ export const getIdeaCategory = (category: IdeaCategory) =>
 
 export const getIdeaEventCategory = (category: IdeaCategory): EventCategory =>
   EVENT_CATEGORY_BY_IDEA[category] ?? 'altro'
+
+export const buildIdeaEventPrefill = (idea: Idea): IdeaEventPrefill => ({
+  id: idea.id,
+  farmId: idea.farmId,
+  title: idea.title,
+  note: idea.note,
+  location: idea.location,
+  category: getIdeaEventCategory(idea.category),
+})
+
+/** A chat message as the starting point of an idea: a long text moves entirely to the note. */
+export const messageToIdeaDraft = (text: string): { title: string; note?: string } => {
+  const clean = text.trim()
+  if (clean.length <= IDEA_TITLE_MAX) return { title: clean }
+  return { title: `${clean.slice(0, IDEA_TITLE_MAX - 1).trimEnd()}…`, note: clean.slice(0, 1000) }
+}
 
 /**
  * Returns a safe http(s) URL, null when the text cannot be used as a link.
@@ -56,3 +74,18 @@ export const rankOpenIdeas = (ideas: Idea[]): Idea[] =>
       b.interestedIds.length - a.interestedIds.length ||
       b.createdAt.getTime() - a.createdAt.getTime()
     )
+
+/** The most voted date of a date poll; on a tie the earliest one. Null without votes or dates. */
+export const getWinningDateOption = (poll: Pick<Poll, 'options' | 'votes'>): string | null => {
+  const isDate = (text: string) => /^\d{4}-\d{2}-\d{2}$/.test(text)
+  if (poll.options.length === 0 || !poll.options.every(o => isDate(o.text))) return null
+  let winner: { date: string; votes: number } | null = null
+  for (const option of poll.options) {
+    const votes = poll.votes.filter(v => v.optionId === option.id).length
+    if (votes === 0) continue
+    if (!winner || votes > winner.votes || (votes === winner.votes && option.text < winner.date)) {
+      winner = { date: option.text, votes }
+    }
+  }
+  return winner?.date ?? null
+}
