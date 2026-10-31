@@ -85,7 +85,9 @@ dist
 
 # Gatsby files
 .cache/
-public
+
+# Generated at build time by vite.config.ts (public/ itself holds tracked assets)
+public/firebase-messaging-sw.js
 
 # Storybook build outputs
 .out
