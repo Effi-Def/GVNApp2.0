@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
-import { roundTo2 } from '../services/firestoreMappers'
+import { formatEuro, splitEqually } from '../utils/expenseUtils'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -12,6 +12,7 @@ const expenseSchema = z.object({
   title: z.string().min(1, 'Il titolo è obbligatorio'),
   amount: z.coerce.number().min(0.01, 'Inserisci un importo valido'),
   eventId: z.string().min(1, 'Seleziona un evento'),
+  paidBy: z.string().min(1, 'Indica chi ha pagato'),
   participants: z.array(z.object({
     userId: z.string(),
     name: z.string(),
@@ -21,6 +22,11 @@ const expenseSchema = z.object({
 })
 
 type ExpenseFormData = z.infer<typeof expenseSchema>
+
+const withEqualShares = <T extends { amount: number }>(participants: T[], amount: number): T[] => {
+  const shares = splitEqually(amount, participants.length)
+  return participants.map((p, i) => ({ ...p, amount: shares[i] }))
+}
 
 interface ExpenseFormProps {
   expense?: Expense // Per la modifica
@@ -49,8 +55,9 @@ const ExpenseForm = ({ expense, defaultEventId, onSubmit, onClose, isLoading = f
     resolver: zodResolver(expenseSchema) as any,
     defaultValues: {
       title: expense?.title || '',
-      amount: expense?.amount || 0,
+      amount: expense?.amount || undefined,
       eventId: expense?.eventId || defaultEventId || '',
+      paidBy: expense?.paidBy || user?.id || '',
       participants: expense?.participants || []
     }
   })
@@ -58,6 +65,17 @@ const ExpenseForm = ({ expense, defaultEventId, onSubmit, onClose, isLoading = f
   const selectedEventId = watch('eventId')
   const currentAmount = watch('amount')
   const currentParticipants = watch('participants')
+  const currentPayer = watch('paidBy')
+
+  // Chi può aver pagato: i partecipanti dell'evento, più chi sta inserendo la spesa
+  const payerOptions = useMemo(() => {
+    const options = new Map(availableParticipants.map(p => [p.userId, p.name]))
+    if (user?.id && !options.has(user.id)) options.set(user.id, user.displayName || 'Tu')
+    if (expense?.paidBy && !options.has(expense.paidBy)) {
+      options.set(expense.paidBy, expense.participants.find(p => p.userId === expense.paidBy)?.name || 'Altro partecipante')
+    }
+    return Array.from(options, ([userId, name]) => ({ userId, name: userId === user?.id ? `${name} (tu)` : name }))
+  }, [availableParticipants, user?.id, user?.displayName, expense])
 
   // Quando si seleziona un evento, aggiorna i partecipanti disponibili
   useEffect(() => {
@@ -72,14 +90,12 @@ const ExpenseForm = ({ expense, defaultEventId, onSubmit, onClose, isLoading = f
         
         // Se è una nuova spesa (o se la lista partecipanti è vuota), seleziona automaticamente tutti
         if (!expense && currentParticipants.length === 0) {
-          const amount = currentAmount || 0
-          const splitAmount = participants.length > 0 ? roundTo2(amount / participants.length) : 0
-          setValue('participants', participants.map(p => ({
+          setValue('participants', withEqualShares(participants.map(p => ({
             userId: p.userId,
             name: p.name,
-            amount: splitAmount,
+            amount: 0,
             settled: false
-          })))
+          })), currentAmount || 0))
         }
       }
     } else {
@@ -90,31 +106,23 @@ const ExpenseForm = ({ expense, defaultEventId, onSubmit, onClose, isLoading = f
   // Quando cambia l'importo, ricalcola gli split
   useEffect(() => {
     if (currentParticipants.length > 0) {
-      const amount = currentAmount || 0
-      const splitAmount = roundTo2(amount / currentParticipants.length)
+      const next = withEqualShares(currentParticipants, currentAmount || 0)
 
-      // Evita loop infinito se i valori sono già corretti (con tolleranza per float)
-      const needsUpdate = currentParticipants.some(p => Math.abs(p.amount - splitAmount) > 0.01)
-      
-      if (needsUpdate) {
-        setValue('participants', currentParticipants.map(p => ({
-          ...p,
-          amount: splitAmount
-        })))
+      // Evita loop infinito se i valori sono già corretti
+      if (next.some((p, i) => p.amount !== currentParticipants[i].amount)) {
+        setValue('participants', next)
       }
     }
   }, [currentAmount]) // Rimosso currentParticipants dalle dipendenze per evitare loop
 
   // Funzioni per gestire la selezione dei partecipanti
   const selectAllParticipants = () => {
-    const amount = currentAmount || 0
-    const splitAmount = availableParticipants.length > 0 ? roundTo2(amount / availableParticipants.length) : 0
-    setValue('participants', availableParticipants.map(p => ({
+    setValue('participants', withEqualShares(availableParticipants.map(p => ({
       userId: p.userId,
       name: p.name,
-      amount: splitAmount,
+      amount: 0,
       settled: false
-    })))
+    })), currentAmount || 0))
   }
 
   const deselectAllParticipants = () => {
@@ -142,13 +150,7 @@ const ExpenseForm = ({ expense, defaultEventId, onSubmit, onClose, isLoading = f
     }
 
     // Ricalcola split
-    const amount = currentAmount || 0
-    const splitAmount = newParticipants.length > 0 ? roundTo2(amount / newParticipants.length) : 0
-    
-    setValue('participants', newParticipants.map(p => ({
-      ...p,
-      amount: splitAmount
-    })))
+    setValue('participants', withEqualShares(newParticipants, currentAmount || 0))
   }
 
   const onFormSubmit = async (data: ExpenseFormData) => {
@@ -158,11 +160,12 @@ const ExpenseForm = ({ expense, defaultEventId, onSubmit, onClose, isLoading = f
       const expenseData: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'> = {
         title: data.title.trim(),
         amount: data.amount,
-        paidBy: user.id,
+        paidBy: data.paidBy,
+        createdBy: expense?.createdBy || user.id,
         participants: data.participants,
         eventId: data.eventId,
         // Popola participantIds per le regole di sicurezza
-        participantIds: [user.id, ...data.participants.map(p => p.userId)]
+        participantIds: [...new Set([user.id, data.paidBy, ...data.participants.map(p => p.userId)])]
       }
 
       await onSubmit(expenseData)
@@ -264,6 +267,27 @@ const ExpenseForm = ({ expense, defaultEventId, onSubmit, onClose, isLoading = f
               )}
             </div>
 
+            {/* Payer */}
+            <div>
+              <label htmlFor="paidBy" className="block text-sm font-medium text-[--text-muted] mb-1">
+                Chi ha pagato *
+              </label>
+              <select
+                id="paidBy"
+                {...register('paidBy')}
+                value={currentPayer}
+                className="w-full px-3 py-2 border border-[--border-base] rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500"
+                disabled={isLoading}
+              >
+                {payerOptions.map(option => (
+                  <option key={option.userId} value={option.userId}>{option.name}</option>
+                ))}
+              </select>
+              {errors.paidBy && (
+                <p className="mt-1 text-sm text-red-600">{errors.paidBy.message}</p>
+              )}
+            </div>
+
             {/* Participants Section */}
             {availableParticipants.length > 0 && (
               <div>
@@ -307,7 +331,7 @@ const ExpenseForm = ({ expense, defaultEventId, onSubmit, onClose, isLoading = f
                         </label>
                         {isSelected && selectedParticipant && (
                           <span className="text-xs text-[--text-muted] bg-[--bg-raised] px-2 py-1 rounded">
-                            {selectedParticipant.amount.toFixed(2)}€
+                            {formatEuro(selectedParticipant.amount)}
                           </span>
                         )}
                       </div>
@@ -317,7 +341,7 @@ const ExpenseForm = ({ expense, defaultEventId, onSubmit, onClose, isLoading = f
                 
                 {currentParticipants.length > 0 && (
                   <div className="mt-2 text-xs text-[--text-muted]">
-                    Totale: {currentParticipants.length} persone × {currentParticipants.length > 0 ? (currentAmount / currentParticipants.length).toFixed(2) : '0.00'}€ ciascuno
+                    {currentParticipants.length === 1 ? '1 persona' : `${currentParticipants.length} persone`} · totale {formatEuro(currentParticipants.reduce((sum, p) => sum + p.amount, 0))}
                   </div>
                 )}
                 

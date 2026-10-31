@@ -5,8 +5,10 @@ import { roundTo2 } from '../services/firestoreMappers'
 import { refreshActiveFarmData, useAuthStore } from '../stores/useAuthStore'
 import { useAppStore } from '../stores/AppStore'
 import { useActiveFarmStore } from '../stores/useActiveFarmStore'
-import { Expense, Event, ExpenseParticipant, PaymentTransaction } from '../types'
+import { Expense, Event, PaymentTransaction } from '../types'
+import ExpenseForm from '../components/ExpenseForm'
 import ExpenseSettlement from '../components/ExpenseSettlement'
+import { formatEuro, formatEuroSigned } from '../utils/expenseUtils'
 import { getSelectableEvents, getUserEventParticipation, getUserKeys } from '../utils/events'
 
 const ExpensesPage = () => {
@@ -24,17 +26,7 @@ const ExpensesPage = () => {
   const [submitting, setSubmitting] = useState(false)
   const handledNavStateRef = useRef<string>('')
 
-  const navEventId = (location.state as { eventId?: string } | null)?.eventId
-  const allowCreateFromGlobal = !!((location.state as { openForm?: boolean } | null)?.openForm && navEventId)
-
-  // Form data per nuova spesa
-  const [formData, setFormData] = useState({
-    title: '',
-    amount: '',
-    category: 'Cibo',
-    eventId: '',
-    participants: [] as string[]
-  })
+  const [formEventId, setFormEventId] = useState<string | undefined>(undefined)
 
   const currentUserId = user?.id || ''
   const userKeys = getUserKeys(user)
@@ -100,8 +92,8 @@ const ExpensesPage = () => {
     const navKey = `${eventId}:${openForm}`
     if (handledNavStateRef.current === navKey) return
     handledNavStateRef.current = navKey
+    setFormEventId(eventId)
     setShowForm(true)
-    handleEventChange(eventId)
   }, [location?.state, events])
 
   // Auto-open create form when ?create=1
@@ -110,14 +102,8 @@ const ExpensesPage = () => {
     const shouldCreate = params.get('create') === '1'
     if (!shouldCreate) return
     setEditingExpense(null)
+    setFormEventId(undefined)
     setShowForm(true)
-    setFormData({
-      title: '',
-      amount: '',
-      category: 'Cibo',
-      eventId: '',
-      participants: [],
-    })
   }, [location?.search])
 
   // Calcolo del saldo totale
@@ -158,42 +144,11 @@ const ExpensesPage = () => {
     })
   }
 
-  // Gestione cambio evento - aggiorna automaticamente i partecipanti disponibili
-  const handleEventChange = (eventId: string) => {
-    const selectedEvent = events.find(e => e.id === eventId)
-    setFormData(prev => ({
-      ...prev,
-      eventId,
-      participants: selectedEvent ? [currentUserId] : []
-    }))
-  }
-
-  // Ottieni i partecipanti disponibili in base all'evento selezionato
-  const getAvailableParticipants = () => {
-    if (!formData.eventId) return []
-    const selectedEvent = events.find(e => e.id === formData.eventId)
-    return selectedEvent ? selectedEvent.participants : []
-  }
-
-  const toggleParticipant = (participantId: string) => {
-    setFormData(prev => ({
-      ...prev,
-      participants: prev.participants.includes(participantId)
-        ? prev.participants.filter(p => p !== participantId)
-        : [...prev.participants, participantId]
-    }))
-  }
-
   // Funzioni per gestire le spese
-  const handleSubmitExpense = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!formData.title || !formData.eventId || formData.participants.length === 0) return
-    const parsedAmount = parseFloat(formData.amount)
-    if (!formData.amount || isNaN(parsedAmount) || parsedAmount <= 0) return
-
+  const handleSubmitExpense = async (expenseData: Omit<Expense, 'id' | 'createdAt' | 'updatedAt'>) => {
     setSubmitting(true)
     try {
-      const selectedEvent = events.find(e => e.id === formData.eventId)
+      const selectedEvent = events.find(e => e.id === expenseData.eventId)
       if (!selectedEvent) return
 
       // Only full access can create expenses
@@ -201,28 +156,6 @@ const ExpensesPage = () => {
       if (p.accessLevel !== 'full') {
         alert('Non hai i permessi per creare spese in questo evento')
         return
-      }
-
-      // Calcola l'importo per partecipante, arrotondato a 2 decimali per evitare drift IEEE-754
-      const amountPerPerson = roundTo2(parsedAmount / formData.participants.length)
-
-      // Crea i partecipanti con la struttura corretta
-      const participants: ExpenseParticipant[] = formData.participants.map(participantId => {
-        const participant = selectedEvent.participants.find(p => p.userId === participantId)
-        return {
-          userId: participantId,
-          name: participant?.name || participantId,
-          amount: amountPerPerson,
-          settled: false
-        }
-      })
-
-      const expenseData = {
-        title: formData.title,
-        amount: parsedAmount,
-        paidBy: currentUserId,
-        participants,
-        eventId: formData.eventId
       }
 
       if (editingExpense) {
@@ -235,19 +168,11 @@ const ExpensesPage = () => {
         setExpenses(prev => [newExpense, ...prev])
       }
 
-      // Reset form
-      setFormData({
-        title: '',
-        amount: '',
-        category: 'Cibo',
-        eventId: '',
-        participants: []
-      })
-      setShowForm(false)
       console.log('✅ Expense saved successfully')
     } catch (error) {
       console.error('❌ Error saving expense:', error)
       alert('Errore durante il salvataggio della spesa')
+      throw error
     } finally {
       setSubmitting(false)
     }
@@ -255,13 +180,6 @@ const ExpensesPage = () => {
 
   const handleEditExpense = (expense: Expense) => {
     setEditingExpense(expense)
-    setFormData({
-      title: expense.title,
-      amount: expense.amount.toString(),
-      category: 'Cibo', // Default category since it's not stored in the expense
-      eventId: expense.eventId || '',
-      participants: expense.participants.map(p => p.userId)
-    })
     setShowForm(true)
   }
 
@@ -325,11 +243,11 @@ const ExpensesPage = () => {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => { setEditingExpense(null); setShowForm(true) }}
+              onClick={() => { setEditingExpense(null); setFormEventId(undefined); setShowForm(true) }}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white text-sm font-medium rounded-lg transition-colors"
             >
               <span className="text-base leading-none font-bold">+</span>
-              <span className="hidden sm:inline">Nuova</span>
+              <span>Nuova</span>
             </button>
             <div className="flex bg-[--bg-raised] p-0.5 rounded-lg">
               <button
@@ -377,7 +295,7 @@ const ExpensesPage = () => {
         <div className="text-center">
           <h2 className="text-lg font-semibold text-[--text-muted] mb-2">Il tuo saldo</h2>
           <div className={`text-4xl font-bold mb-2 ${balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-            {balance >= 0 ? '+' : ''}{balance.toFixed(2)}€
+            {formatEuroSigned(balance)}
           </div>
           <p className="text-[--text-muted]">
             {balance > 0 
@@ -470,15 +388,15 @@ const ExpensesPage = () => {
                       Pagato da <span className="font-medium">{paidByName}</span> • {formatDate(expense.createdAt)}
                     </p>
                     <p className="text-sm text-[--text-muted]">
-                      {expense.participants.length} partecipanti: {expense.participants.map(p => p.name).join(', ')}
+                      {expense.participants.length === 1 ? '1 partecipante' : `${expense.participants.length} partecipanti`}: {expense.participants.map(p => p.name).join(', ')}
                     </p>
                   </div>
                 </div>
                 <div className="flex items-center space-x-4">
                   <div className="text-right">
-                    <p className="text-xl font-bold text-[--text-base]">€{expense.amount.toFixed(2)}</p>
+                    <p className="text-xl font-bold text-[--text-base]">{formatEuro(expense.amount)}</p>
                     <p className="text-sm text-[--text-muted]">
-                      €{(expense.amount / expense.participants.length).toFixed(2)} a testa
+                      circa {formatEuro(expense.amount / expense.participants.length)} a testa
                     </p>
                     {expense.paidBy === currentUserId && (
                       <span className="inline-block mt-1 px-2 py-1 bg-green-500/10 text-green-600 text-xs font-medium rounded-full">
@@ -486,8 +404,8 @@ const ExpensesPage = () => {
                       </span>
                     )}
                   </div>
-                  {/* Controlli modifica/cancellazione per chi ha creato la spesa */}
-                  {expense.paidBy === currentUserId && (
+                  {/* Controlli modifica/cancellazione per chi ha pagato o inserito la spesa */}
+                  {(expense.paidBy === currentUserId || expense.createdBy === currentUserId) && (
                     <div className="flex flex-col space-y-1">
                       <button
                         onClick={() => handleEditExpense(expense)}
@@ -520,9 +438,9 @@ const ExpensesPage = () => {
             <div className="text-6xl mb-4">💸</div>
             <h3 className="text-xl font-semibold text-[--text-muted] mb-2">Nessuna spesa trovata</h3>
             <p className="text-[--text-muted]">
-              {allowCreateFromGlobal
-                ? 'Non ci sono spese che corrispondono ai filtri selezionati'
-                : 'Questa pagina è di consultazione. Per creare una spesa: apri un evento e usa il Riassunto.'}
+              {expenses.length > 0
+                ? 'Non ci sono spese che corrispondono ai filtri selezionati.'
+                : 'Tocca + Nuova per registrare la prima spesa.'}
             </p>
           </div>
         )}
@@ -532,223 +450,16 @@ const ExpensesPage = () => {
 
       {/* Modal Form per Aggiungere/Modificare Spesa */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center sm:p-4 z-[60]">
-          <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full h-[calc(100dvh-4rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-[--text-base]">
-                  {editingExpense ? 'Modifica Spesa' : 'Nuova Spesa'}
-                </h2>
-                <button
-                  onClick={() => {
-                    setShowForm(false)
-                    setEditingExpense(null)
-                    setFormData({
-                      title: '',
-                      amount: '',
-                      category: 'Cibo',
-                      eventId: '',
-                      participants: []
-                    })
-                  }}
-                  className="text-[--text-muted] hover:text-[--text-muted]"
-                >
-                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-
-              <form onSubmit={handleSubmitExpense} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-[--text-muted] mb-1">
-                    Titolo spesa
-                  </label>
-                  <input
-                    type="text"
-                    value={formData.title}
-                    onChange={(e) => setFormData({...formData, title: e.target.value})}
-                    className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-blue-500"
-                    placeholder="Es. Cena al ristorante"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-[--text-muted] mb-1">
-                    Importo (€)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.amount}
-                    onChange={(e) => setFormData({...formData, amount: e.target.value})}
-                    className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-blue-500"
-                    placeholder="0.00"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-[--text-muted] mb-1">
-                    Evento <span className="text-red-500">*</span>
-                  </label>
-                  <select
-                    value={formData.eventId}
-                    onChange={(e) => handleEventChange(e.target.value)}
-                    className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-blue-500"
-                    required
-                  >
-                    <option value="">Seleziona un evento</option>
-                    {events.map(event => (
-                      <option key={event.id} value={event.id}>{event.title}</option>
-                    ))}
-                  </select>
-                  <p className="text-xs text-[--text-muted] mt-1">
-                    Seleziona l'evento per vedere i partecipanti disponibili
-                  </p>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-[--text-muted] mb-2">
-                    Partecipanti per lo split {formData.eventId && <span className="text-red-500">*</span>}
-                  </label>
-                  {!formData.eventId ? (
-                    <div className="text-center py-4 bg-[--bg-subtle] rounded-lg border-2 border-dashed border-[--border-base]">
-                      <p className="text-[--text-muted] text-sm">
-                        Seleziona prima un evento per vedere i partecipanti disponibili
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {/* Controlli rapidi per la selezione */}
-                      <div className="flex flex-wrap gap-2 p-3 bg-[--bg-subtle] rounded-lg">
-                        <button
-                          type="button"
-                          onClick={() => setFormData(prev => ({ ...prev, participants: getAvailableParticipants().map(p => p.userId) }))}
-                          className="px-3 py-1 text-xs font-medium bg-blue-500/100 text-white rounded-md hover:bg-blue-600 transition-colors"
-                        >
-                          Tutti i partecipanti ({getAvailableParticipants().length})
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setFormData(prev => ({ ...prev, participants: getAvailableParticipants().map(p => p.userId) }))}
-                          className="px-3 py-1 text-xs font-medium bg-green-500 text-white rounded-md hover:bg-green-600 transition-colors"
-                        >
-                          Seleziona tutti
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setFormData(prev => ({ ...prev, participants: [] }))}
-                          className="px-3 py-1 text-xs font-medium bg-red-500 text-white rounded-md hover:bg-red-600 transition-colors"
-                        >
-                          Deseleziona tutti
-                        </button>
-                      </div>
-
-                      {/* Lista dei partecipanti con checkbox */}
-                      <div className="border border-[--border-base] rounded-lg p-3 max-h-40 overflow-y-auto">
-                        <div className="space-y-2">
-                          {getAvailableParticipants().map(participant => (
-                            <label key={participant.userId} className="flex items-center justify-between p-2 hover:bg-[--bg-subtle] rounded-md cursor-pointer">
-                              <div className="flex items-center space-x-3">
-                                <input
-                                  type="checkbox"
-                                  checked={formData.participants.includes(participant.userId)}
-                                  onChange={() => toggleParticipant(participant.userId)}
-                                  className="rounded border-[--border-base] text-blue-600 focus:ring-blue-500"
-                                />
-                                <span className="text-sm text-[--text-muted] font-medium">{participant.name}</span>
-                                {participant.userId === currentUserId && (
-                                  <span className="text-xs bg-blue-500/100/10 text-blue-600 px-2 py-1 rounded-full">tu</span>
-                                )}
-                              </div>
-                              {formData.participants.includes(participant.userId) && formData.amount && (
-                                <span className="text-xs text-[--text-muted]">
-                                  €{(parseFloat(formData.amount) / formData.participants.length).toFixed(2)}
-                                </span>
-                              )}
-                            </label>
-                          ))}
-                          {getAvailableParticipants().length === 0 && (
-                            <p className="text-sm text-[--text-muted] text-center py-2">
-                              Nessun partecipante disponibile per questo evento
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Riepilogo selezione */}
-                      {formData.eventId && (
-                        <div className="flex items-center justify-between text-sm p-2 bg-blue-500/10 rounded-lg">
-                          <span className="text-[--text-muted]">
-                            {formData.participants.length > 0 
-                              ? `${formData.participants.length} partecipanti selezionati`
-                              : 'Nessun partecipante selezionato'
-                            }
-                          </span>
-                          {formData.participants.length > 0 && formData.amount && (
-                            <span className="font-medium text-blue-700">
-                              €{(parseFloat(formData.amount) / formData.participants.length).toFixed(2)} a testa
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  {formData.eventId && formData.participants.length === 0 && (
-                    <p className="text-xs text-red-500 mt-1">
-                      Seleziona almeno un partecipante per lo split della spesa
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex space-x-3 pt-4 pb-6">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setShowForm(false)
-                      setEditingExpense(null)
-                      setFormData({
-                        title: '',
-                        amount: '',
-                        category: 'Cibo',
-                        eventId: '',
-                        participants: []
-                      })
-                    }}
-                    className="flex-1 px-4 py-3 border border-[--border-base] text-[--text-muted] rounded-xl hover:bg-[--bg-subtle] transition-colors font-medium"
-                    disabled={submitting}
-                  >
-                    Annulla
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submitting}
-                    className="flex-1 px-4 py-3 bg-primary-600 text-white rounded-xl hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
-                  >
-                    {submitting ? 'Salvataggio...' : (editingExpense ? 'Salva' : 'Aggiungi')}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Bottone Aggiungi Spesa Mobile (solo da Summary evento) */}
-      {allowCreateFromGlobal && (
-        <div className="fixed bottom-28 right-6 md:bottom-8 z-40">
-          <button 
-            onClick={() => setShowForm(true)}
-            className="bg-blue-500/100 hover:bg-blue-600 text-white p-4 rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 hover:scale-110 ring-4 ring-blue-100"
-            title="Aggiungi nuova spesa"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
-        </div>
+        <ExpenseForm
+          expense={editingExpense || undefined}
+          defaultEventId={formEventId}
+          onSubmit={handleSubmitExpense}
+          onClose={() => {
+            setShowForm(false)
+            setEditingExpense(null)
+          }}
+          isLoading={submitting}
+        />
       )}
     </div>
   )

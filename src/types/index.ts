@@ -165,6 +165,7 @@ export interface Expense {
   title: string
   amount: number
   paidBy: string
+  createdBy?: string
   participants: ExpenseParticipant[]
   eventId?: string
   notes?: string // 📝 Note e descrizioni aggiuntive

@@ -366,12 +366,13 @@ export const onExpenseCreated = functions.firestore.document('expenses/{id}').on
   const data = snap.data() as admin.firestore.DocumentData | undefined
   if (!data) return
   let userIds = getParticipantsUserIds(data)
-  // Exclude the payer: getParticipantsUserIds already removes createdBy, but expenses use
-  // `paidBy` (not `createdBy`) as the initiator. The payer created this expense themselves
-  // and should not receive a push notification for their own action.
+  // getParticipantsUserIds already removes createdBy. Legacy expenses have no createdBy:
+  // there the payer is the initiator and should not receive a push for their own action.
   const payer = typeof data.paidBy === 'string' ? data.paidBy : null
-  if (payer) userIds = userIds.filter(id => id !== payer)
-  const amount = typeof data.amount === 'number' ? `${data.amount.toFixed(2)}€` : ''
+  if (payer && !data.createdBy) userIds = userIds.filter(id => id !== payer)
+  const amount = typeof data.amount === 'number'
+    ? new Intl.NumberFormat('it-IT', { style: 'currency', currency: 'EUR' }).format(data.amount)
+    : ''
   const title = 'Nuova spesa 💰'
   const body = [data.title || 'Spesa', amount].filter(Boolean).join(' • ')
   await sendFcmToUsers(userIds, 'expense', { notification: { title, body }, data: { click_action: data.eventId ? `/events/${data.eventId}/summary` : '/expenses' } }, snap.id)

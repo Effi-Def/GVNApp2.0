@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Event, Expense, Poll, ShoppingList } from '../types'
 import { useAppStore } from '../stores/AppStore'
 import { listService } from '../services/firestore'
+import { formatEuro } from '../utils/expenseUtils'
 
 interface EventDashboardProps {
   event: Event
@@ -132,7 +133,7 @@ const EventDashboard = ({ event, onClose }: EventDashboardProps) => {
                 <div>
                   <p className="text-green-600 text-sm font-medium">Spese Totali</p>
                   <p className="text-2xl font-bold text-green-900">
-                    {getTotalExpenses().toFixed(2)}€
+                    {formatEuro(getTotalExpenses())}
                   </p>
                 </div>
                 <span className="text-3xl">💰</span>
@@ -201,12 +202,12 @@ const EventDashboard = ({ event, onClose }: EventDashboardProps) => {
                     <div key={expense.id} className="flex justify-between items-center py-2 border-b last:border-b-0">
                       <div>
                         <p className="font-medium text-[--text-base]">{expense.title}</p>
-                        <p className="text-sm text-[--text-muted]">{expense.participants.length} partecipanti</p>
+                        <p className="text-sm text-[--text-muted]">{expense.participants.length === 1 ? '1 partecipante' : `${expense.participants.length} partecipanti`}</p>
                       </div>
                       <div className="text-right">
-                        <p className="font-bold text-[--text-base]">{expense.amount.toFixed(2)}€</p>
+                        <p className="font-bold text-[--text-base]">{formatEuro(expense.amount)}</p>
                         <p className="text-xs text-[--text-muted]">
-                          {(expense.amount / expense.participants.length).toFixed(2)}€ a persona
+                          circa {formatEuro(expense.amount / expense.participants.length)} a persona
                         </p>
                       </div>
                     </div>

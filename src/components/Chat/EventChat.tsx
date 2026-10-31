@@ -583,7 +583,7 @@ const EventChat: React.FC<Props> = ({ eventId: eventIdProp, chatDescriptor: desc
           <div className="text-xs text-[--text-muted] truncate">
             {othersTyping.length > 0
               ? <span className="text-green-600 font-medium">sta scrivendo...</span>
-              : `${participants.length} partecipanti`
+              : (participants.length === 1 ? '1 partecipante' : `${participants.length} partecipanti`)
             }
           </div>
         </div>
@@ -730,7 +730,7 @@ function ChatThread(props: {
           </div>
         )}
 
-        {messages.length === 0 && (
+        {messages.length === 0 && !chatError && (
           <div className="flex flex-col items-center justify-center h-full text-[--text-muted] gap-2">
             <div className="text-4xl">💬</div>
             <div className="text-sm">Nessun messaggio. Inizia la conversazione!</div>

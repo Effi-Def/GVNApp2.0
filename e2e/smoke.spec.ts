@@ -75,5 +75,5 @@ test('crea spesa collegata evento -> visualizza saldo', async ({ page }) => {
 
   await expect(page.getByText('Spesa smoke')).toBeVisible()
   await page.getByRole('button', { name: /Saldi evento/ }).click()
-  await expect(page.getByText('+21.00€')).toBeVisible()
+  await expect(page.getByText(/\+21,00\s€/)).toBeVisible()
 })

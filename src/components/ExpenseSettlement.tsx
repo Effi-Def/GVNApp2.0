@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react'
 import { Expense, PaymentTransaction, Event } from '../types'
-import { calculateBalances, calculateDebts, Debt } from '../utils/expenseUtils'
+import { formatEuro, calculateBalances, calculateDebts, Debt } from '../utils/expenseUtils'
 import { paymentService } from '../services/firestore'
 
 interface Props {
@@ -47,7 +47,7 @@ const ExpenseSettlement: React.FC<Props> = ({ expenses, payments, events, curren
   }, [expenses, payments])
 
   const handleSettleUp = async (debt: Debt) => {
-    if (!confirm(`Confermi di aver pagato ${debt.amount.toFixed(2)}€ a ${getUserName(debt.to)}?`)) return
+    if (!confirm(`Confermi di aver pagato ${formatEuro(debt.amount)} a ${getUserName(debt.to)}?`)) return
 
     setLoading(true)
     try {
@@ -82,7 +82,7 @@ const ExpenseSettlement: React.FC<Props> = ({ expenses, payments, events, curren
   const handleSettleAllMine = async () => {
     if (myDebts.length === 0) return
     const total = myDebts.reduce((s, d) => s + d.amount, 0)
-    if (!confirm(`Confermi di aver saldato TUTTI i tuoi debiti per un totale di ${total.toFixed(2)}€?`)) return
+    if (!confirm(`Confermi di aver saldato TUTTI i tuoi debiti per un totale di ${formatEuro(total)}?`)) return
 
     setLoading(true)
     try {
@@ -124,13 +124,13 @@ const ExpenseSettlement: React.FC<Props> = ({ expenses, payments, events, curren
         <div className={`p-4 rounded-xl border ${totalIOwe > 0 ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'}`}>
           <h3 className="text-sm font-medium text-[--text-muted] mb-1">Devi dare</h3>
           <p className={`text-2xl font-bold ${totalIOwe > 0 ? 'text-red-600' : 'text-green-600'}`}>
-            {totalIOwe.toFixed(2)}€
+            {formatEuro(totalIOwe)}
           </p>
         </div>
         <div className={`p-4 rounded-xl border ${totalOwedToMe > 0 ? 'bg-green-50 border-green-100' : 'bg-[--bg-subtle] border-gray-100'}`}>
           <h3 className="text-sm font-medium text-[--text-muted] mb-1">Ti devono</h3>
           <p className={`text-2xl font-bold ${totalOwedToMe > 0 ? 'text-green-600' : 'text-[--text-muted]'}`}>
-            {totalOwedToMe.toFixed(2)}€
+            {formatEuro(totalOwedToMe)}
           </p>
         </div>
       </div>
@@ -164,7 +164,7 @@ const ExpenseSettlement: React.FC<Props> = ({ expenses, payments, events, curren
                   </div>
                 </div>
                 <div className="text-right">
-                  <p className="text-lg font-bold text-red-600 mb-1">{debt.amount.toFixed(2)}€</p>
+                  <p className="text-lg font-bold text-red-600 mb-1">{formatEuro(debt.amount)}</p>
                   <button
                     onClick={() => handleSettleUp(debt)}
                     disabled={loading}
@@ -197,7 +197,7 @@ const ExpenseSettlement: React.FC<Props> = ({ expenses, payments, events, curren
                     <p className="text-sm text-[--text-muted]">Ti deve</p>
                   </div>
                 </div>
-                <p className="text-lg font-bold text-green-600">{debt.amount.toFixed(2)}€</p>
+                <p className="text-lg font-bold text-green-600">{formatEuro(debt.amount)}</p>
               </div>
             ))}
           </div>
@@ -218,7 +218,7 @@ const ExpenseSettlement: React.FC<Props> = ({ expenses, payments, events, curren
                   <span className="text-[--text-muted]">→</span>
                   <span className="font-medium text-[--text-base]">{getUserName(debt.to)}</span>
                 </div>
-                <p className="font-medium text-[--text-muted]">{debt.amount.toFixed(2)}€</p>
+                <p className="font-medium text-[--text-muted]">{formatEuro(debt.amount)}</p>
               </div>
             ))}
           </div>

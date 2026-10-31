@@ -1,5 +1,6 @@
 import { Expense } from '../types'
 import { useAuthStore } from '../stores/useAuthStore'
+import { formatEuro } from '../utils/expenseUtils'
 
 interface ExpenseCardProps {
   expense: Expense
@@ -27,7 +28,7 @@ const ExpenseCard = ({ expense, onEdit, onDelete }: ExpenseCardProps) => {
         <div className="flex-1">
           <h3 className="text-lg font-medium text-[--text-base]">{expense.title}</h3>
           <p className="text-sm text-[--text-muted]">
-            Totale: <span className="font-semibold text-[--text-base]">{expense.amount.toFixed(2)}€</span>
+            Totale: <span className="font-semibold text-[--text-base]">{formatEuro(expense.amount)}</span>
           </p>
         </div>
         
@@ -62,13 +63,13 @@ const ExpenseCard = ({ expense, onEdit, onDelete }: ExpenseCardProps) => {
         {/* Current User Balance */}
         {userOwes > 0 && (
           <div className="text-sm bg-red-50 text-red-700 px-2 py-1 rounded">
-            Devi pagare: <span className="font-semibold">{userOwes.toFixed(2)}€</span>
+            Devi pagare: <span className="font-semibold">{formatEuro(userOwes)}</span>
           </div>
         )}
         
         {userIsOwed > 0 && (
           <div className="text-sm bg-green-50 text-green-700 px-2 py-1 rounded">
-            Ti devono: <span className="font-semibold">{userIsOwed.toFixed(2)}€</span>
+            Ti devono: <span className="font-semibold">{formatEuro(userIsOwed)}</span>
           </div>
         )}
       </div>
@@ -86,7 +87,7 @@ const ExpenseCard = ({ expense, onEdit, onDelete }: ExpenseCardProps) => {
               </span>
               <div className="flex items-center space-x-2">
                 <span className="text-[--text-base] font-medium">
-                  {participant.amount.toFixed(2)}€
+                  {formatEuro(participant.amount)}
                 </span>
                 <div className={`w-2 h-2 rounded-full ${
                   participant.settled ? 'bg-green-500' : 'bg-yellow-500'

@@ -8,6 +8,7 @@ import { refreshActiveFarmData, useAuthStore } from '../stores/useAuthStore'
 import type { Event, EventParticipant, FarmMembership } from '../types'
 import TutorialModal, { shouldShowTutorial } from '../components/TutorialModal'
 import { getUserKeys, getUserEventParticipation, userCanViewEvent } from '../utils/events'
+import { formatEuro } from '../utils/expenseUtils'
 
 type RsvpStatus = 'yes' | 'maybe' | 'no'
 
@@ -331,7 +332,7 @@ export default function HomePage() {
       if (x.eventId && !activeFarmEventIds.has(x.eventId)) continue
       const t = x.updatedAt?.getTime?.() || 0
       if (!t || now - t > dayMs) continue
-      const amountStr = typeof (x as any).amount === 'number' ? ` · €${(x as any).amount}` : ''
+      const amountStr = typeof (x as any).amount === 'number' ? ` · ${formatEuro((x as any).amount)}` : ''
       items.push({
         key: `ex:${x.id}`,
         ts: t,
@@ -527,7 +528,7 @@ export default function HomePage() {
                 <AvatarStack people={[...heroRsvp.yes, ...heroRsvp.maybe]} max={5} />
                 <div className="text-xs text-[--text-muted]">
                   {heroRsvp.yes.length > 0
-                    ? `${heroRsvp.yes.length} confermati`
+                    ? `${heroRsvp.yes.length} ${heroRsvp.yes.length === 1 ? 'confermato' : 'confermati'}`
                     : 'Nessuno ha ancora confermato'}
                   {heroRsvp.maybe.length > 0 ? `, ${heroRsvp.maybe.length} forse` : ''}
                   {heroRsvp.pending.length > 0 ? ` · ${heroRsvp.pending.length} in attesa` : ''}

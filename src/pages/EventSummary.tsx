@@ -9,6 +9,7 @@ import { eventService, expenseService, farmService, listService, pollService } f
 import { roundTo2 } from '../services/firestoreMappers'
 import { Event, Expense, FarmMembership, Poll, ShoppingList, EventParticipant, EventParticipation } from '../types'
 import { getUserKeys, getUserEventParticipation } from '../utils/events'
+import { formatEuro, formatEuroSigned, getExpenseShares } from '../utils/expenseUtils'
 import ExpenseForm from '../components/ExpenseForm'
 import PollForm from '../components/PollForm'
 
@@ -91,13 +92,13 @@ const EventSummary = () => {
     if (total === 0) return 'Nessuna risposta ancora.'
     if (confirmed.length === total) return 'Tutti hanno confermato.'
     const pending = total - confirmed.length
-    return `${confirmed.length} confermati su ${total} · ${pending} in attesa`
+    return `${confirmed.length} ${confirmed.length === 1 ? 'confermato' : 'confermati'} su ${total} · ${pending} in attesa`
   }, [participationStats])
 
   const stageLabel = useMemo(() => {
     const { confirmed, total } = participationStats
     if (total === 0) return 'Nessuna risposta'
-    return `${confirmed.length} / ${total} confermati`
+    return `${confirmed.length} / ${total} ${confirmed.length === 1 ? 'confermato' : 'confermati'}`
   }, [participationStats])
   const startOfDay = (d: Date) => { const nd = new Date(d); nd.setHours(0,0,0,0); return nd }
   const dateKey = (d: Date) => {
@@ -278,9 +279,9 @@ const EventSummary = () => {
     for (const exp of expenses) {
       const payer = users.get(exp.paidBy)
       if (payer) payer.balance = roundTo2(payer.balance + exp.amount)
-      for (const pp of exp.participants) {
-        const u = users.get(pp.userId)
-        if (u) u.balance = roundTo2(u.balance - pp.amount)
+      for (const { userId, share } of getExpenseShares(exp)) {
+        const u = users.get(userId)
+        if (u) u.balance = roundTo2(u.balance - share)
       }
     }
     return Array.from(users.values())
@@ -292,18 +293,19 @@ const EventSummary = () => {
     const nameById = new Map(participants.map(p => [p.userId, p.name] as const))
     const ledger = new Map<string, number>()
     for (const exp of expenses) {
+      const shares = getExpenseShares(exp)
       if (exp.paidBy === currentUserId) {
         // Others owe me their shares
-        for (const pp of exp.participants) {
-          if (pp.userId !== currentUserId) {
-            ledger.set(pp.userId, roundTo2((ledger.get(pp.userId) || 0) + pp.amount))
+        for (const { userId, share } of shares) {
+          if (userId !== currentUserId) {
+            ledger.set(userId, roundTo2((ledger.get(userId) || 0) + share))
           }
         }
       }
       // If I am participant and not payer, I owe my share to the payer
-      const mine = exp.participants.find(pp => pp.userId === currentUserId)
+      const mine = shares.find(s => s.userId === currentUserId)
       if (mine && exp.paidBy !== currentUserId) {
-        ledger.set(exp.paidBy, roundTo2((ledger.get(exp.paidBy) || 0) - mine.amount))
+        ledger.set(exp.paidBy, roundTo2((ledger.get(exp.paidBy) || 0) - mine.share))
       }
     }
     return Array.from(ledger.entries()).map(([counterpartyId, amount]) => ({
@@ -721,7 +723,7 @@ const EventSummary = () => {
                 <div key={b.userId} className="flex items-center justify-between px-3 py-2 rounded border">
                   <span>{b.name}</span>
                   <span className={`${b.balance >= 0 ? 'text-green-600' : 'text-red-600'} font-semibold`}>
-                    {b.balance >= 0 ? '+' : ''}{b.balance.toFixed(2)}€
+                    {formatEuroSigned(b.balance)}
                   </span>
                 </div>
               ))}
@@ -750,7 +752,7 @@ const EventSummary = () => {
                     <div className="text-sm text-[--text-base]">{d.counterpartyName}</div>
                     <div className={`${d.amount >= 0 ? 'text-green-600' : 'text-red-600'} font-semibold`}>
                       {d.amount >= 0 ? 'Deve darti ' : 'Devi a lui/lei '}
-                      {Math.abs(d.amount).toFixed(2)}€
+                      {formatEuro(Math.abs(d.amount))}
                     </div>
                   </div>
                 ))}
@@ -787,7 +789,7 @@ const EventSummary = () => {
                           className="absolute -translate-x-1/2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center shadow"
                           style={{ left: `${leftPct}%` }}
                           onClick={() => setOpen(isOpen ? null : key)}
-                          title={`${count} partecipanti`}
+                          title={count === 1 ? '1 partecipante' : `${count} partecipanti`}
                         >
                           {count}
                         </button>
@@ -843,7 +845,7 @@ const EventSummary = () => {
                       || (e.paidBy === user?.id ? (user?.displayName || 'Tu') : e.paidBy)}
                   </div>
                 </div>
-                <div className="text-[--text-base] font-semibold">{e.amount.toFixed(2)}€</div>
+                <div className="text-[--text-base] font-semibold">{formatEuro(e.amount)}</div>
               </div>
             ))}
           </div>

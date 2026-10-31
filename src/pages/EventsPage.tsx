@@ -487,7 +487,7 @@ const EventsPage = () => {
                     <div className="mt-0.5 text-xs text-[--text-muted] truncate">
                       {formatCompactDate(new Date(event.date))}
                       {event.location ? ` · ${event.location}` : ''}
-                      {participantCount > 0 ? ` · ${participantCount} persone` : ''}
+                      {participantCount > 0 ? ` · ${participantCount === 1 ? '1 persona' : `${participantCount} persone`}` : ''}
                     </div>
                   </button>
 
