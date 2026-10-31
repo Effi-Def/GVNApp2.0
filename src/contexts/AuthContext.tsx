@@ -1,11 +1,12 @@
 import { createContext, useEffect, ReactNode } from 'react'
 import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth'
-import { doc, setDoc, getDoc } from 'firebase/firestore'
+import { deleteField, doc, setDoc, getDoc, updateDoc } from 'firebase/firestore'
 import { clearUserData, loadUserData } from '../stores/useAuthStore'
 import { auth, db } from '../firebase/config'
 import { useAuthStore } from '../stores/useAuthStore'
 import { getE2EAuthState, getE2EUser, isE2EMode, setE2EAuthState } from '../e2e/runtime'
 import { User } from '../types'
+import { cleanUndefinedDeep } from '../services/firestoreMappers'
 
 export interface AuthContextType {
   signInWithGoogle: () => Promise<void>
@@ -47,7 +48,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(true)
       
       if (firebaseUser) {
-        console.log('👤 Processing user:', firebaseUser.uid, firebaseUser.email)
+        console.log('👤 Processing user:', firebaseUser.uid)
         try {
           // Verifica se l'utente esiste nel database
           console.log('📄 Checking user document in Firestore...')
@@ -58,7 +59,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
           if (userDoc.exists()) {
             console.log('✅ User document found in Firestore')
             // IMPORTANT: ensure `id` is always the auth uid (avoid any stored `id` field overriding it)
-            userData = { ...(userDoc.data() as any), id: firebaseUser.uid } as User
+            // The e-mail comes from auth only: profiles are readable by other users.
+            userData = { ...(userDoc.data() as any), id: firebaseUser.uid, email: firebaseUser.email! } as User
+            if ('email' in (userDoc.data() || {})) {
+              void updateDoc(doc(db, 'users', firebaseUser.uid), { email: deleteField() })
+                .catch((e) => console.warn('⚠️ Could not remove legacy profile e-mail:', e))
+            }
           } else {
             console.log('📝 Creating new user document in Firestore')
             // Crea un nuovo utente nel database
@@ -70,11 +76,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
               createdAt: new Date(),
             }
             
-            await setDoc(doc(db, 'users', firebaseUser.uid), userData, { merge: true })
+            const { email: _email, ...publicProfile } = userData
+            await setDoc(doc(db, 'users', firebaseUser.uid), cleanUndefinedDeep(publicProfile), { merge: true })
             console.log('✅ User document created successfully')
           }
           
-          console.log('🎯 Setting user data:', userData)
+          console.log('🎯 Setting user data:', userData.id)
           setUser(userData)
         } catch (error: any) {
           console.error('❌ Error processing user:', error)
@@ -126,7 +133,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const provider = new GoogleAuthProvider()
     try {
       const result = await signInWithPopup(auth, provider)
-      console.log('✅ Google sign in successful:', result.user.email)
+      console.log('✅ Google sign in successful:', result.user.uid)
     } catch (error) {
       console.error('❌ Error signing in with Google:', error)
       throw error

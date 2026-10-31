@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { auth, db } from '../firebase/config'
-import { doc, setDoc, getDoc } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 
 const FirebaseTroubleshooting = () => {
   const [tests, setTests] = useState({
@@ -49,14 +49,11 @@ const FirebaseTroubleshooting = () => {
       }
     }
 
-    // Test 3: Firestore rules (try to write)
+    // Test 3: Firestore rules (read-only check on the user's own profile)
     if (auth.currentUser) {
       try {
         console.log('Testing Firestore rules...')
-        await setDoc(doc(db, 'users', auth.currentUser.uid), { 
-          test: true, 
-          timestamp: new Date() 
-        }, { merge: true })
+        await getDoc(doc(db, 'users', auth.currentUser.uid))
         setTests(prev => ({ ...prev, rules: 'success' }))
         console.log('✅ Firestore rules OK')
       } catch (error) {
@@ -65,8 +62,6 @@ const FirebaseTroubleshooting = () => {
       }
     }
   }
-
-  if (!import.meta.env.DEV) return null
 
   return (
     <div className="fixed bottom-4 right-4 bg-[--bg-card] border border-[--border-base] rounded-lg p-4 shadow-lg text-xs">

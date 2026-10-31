@@ -211,8 +211,9 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
-      // Anyone authenticated can read user profiles
-      allow read: if isSignedIn();
+      // Profiles are readable by id only: listing would expose a global user directory
+      allow get: if isSignedIn();
+      allow list: if false;
       // Users can only write their own profile
       allow write: if isSignedIn() && isOwner(userId);
 
@@ -358,8 +359,11 @@ service cloud.firestore {
         resource.data.paidBy == request.auth.uid ||
         !('participantIds' in resource.data)
       );
+      // The payer can be another participant when the creator can write on the event
       allow create: if isSignedIn() &&
-        (request.resource.data.paidBy == request.auth.uid) &&
+        (request.resource.data.paidBy == request.auth.uid ||
+          (request.resource.data.createdBy == request.auth.uid &&
+           canWriteEventContent(request.resource.data.eventId))) &&
         ('eventId' in request.resource.data) &&
         (request.resource.data.eventId is string) &&
         (request.resource.data.eventId.size() > 0) &&

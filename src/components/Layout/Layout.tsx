@@ -11,6 +11,7 @@ import ChatFloatingLauncher from '../Chat/ChatFloatingLauncher'
 import { useActiveFarmStore } from '../../stores/useActiveFarmStore'
 import { useAuthStore, refreshActiveFarmData } from '../../stores/useAuthStore'
 import { useAppStore } from '../../stores/AppStore'
+import { isE2EMode } from '../../e2e/runtime'
 
 // Build/version stamp injected at build time (fallback to import.meta.env when available)
 const BUILD_STAMP = (() => {
@@ -96,8 +97,8 @@ const Layout = ({ children }: LayoutProps) => {
         v{BUILD_STAMP}
       </div>
 
-      {/* Debug Component (only in development) */}
-      <FirebaseTroubleshooting />
+      {/* Debug Component (only in development, never mounted in production) */}
+      {import.meta.env.DEV && !isE2EMode() ? <FirebaseTroubleshooting /> : null}
 
       {/* One-time announcement popup for important updates */}
       {showChrome ? <AnnouncementModal /> : null}
