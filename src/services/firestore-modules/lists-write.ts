@@ -4,11 +4,12 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  runTransaction,
   Timestamp,
 } from 'firebase/firestore'
 import { db } from '../../firebase/config'
-import { ShoppingList } from '../../types'
-import { cleanUndefinedDeep } from '../firestoreMappers'
+import { ListItem, ShoppingList } from '../../types'
+import { cleanUndefinedDeep, toDate } from '../firestoreMappers'
 
 export const listWriteService = {
   async create(listData: Omit<ShoppingList, 'id' | 'createdAt' | 'updatedAt'>): Promise<ShoppingList> {
@@ -60,6 +61,27 @@ export const listWriteService = {
       }
       throw new Error(`Errore durante l'aggiornamento della lista: ${e?.message ?? ''}`)
     }
+  },
+
+  /** Applies a change on the latest saved items, so concurrent edits are not lost. */
+  async changeItems(id: string, change: (items: ListItem[]) => ListItem[]): Promise<ListItem[]> {
+    const docRef = doc(db, 'lists', id)
+    return runTransaction(db, async (tx) => {
+      const snap = await tx.get(docRef)
+      if (!snap.exists()) throw new Error('Lista non trovata')
+      const raw = snap.data().items
+      const current: ListItem[] = Array.isArray(raw)
+        ? raw.map((it: any) => ({
+            ...it,
+            addedAt: toDate(it?.addedAt),
+            completedAt: toDate(it?.completedAt),
+            dueDate: toDate(it?.dueDate),
+          }))
+        : []
+      const next = change(current)
+      tx.update(docRef, { items: cleanUndefinedDeep(next), updatedAt: Timestamp.now() })
+      return next
+    })
   },
 
   async delete(id: string): Promise<void> {

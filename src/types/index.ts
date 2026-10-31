@@ -277,6 +277,7 @@ export interface ShoppingList {
   description?: string // Aggiungiamo descrizione opzionale
   items: ListItem[]  // Cambiamo il nome del tipo
   eventId?: string
+  farmId?: string // Fattoria che vede la lista quando non è legata a un evento
   createdBy: string
   shared?: boolean  // Aggiungiamo flag condivisione
   sharedWith?: string[] // IDs degli utenti con cui è condivisa la lista
@@ -300,12 +301,14 @@ export interface ListItem {  // Rinominiamo e aggiungiamo proprietà
   // Campi opzionali per To-do e altri tipi specializzati
   status?: 'todo' | 'in-progress' | 'done'
   dueDate?: Date
-  assignees?: { userId?: string; userName: string }[]
+  assignees?: ListItemAssignee[]
   notes?: string
   // Estensioni per tipi speciali: trasporti (macchine) e stanze
   capacity?: number // posti disponibili nello slot (es. 5 per auto, 2 per stanza)
-  driver?: { userId?: string; userName: string } // solo per macchine
+  driver?: ListItemAssignee // solo per macchine
 }
+
+export type ListItemAssignee = { userId?: string; userName: string }
 
 // Alias per backward compatibility
 export interface ShoppingListItem extends ListItem {}

@@ -258,6 +258,55 @@ describe('polls', () => {
   })
 })
 
+describe('lists', () => {
+  const list = (overrides: Record<string, unknown>) => ({
+    title: 'Spesa',
+    items: [],
+    createdBy: AUTHOR,
+    sharedWith: [AUTHOR],
+    createdAt: Timestamp.now(),
+    updatedAt: Timestamp.now(),
+    ...overrides,
+  })
+
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'lists', 'farm-list'), list({ farmId: FARM }))
+      await setDoc(doc(ctx.firestore(), 'lists', 'personal-list'), list({}))
+    })
+  })
+
+  it('shows a farm list to its members only', async () => {
+    await assertSucceeds(getDoc(doc(db(MEMBER), 'lists', 'farm-list')))
+    await assertFails(getDoc(doc(db(OUTSIDER), 'lists', 'farm-list')))
+    await assertSucceeds(getDocs(query(collection(db(MEMBER), 'lists'), where('farmId', '==', FARM))))
+    await assertFails(getDocs(query(collection(db(OUTSIDER), 'lists'), where('farmId', '==', FARM))))
+  })
+
+  it('keeps a list without farm or event with its creator', async () => {
+    await assertSucceeds(getDoc(doc(db(AUTHOR), 'lists', 'personal-list')))
+    await assertFails(getDoc(doc(db(MEMBER), 'lists', 'personal-list')))
+  })
+
+  it('lets farm members change items and nothing else', async () => {
+    const ref = doc(db(MEMBER), 'lists', 'farm-list')
+    await assertSucceeds(updateDoc(ref, { items: [{ id: 'a', text: 'Pane' }], updatedAt: serverTimestamp() }))
+    await assertFails(updateDoc(ref, { title: 'Altro' }))
+    await assertFails(updateDoc(ref, { createdBy: MEMBER }))
+    await assertFails(updateDoc(doc(db(OUTSIDER), 'lists', 'farm-list'), { items: [] }))
+  })
+
+  it('leaves deleting a farm list to its creator', async () => {
+    await assertFails(deleteDoc(doc(db(MEMBER), 'lists', 'farm-list')))
+    await assertSucceeds(deleteDoc(doc(db(AUTHOR), 'lists', 'farm-list')))
+  })
+
+  it('accepts a farm list only from a member of that farm', async () => {
+    await assertSucceeds(setDoc(doc(db(MEMBER), 'lists', 'n1'), list({ createdBy: MEMBER, farmId: FARM })))
+    await assertFails(setDoc(doc(db(OUTSIDER), 'lists', 'n2'), list({ createdBy: OUTSIDER, farmId: FARM })))
+  })
+})
+
 describe('users', () => {
   it('allows reading a profile by id but not listing all users', async () => {
     await assertSucceeds(getDoc(doc(db(AUTHOR), 'users', MEMBER)))

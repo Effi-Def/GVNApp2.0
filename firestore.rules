@@ -188,7 +188,8 @@ service cloud.firestore {
       let d = get(/databases/$(database)/documents/lists/$(listId)).data;
       return d.createdBy == request.auth.uid
         || isSharedWith(d)
-        || (('eventId' in d) && canReadEventById(d.eventId));
+        || (('eventId' in d) && canReadEventById(d.eventId))
+        || (('farmId' in d) && isFarmMember(d.farmId));
     }
 
     // Helper: check if authenticated user can modify the given list document (and its items)
@@ -196,7 +197,8 @@ service cloud.firestore {
       let d = get(/databases/$(database)/documents/lists/$(listId)).data;
       return d.createdBy == request.auth.uid
         || isSharedWith(d)
-        || (('eventId' in d) && canWriteEventContent(d.eventId));
+        || (('eventId' in d) && canWriteEventContent(d.eventId))
+        || (('farmId' in d) && isFarmMember(d.farmId));
     }
 
     function canReadPollData(data) {
@@ -412,15 +414,28 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         (resource.data.createdBy == request.auth.uid) ||
         isSharedWith(resource.data) ||
-        (('eventId' in resource.data) && canReadEventById(resource.data.eventId))
+        (('eventId' in resource.data) && canReadEventById(resource.data.eventId)) ||
+        (('farmId' in resource.data) && isFarmMember(resource.data.farmId))
       );
 
       allow create: if isSignedIn() && (
         (request.resource.data.createdBy == request.auth.uid) &&
-        (!('eventId' in request.resource.data) || canWriteEventContent(request.resource.data.eventId))
+        (!('eventId' in request.resource.data) || canWriteEventContent(request.resource.data.eventId)) &&
+        (!('farmId' in request.resource.data) || isFarmMember(request.resource.data.farmId))
       );
 
-      allow update, delete: if isSignedIn() && (
+      // Farm members work on the items; the rest of a farm list stays with its creator.
+      allow update: if isSignedIn() && (
+        (resource.data.createdBy == request.auth.uid) ||
+        isSharedWith(resource.data) ||
+        (('eventId' in resource.data) && canWriteEventContent(resource.data.eventId)) ||
+        (
+          ('farmId' in resource.data) && isFarmMember(resource.data.farmId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['items', 'updatedAt'])
+        )
+      );
+
+      allow delete: if isSignedIn() && (
         (resource.data.createdBy == request.auth.uid) ||
         isSharedWith(resource.data) ||
         (('eventId' in resource.data) && canWriteEventContent(resource.data.eventId))

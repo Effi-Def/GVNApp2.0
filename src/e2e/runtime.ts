@@ -19,6 +19,7 @@ import type {
   FarmMembership,
   Idea,
   IdeaDraft,
+  ListItem,
   PaymentTransaction,
   Poll,
   PollVote,
@@ -794,6 +795,17 @@ function patchPollAndListServices() {
         const current = db.lists[listId]
         if (current) db.lists[listId] = { ...current, ...cloneValue(listData), updatedAt: new Date() }
       })
+    },
+    async changeItems(listId: string, change: (items: ListItem[]) => ListItem[]) {
+      let next: ListItem[] = []
+      updateDb((db) => {
+        const current = db.lists[listId]
+        if (!current) throw new Error('Lista non trovata')
+        next = change(current.items)
+        current.items = cloneValue(next)
+        current.updatedAt = new Date()
+      })
+      return next
     },
     async delete(listId: string) {
       updateDb((db) => {

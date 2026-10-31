@@ -93,6 +93,32 @@ test('crea idea -> Ci sto -> organizza evento', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Apri evento' })).toBeVisible()
 })
 
+test('crea lista -> avanza stato -> resta dopo aver cambiato pagina', async ({ page }) => {
+  await primeRuntime(page, { scenario: 'seeded', auth: 'signed-in' })
+
+  await page.goto('/lists?create=1')
+  await page.getByLabel('Titolo lista').fill('Preparativi')
+  await page.getByLabel('Tipo lista').selectOption('todo')
+  await page.getByLabel('Elemento 1', { exact: true }).fill('Prenotare')
+  await page.getByRole('button', { name: 'Crea lista' }).click()
+
+  const main = page.getByRole('main')
+  await expect(main.getByText('Prenotare')).toBeVisible()
+  await expect(main.getByText('Condivisa')).toBeVisible()
+
+  await main.getByRole('button', { name: 'Da fare', exact: true }).click()
+  await main.getByRole('button', { name: 'In corso', exact: true }).click()
+  await expect(main.getByRole('button', { name: 'Fatto', exact: true })).toBeVisible()
+  await expect(main.getByText(/1\/1 \(100%\)/)).toBeVisible()
+
+  // The list must survive leaving the page, without a reload
+  await page.getByRole('link', { name: 'Eventi' }).click()
+  await expect(page).toHaveURL(/\/events/)
+  await page.getByRole('link', { name: 'Liste' }).click()
+  await expect(main.getByText('Prenotare')).toBeVisible()
+  await expect(main.getByText(/1\/1 \(100%\)/)).toBeVisible()
+})
+
 test('crea spesa collegata evento -> visualizza saldo', async ({ page }) => {
   await primeRuntime(page, { scenario: 'seeded', auth: 'signed-in' })
 
