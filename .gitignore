@@ -37,6 +37,10 @@ coverage/
 # nyc test coverage
 .nyc_output
 
+# Playwright reports
+playwright-report/
+test-results/
+
 # Dependency directories
 node_modules/
 jspm_packages/
@@ -93,6 +97,8 @@ temp/
 
 # Local backups
 backups/
+_archive/
+*.backup
 
 # Editor directories and files
 .vscode/*

@@ -1,519 +1,713 @@
-import { useEffect, useState } from 'react'
-import { useAppStore } from '../stores/AppStore'
-import { useAuthStore } from '../stores/useAuthStore'
-import { useUserSettingsStore } from '../stores/UserSettingsStore'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { eventService, listService } from '../services/firestore'
-import MonthCalendar from '../components/Calendar/MonthCalendar'
-import { isAnnouncementUnread, openAnnouncementModal } from '../components/AnnouncementModal'
+import { eventService, farmService } from '../services/firestore'
+import { useFarmContext } from '../contexts/FarmContext'
+import { useActiveFarmStore } from '../stores/useActiveFarmStore'
+import { useAppStore } from '../stores/AppStore'
+import { refreshActiveFarmData, useAuthStore } from '../stores/useAuthStore'
+import type { Event, EventParticipant, FarmMembership } from '../types'
+import TutorialModal, { shouldShowTutorial } from '../components/TutorialModal'
+import { getUserKeys, getUserEventParticipation, userCanViewEvent } from '../utils/events'
 
-const HomePage = () => {
-  const { user } = useAuthStore()
-  const { profile } = useUserSettingsStore()
-  const { events, expenses, lists, setEvents, setLists } = useAppStore()
-  const navigate = useNavigate()
-  
-  const [isLoading, setIsLoading] = useState(false)
+type RsvpStatus = 'yes' | 'maybe' | 'no'
 
-  // Funzione per ricaricare i dati manualmente usando lo store
-  const refreshData = async () => {
-    setIsLoading(true)
+type ActivityItem = {
+  key: string
+  ts: number
+  title: string
+  onClick?: () => void
+}
+
+function formatHeroDate(ev: Pick<Event, 'date' | 'endDate'>) {
+  const start = ev.date
+  const end = ev.endDate
+  const fmt = (d: Date) => {
     try {
-      // Prova a usare una funzione di caricamento centralizzata se esiste
-      const { loadUserData } = useAuthStore.getState() as any
-      if (typeof loadUserData === 'function') {
-        await loadUserData()
-      }
-    } finally {
-      setIsLoading(false)
+      return d.toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: 'short' })
+    } catch {
+      return ''
     }
   }
-
-  // Assicurati che se lo store è vuoto proviamo un caricamento centralizzato una sola volta
-  useEffect(() => {
-    if (events.length === 0 && !isLoading) {
-      // Prova prima la funzione centralizzata se disponibile
-      const { loadUserData } = useAuthStore.getState() as any
-      if (typeof loadUserData === 'function') {
-        console.log('🔄 HomePage: Loading user data...')
-        loadUserData().catch((e: any) => {
-          console.warn('⚠️ HomePage: loadUserData failed:', e)
-        })
-      } else {
-        // Fallback diretto: carica eventi da Firestore
-        console.log('🔄 HomePage: Loading events directly...')
-        ;(async () => {
-          try {
-            const eventsData = await eventService.getAll()
-            console.log('✅ HomePage: Loaded events:', eventsData.length)
-            setEvents(eventsData)
-          } catch (e) {
-            console.warn('⚠️ Impossibile caricare eventi (fallback HomePage):', e)
-          }
-        })()
-      }
-    }
-  }, [events.length, isLoading])
-
-  // Prendi i prossimi 3-5 eventi
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  // Id utente corrente usato in più sezioni; definirlo PRIMA di usarlo
-  const currentUserId = user?.id || user?.email || 'mock-user'
-  
-  const upcomingEvents = events
-    .filter(event => {
-      const eventDate = new Date(event.date)
-      eventDate.setHours(0, 0, 0, 0)
-      if (eventDate < today) return false
-      return true
-    })
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-  
-  const nextUpcomingEvents = upcomingEvents.slice(0, 5)
-
-  // Calcola il bilancio delle spese per l'utente corrente (stesso algoritmo di ExpensesPage-hybrid)
-  
-  const userBalance = expenses.reduce((balance, expense) => {
-    const userParticipation = expense.participants.find(p => p.userId === currentUserId)
-    if (!userParticipation) return balance
-
-    if (expense.paidBy === currentUserId) {
-      // L'utente ha pagato, deve ricevere dagli altri (solo da quelli non settled)
-      const totalOwed = expense.participants
-        .filter(p => p.userId !== currentUserId && !p.settled)
-        .reduce((sum, p) => sum + p.amount, 0)
-      return balance + totalOwed
-    } else if (!userParticipation.settled) {
-      // L'utente deve pagare (solo se non già settled)
-      return balance - userParticipation.amount
-    }
-    return balance
-  }, 0)
-
-  console.log('🏠 HomePage Balance Calculation:', { 
-    currentUserId, 
-    expensesCount: expenses.length, 
-    userBalance,
-    expenses: expenses.map(e => ({
-      id: e.id,
-      title: e.title,
-      amount: e.amount,
-      paidBy: e.paidBy,
-      userParticipation: e.participants.find(p => p.userId === currentUserId)
-    }))
-  })
-
-  // ===== I miei To-do =====
-  const meName = (profile?.displayName && profile.displayName.trim().length > 0)
-    ? profile.displayName.trim()
-    : ((user?.displayName && user.displayName !== 'Utente') ? user.displayName : (user?.email ? user.email.split('@')[0] : ''))
-
-  type TodoEntry = {
-    listId: string
-    listTitle: string
-    eventId?: string
-    itemId: string
-    text: string
-    status?: 'todo' | 'in-progress' | 'done'
-    dueDate?: Date
-    addedAt?: Date
+  if (end && end instanceof Date && !Number.isNaN(end.getTime()) && end.getTime() !== start.getTime()) {
+    return `${fmt(start)} → ${fmt(end)}`
   }
+  return fmt(start)
+}
 
-  const myTodos: TodoEntry[] = (lists || [])
-    .filter(l => (l.type || 'shopping') === 'todo')
-    .flatMap(l => (l.items || []).filter(it => !it.completed).map(it => ({
-      listId: l.id,
-      listTitle: l.title,
-      eventId: l.eventId,
-      itemId: it.id,
-      text: it.text,
-      status: it.status,
-      dueDate: it.dueDate,
-      addedAt: it.addedAt,
-      assignees: it.assignees || [],
-      addedBy: it.addedBy,
-    } as any)))
-    .filter((e: any) => {
-      // Match per assegnatari o autore come fallback
-      const assigned = Array.isArray(e.assignees) && e.assignees.some((a: any) =>
-        (a.userId && a.userId === currentUserId) || (a.userName && meName && a.userName.toLowerCase() === meName.toLowerCase())
-      )
-      return assigned || e.addedBy === currentUserId
-    })
-    .sort((a, b) => {
-      const ad = a.dueDate ? new Date(a.dueDate).getTime() : Number.MAX_SAFE_INTEGER
-      const bd = b.dueDate ? new Date(b.dueDate).getTime() : Number.MAX_SAFE_INTEGER
-      if (ad !== bd) return ad - bd
-      const order = (s?: string) => s === 'todo' ? 0 : s === 'in-progress' ? 1 : 2
-      const so = order(a.status) - order(b.status)
-      if (so !== 0) return so
-      const aa = a.addedAt ? new Date(a.addedAt).getTime() : 0
-      const ba = b.addedAt ? new Date(b.addedAt).getTime() : 0
-      return aa - ba
-    })
-    .slice(0, 4)
-
-  const toggleTodoFromHome = async (entry: TodoEntry) => {
-    const list = lists.find(l => l.id === entry.listId)
-    if (!list) return
-    const updatedItems = list.items.map(it => {
-      if (it.id !== entry.itemId) return it
-      const nowCompleted = !it.completed
-      return {
-        ...it,
-        completed: nowCompleted,
-        completedBy: nowCompleted ? (user?.id || currentUserId) : undefined,
-        completedAt: nowCompleted ? new Date() : undefined,
-        status: (list.type || 'shopping') === 'todo' ? (nowCompleted ? 'done' : 'todo') : it.status,
-      }
-    })
-    const updatedList = { ...list, items: updatedItems, updatedAt: new Date() }
-    await listService.update(list.id, updatedList)
-    setLists(lists.map(l => l.id === list.id ? updatedList : l))
+function formatCompactDate(d: Date) {
+  try {
+    return d.toLocaleDateString('it-IT', { day: '2-digit', month: 'short' })
+  } catch {
+    return ''
   }
+}
 
+function initialFromName(name?: string) {
+  const t = (name || '').trim()
+  return (t ? t.slice(0, 1) : 'G').toUpperCase()
+}
+
+function AvatarCircle({ name, src, size = 28 }: { name?: string; src?: string; size?: number }) {
+  const dim = size
+  if (src) {
+    return (
+      <img
+        src={src}
+        alt={name || 'avatar'}
+        className="rounded-full border border-[--border-base]"
+        style={{ width: dim, height: dim, objectFit: 'cover' }}
+      />
+    )
+  }
   return (
-    <div className="space-y-6 sm:space-y-8 pb-6 sm:pb-8 relative">
-      {/* Loading state */}
-      {isLoading && (
-        <div className="gvn-card p-4 sm:p-6 bg-gradient-to-r from-primary-50 to-accent-50 border-primary-200">
-          <div className="flex items-center space-x-3">
-            <div className="animate-spin h-5 w-5 border-2 border-primary-600 border-t-transparent rounded-full"></div>
-            <span className="text-primary-700 font-medium">Caricamento dati in corso...</span>
-          </div>
-        </div>
-      )}
-
-      {/* Hero Header con mascotte */}
-      <div className="gvn-card p-6 sm:p-8 bg-gradient-to-br from-primary-50 via-white to-accent-50 border-primary-100 relative overflow-hidden">
-        {/* Mascotte floating */}
-        <div className="hidden sm:block absolute top-4 right-6 text-4xl animate-float opacity-60">
-          🐷
-        </div>
-        
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between relative z-10">
-          <div className="space-y-3">
-            <div className="flex items-center space-x-3">
-              <h1 className="gvn-title text-2xl sm:text-3xl lg:text-4xl bg-gradient-to-r from-primary-600 to-accent-500 bg-clip-text text-transparent">
-                Ciao, {(profile?.displayName && profile.displayName.trim().length > 0)
-                  ? profile.displayName
-                  : ((user?.displayName && user.displayName !== 'Utente') ? user.displayName : (user?.email ? user.email.split('@')[0] : 'Amico'))}!
-              </h1>
-              <span className="text-2xl animate-bounce">👋</span>
-              {/* Badge novità se annuncio non letto */}
-              {typeof window !== 'undefined' && isAnnouncementUnread() && (
-                <button
-                  onClick={openAnnouncementModal}
-                  className="ml-2 inline-flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-pink-50 text-pink-700 border border-pink-200 hover:bg-pink-100"
-                  title="Novità dell'ultima versione"
-                >
-                  <span>🐷</span>
-                  <span>Novità</span>
-                </button>
-              )}
-            </div>
-            <p className="text-neutral-600 text-base sm:text-lg font-medium">
-              Benvenuto nel tuo hub sociale del <span className="gvn-badge-pig">🐷 Gruppo GVN</span>
-            </p>
-            <p className="text-neutral-500 flex flex-wrap items-center gap-2 text-sm sm:text-base">
-              Gestisci eventi, spese e decisioni di gruppo tutto in un posto
-              {/* Pulsante refresh dati */}
-              <button
-                onClick={refreshData}
-                disabled={isLoading}
-                className="ml-2 p-1 rounded-full hover:bg-primary-100 transition-colors disabled:opacity-50"
-                title="Aggiorna dati"
-              >
-                <span className={`text-sm ${isLoading ? 'animate-spin' : ''}`}>🔄</span>
-              </button>
-            </p>
-          </div>
-          <div className="hidden lg:block text-6xl opacity-20">
-            🎉
-          </div>
-        </div>
-      </div>
-
-      {/* Calendar + Stats */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
-        <div className="lg:col-span-2">
-          <MonthCalendar
-            events={events}
-            onSelectEvent={(eventId) => navigate(`/events/${eventId}/summary`)}
-            compact
-            currentUserId={currentUserId}
-            onCreateEvent={(date) => {
-              const y = date.getFullYear()
-              const m = String(date.getMonth() + 1).padStart(2, '0')
-              const d = String(date.getDate()).padStart(2, '0')
-              navigate(`/events?create=1&date=${y}-${m}-${d}`)
-            }}
-          />
-        </div>
-
-  <button onClick={() => navigate('/expenses')} className="gvn-card p-6 group hover:scale-105 text-left">
-          <div className="flex items-center justify-between">
-            <div className="space-y-2">
-              <p className="text-sm font-semibold text-neutral-500 uppercase tracking-wide">Il Tuo Saldo</p>
-              <p className={`gvn-title text-4xl ${userBalance >= 0 ? 'text-green-500' : 'text-red-500'}`}>
-                {userBalance >= 0 ? '+' : ''}€{userBalance.toFixed(2)}
-              </p>
-              <p className="text-xs text-neutral-400">
-                {userBalance >= 0 ? 'Devi ricevere' : 'Devi pagare'}
-              </p>
-              {/* Debug info */}
-              <p className="text-xs text-blue-400 opacity-70">
-                📊 Dati: {events.length} eventi, {expenses.length} spese
-              </p>
-            </div>
-            <div className={`bg-gradient-to-br p-4 rounded-2xl group-hover:scale-110 transition-transform ${
-              userBalance >= 0 ? 'from-green-100 to-green-200' : 'from-red-100 to-red-200'
-            }`}>
-              <span className="text-3xl">{userBalance >= 0 ? '💚' : '💸'}</span>
-            </div>
-          </div>
-  </button>
-        {/* Chat quick link removed to keep Home clean as requested */}
-        {/* Riepilogo Spese Totali rimosso su richiesta */}
-      </div>
-
-      {/* I miei To-do */}
-      <div className="gvn-card p-6 sm:p-8">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="gvn-title text-2xl flex items-center gap-2">
-            <span>✅</span>
-            <span>I miei To‑do</span>
-          </h2>
-          <button onClick={() => navigate('/lists')} className="text-sm text-primary-600 hover:underline">Apri liste</button>
-        </div>
-        {myTodos.length === 0 ? (
-          <p className="text-neutral-500">Nessun to‑do assegnato. Assegna elementi dalle liste To‑do.</p>
-        ) : (
-          <div className="space-y-3">
-            {myTodos.map(t => (
-              <div key={`${t.listId}:${t.itemId}`} className="flex items-center gap-3 p-3 rounded-lg border hover:bg-neutral-50">
-                <button
-                  onClick={() => toggleTodoFromHome(t)}
-                  className={`w-6 h-6 rounded-full border-2 ${t.status === 'done' ? 'bg-green-500 border-green-500' : 'border-neutral-300'}`}
-                  title="Completa"
-                >
-                  {t.status === 'done' && (
-                    <svg className="w-4 h-4 text-white mx-auto mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                  )}
-                </button>
-                <div className="flex-1 min-w-0">
-                  <div className="font-medium text-neutral-800 truncate">{t.text}</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-neutral-600">
-                    <span className={`px-2 py-0.5 rounded-full border ${
-                      t.status === 'done' ? 'bg-green-50 text-green-700 border-green-200' :
-                      t.status === 'in-progress' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' :
-                      'bg-gray-50 text-gray-700 border-gray-200'
-                    }`}>{t.status || 'todo'}</span>
-                    {t.dueDate && (
-                      <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">📅 {new Date(t.dueDate).toLocaleDateString('it-IT')}</span>
-                    )}
-                    <span className="px-2 py-0.5 rounded-full bg-neutral-50 text-neutral-600 border border-neutral-200">📝 {t.listTitle}</span>
-                    {t.eventId && (
-                      <button onClick={() => navigate(`/events/${t.eventId}/summary`)} className="px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 hover:underline">Vai all'evento</button>
-                    )}
-                  </div>
-                </div>
-                <button onClick={() => navigate('/lists')} className="text-xs text-primary-600 hover:underline">Apri</button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Prossimi Eventi - redesigned */}
-      <div className="gvn-card p-6 sm:p-8">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
-          <h2 className="gvn-title text-2xl flex items-center space-x-3">
-            <span>🎉</span>
-            <span>Eventi in Programma</span>
-          </h2>
-          {nextUpcomingEvents.length > 0 && (
-            <div className="gvn-badge-pig">
-              <span>🐷</span>
-              <span>{nextUpcomingEvents.length} eventi</span>
-            </div>
-          )}
-        </div>
-        
-        {nextUpcomingEvents.length > 0 ? (
-          <div className="space-y-4">
-            {nextUpcomingEvents.map((event, index) => (
-              <div key={event.id} className="relative">
-                <div onClick={() => navigate(`/events/${event.id}/summary`)} className="cursor-pointer flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-0 sm:space-x-4 p-4 rounded-xl bg-gradient-to-r from-neutral-50 to-transparent border border-neutral-100 hover:shadow-md transition-all duration-200">
-                  <div className="flex-shrink-0">
-                    <div className="w-12 h-12 bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg">
-                      {new Date(event.date).getDate()}
-                    </div>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-neutral-900 text-lg">{event.title}</h3>
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:space-x-4 mt-2 text-sm text-neutral-600 space-y-2 sm:space-y-0">
-                      <span className="flex items-center space-x-1">
-                        <span>📅</span>
-                        <span>{new Date(event.date).toLocaleDateString('it-IT')} alle {event.time}</span>
-                      </span>
-                      <span className="flex items-center space-x-1">
-                        <span>📍</span>
-                        <span>{event.location}</span>
-                      </span>
-                    </div>
-                    <div className="mt-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                      <span className="text-xs font-semibold text-primary-600 bg-primary-50 px-3 py-1 rounded-full">
-                        {event.participants.filter(p => p.status === 'yes').length} confermati
-                      </span>
-                      {index === 0 && (
-                        <span className="text-xs font-semibold text-accent-600 bg-accent-50 px-3 py-1 rounded-full animate-pulse">
-                          🔥 Prossimo evento
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4 opacity-50">📅</div>
-            <h3 className="gvn-title text-xl text-neutral-600 mb-2">Nessun evento in programma</h3>
-            <p className="text-neutral-500 mb-6">Crea il primo evento per il gruppo!</p>
-            <button onClick={() => navigate('/events?create=1')} className="gvn-btn-primary">
-              <span>🎉</span>
-              <span>Crea Evento</span>
-            </button>
-          </div>
-        )}
-      </div>
-
-      {/* Attività recenti - dinamiche e filtrate */}
-      <div className="gvn-card p-6 sm:p-8">
-        <h2 className="gvn-title text-2xl flex items-center space-x-3 mb-6">
-          <span>🔔</span>
-          <span>Attività Recenti</span>
-        </h2>
-
-        {(() => {
-          // Helper: safe date
-          const toDate = (d: any) => d instanceof Date ? d : new Date(d)
-          // Event IDs dove partecipo (escludendo solo 'no') o che ho creato
-          const myEventIds = new Set(
-            events
-              .filter(ev => ev.createdBy === currentUserId || (ev.participants || []).some(p => p.userId === currentUserId && p.status !== 'no'))
-              .map(ev => ev.id)
-          )
-
-          type Activity = { id: string; kind: 'event' | 'expense' | 'poll' | 'list'; text: string; when: Date; icon: string; click: () => void; accent: string }
-          const items: Activity[] = []
-
-          // Nuovi eventi creati (mostra come categoria dedicata)
-          for (const ev of events) {
-            items.push({
-              id: `ev-${ev.id}`,
-              kind: 'event',
-              text: `Nuovo evento: "${ev.title}"` ,
-              when: toDate(ev.createdAt),
-              icon: '🎉',
-              accent: 'bg-blue-50 border-blue-100',
-              click: () => navigate(`/events/${ev.id}/summary`)
-            })
-          }
-
-          // Attività inerenti ai miei eventi: spese, sondaggi, liste
-          for (const ex of expenses) {
-            if (!ex.eventId || !myEventIds.has(ex.eventId)) continue
-            items.push({
-              id: `ex-${ex.id}`,
-              kind: 'expense',
-              text: `Nuova spesa: "${ex.title}" · €${ex.amount.toFixed(2)}`,
-              when: toDate(ex.createdAt),
-              icon: '💰',
-              accent: 'bg-green-50 border-green-100',
-              click: () => navigate(`/events/${ex.eventId}/summary`)
-            })
-          }
-
-          // Polls
-          const appState: any = useAppStore.getState()
-          const polls = appState.polls || []
-          for (const p of polls) {
-            if (!p.eventId || !myEventIds.has(p.eventId)) continue
-            items.push({
-              id: `po-${p.id}`,
-              kind: 'poll',
-              text: `Nuovo sondaggio: "${p.title}"`,
-              when: toDate(p.createdAt),
-              icon: '🗳️',
-              accent: 'bg-purple-50 border-purple-100',
-              click: () => navigate(`/events/${p.eventId}/summary`)
-            })
-          }
-
-          // Lists
-          const lists = appState.lists || []
-          for (const l of lists) {
-            if (!l.eventId || !myEventIds.has(l.eventId)) continue
-            items.push({
-              id: `li-${l.id}`,
-              kind: 'list',
-              text: `Nuova lista: "${l.title}"`,
-              when: toDate(l.createdAt),
-              icon: '📝',
-              accent: 'bg-amber-50 border-amber-100',
-              click: () => navigate(`/events/${l.eventId}/summary`)
-            })
-          }
-
-          // Ordina per data desc e prendi i più recenti
-          items.sort((a, b) => b.when.getTime() - a.when.getTime())
-          const top = items.slice(0, 6)
-
-          const timeAgo = (d: Date) => {
-            const diff = Date.now() - d.getTime()
-            const minutes = Math.floor(diff / 60000)
-            if (minutes < 1) return 'adesso'
-            if (minutes < 60) return `${minutes} min fa`
-            const hours = Math.floor(minutes / 60)
-            if (hours < 24) return `${hours} h fa`
-            const days = Math.floor(hours / 24)
-            if (days === 1) return 'ieri'
-            return `${days} gg fa`
-          }
-
-          return (
-            <div className="space-y-3">
-              {top.length === 0 ? (
-                <div className="text-center py-8 text-neutral-500">Nessuna attività recente</div>
-              ) : (
-                top.map(a => (
-                  <button key={a.id} onClick={a.click} className={`text-left flex flex-col sm:flex-row sm:items-center sm:space-x-4 space-y-3 sm:space-y-0 p-4 rounded-xl border w-full ${a.accent}`}>
-                    <div className="w-3 h-3 bg-neutral-400 rounded-full"></div>
-                    <div className="flex-1">
-                      <span className="font-medium text-neutral-700">{a.text}</span>
-                      <p className="text-sm text-neutral-500">{timeAgo(a.when)}</p>
-                    </div>
-                    <span className="text-xl">{a.icon}</span>
-                  </button>
-                ))
-              )}
-            </div>
-          )
-        })()}
-      </div>
-  {/* Floating chat launcher moved to global Layout for cross-page visibility */}
+    <div
+      className="rounded-full border border-[--border-base] bg-[--bg-raised] text-[--text-muted] flex items-center justify-center text-xs font-semibold"
+      style={{ width: dim, height: dim }}
+      aria-label={name || 'avatar'}
+      title={name || ''}
+    >
+      {initialFromName(name)}
     </div>
   )
 }
 
-export { HomePage }
-export default HomePage
-// Floating chat launcher rendered specifically on Home
-// (Placed after export to avoid interfering with page DOM logic)
+function AvatarStack({ people, max = 6 }: { people: Array<{ name?: string; photoURL?: string }>; max?: number }) {
+  const shown = people.slice(0, max)
+  const extra = Math.max(0, people.length - shown.length)
+  return (
+    <div className="flex items-center">
+      {shown.map((p, idx) => (
+        <div key={idx} className={idx === 0 ? '' : '-ml-2'}>
+          <AvatarCircle name={p.name} src={p.photoURL} size={28} />
+        </div>
+      ))}
+      {extra > 0 ? (
+        <div className="-ml-2">
+          <div className="h-7 w-7 rounded-full border border-[--border-base] bg-[--bg-card] text-[11px] font-semibold text-[--text-muted] flex items-center justify-center">
+            +{extra}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function FarmSwitcherModal({
+  open,
+  onClose,
+  farms,
+  activeFarmId,
+  onSelect,
+  onManage,
+  busy,
+}: {
+  open: boolean
+  onClose: () => void
+  farms: Array<{ id: string; name?: string; memberCount?: number }>
+  activeFarmId: string | null
+  onSelect: (farmId: string) => Promise<void>
+  onManage: () => void
+  busy?: boolean
+}) {
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-[70]">
+      <button type="button" className="absolute inset-0 bg-black/30" onClick={onClose} aria-label="Chiudi" />
+      <div className="absolute left-0 right-0 bottom-0 sm:bottom-auto sm:left-1/2 sm:top-24 sm:-translate-x-1/2 w-full sm:w-[420px] max-w-[96vw]">
+        <div className="bg-[--bg-card] rounded-t-3xl sm:rounded-3xl border border-[--border-base] shadow-xl p-4">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-semibold text-[--text-base]">Cambia gruppo</div>
+              <div className="text-xs text-[--text-muted]">Scegli con chi stai organizzando</div>
+            </div>
+            <button type="button" className="text-sm text-[--text-muted] hover:text-[--text-base]" onClick={onClose}>
+              Chiudi
+            </button>
+          </div>
+
+          <div className="mt-3 space-y-2">
+            {farms.map((f) => {
+              const active = f.id === activeFarmId
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  disabled={busy}
+                  className={
+                    'w-full text-left px-3 py-3 rounded-2xl border transition flex items-center justify-between gap-3 ' +
+                    (active
+                      ? 'border-primary-200 bg-primary-50 text-primary-800'
+                      : 'border-[--border-base] bg-[--bg-card] hover:bg-[--bg-subtle] text-[--text-base]')
+                  }
+                  onClick={() => onSelect(f.id)}
+                >
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold truncate">{f.name || 'Gruppo'}</div>
+                    <div className="text-xs text-[--text-muted]">
+                      {typeof f.memberCount === 'number' ? `${f.memberCount} membri` : 'Membri'}
+                    </div>
+                  </div>
+                  {active ? (
+                    <div className="text-xs font-semibold">Attivo</div>
+                  ) : (
+                    <div className="text-xs text-[--text-muted]">Apri</div>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+
+          <div className="mt-4 flex items-center justify-between">
+            <button
+              type="button"
+              className="px-3 py-2 rounded-xl bg-[--bg-raised] text-[--text-base] hover:bg-[--bg-raised]"
+              onClick={onManage}
+            >
+              Gestisci gruppi
+            </button>
+            {busy ? (
+              <div className="text-xs text-[--text-muted] flex items-center gap-2">
+                <span className="inline-block h-4 w-4 border-2 border-neutral-400 border-t-transparent rounded-full animate-spin" />
+                <span>Aggiorno…</span>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+export default function HomePage() {
+  const navigate = useNavigate()
+  const { user } = useAuthStore()
+  const { farms, activeFarmId, activeFarm } = useFarmContext()
+
+  const initializing = useActiveFarmStore((s) => s.initializing)
+  const setActiveFarmId = useActiveFarmStore((s) => s.setActiveFarmId)
+
+  const events = useAppStore((s) => s.events)
+  const expenses = useAppStore((s) => s.expenses)
+  const polls = useAppStore((s) => s.polls)
+  const lists = useAppStore((s) => s.lists)
+  const updateEvent = useAppStore((s) => s.updateEvent)
+
+  const [switcherOpen, setSwitcherOpen] = useState(false)
+  const [switcherBusy, setSwitcherBusy] = useState(false)
+  const [members, setMembers] = useState<FarmMembership[]>([])
+  const [rsvpLoading, setRsvpLoading] = useState<{ eventId: string; status: RsvpStatus } | null>(null)
+  const [rsvpError, setRsvpError] = useState<string | null>(null)
+  const [isOnline, setIsOnline] = useState(true)
+  const [showTutorial, setShowTutorial] = useState(false)
+
+  useEffect(() => {
+    try {
+      setIsOnline(typeof navigator !== 'undefined' ? navigator.onLine : true)
+      const on = () => setIsOnline(true)
+      const off = () => setIsOnline(false)
+      window.addEventListener('online', on)
+      window.addEventListener('offline', off)
+      return () => {
+        window.removeEventListener('online', on)
+        window.removeEventListener('offline', off)
+      }
+    } catch {
+      return
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!activeFarmId || !user?.id) {
+      setMembers([])
+      return
+    }
+
+    let alive = true
+    ;(async () => {
+      try {
+        const next = await farmService.listMembers(activeFarmId)
+        if (!alive) return
+        setMembers(Array.isArray(next) ? next : [])
+      } catch {
+        if (!alive) return
+        setMembers([])
+      }
+    })()
+
+    return () => {
+      alive = false
+    }
+  }, [activeFarmId, user?.id])
+
+  const hasFarms = (farms || []).length > 0
+
+  // Show tutorial once for new users who just created/joined their first farm
+  useEffect(() => {
+    if (hasFarms && shouldShowTutorial()) {
+      setShowTutorial(true)
+    }
+  }, [hasFarms])
+
+  const meKeys = useMemo(() => getUserKeys(user), [user?.id, user?.email])
+
+  const sortedEvents = useMemo(() => {
+    const farmCtx = { userKeys: meKeys, farmIds: activeFarmId ? [activeFarmId] : [] }
+    const base = (Array.isArray(events) ? [...events] : []).filter(e => userCanViewEvent(e, farmCtx))
+    base.sort((a, b) => (a.date?.getTime?.() || 0) - (b.date?.getTime?.() || 0))
+    return base
+  }, [events, activeFarmId, meKeys])
+
+  const heroEvent = useMemo(() => {
+    const now = Date.now()
+    const graceMs = 1000 * 60 * 60 * 2
+    return sortedEvents.find((e) => (e.date?.getTime?.() || 0) >= now - graceMs) || null
+  }, [sortedEvents])
+
+  const upcomingEvents = useMemo(() => {
+    const now = Date.now()
+    return sortedEvents.filter((e) => (e.date?.getTime?.() || 0) >= now).slice(0, 10)
+  }, [sortedEvents])
+
+  const membersById = useMemo(() => {
+    const map = new Map<string, FarmMembership>()
+    for (const m of members || []) {
+      if (m?.userId) map.set(m.userId, m)
+    }
+    return map
+  }, [members])
+
+  const heroRsvp = useMemo(() => {
+    if (!heroEvent) return null
+
+    const ps = Array.isArray(heroEvent.participants) ? heroEvent.participants : []
+    const yesIds = ps.filter((p) => p.status === 'yes').map((p) => p.userId)
+    const maybeIds = ps.filter((p) => p.status === 'maybe').map((p) => p.userId)
+    const responded = new Set(ps.map((p) => p.userId))
+    const pendingIds = (members || []).map((m) => m.userId).filter((uid) => uid && !responded.has(uid))
+
+    const toPerson = (uid: string) => {
+      const m = membersById.get(uid)
+      const fallbackName = ps.find((x) => x.userId === uid)?.name
+      return {
+        name: m?.displayName || fallbackName || uid,
+        photoURL: m?.photoURL,
+      }
+    }
+
+    return {
+      yes: yesIds.map(toPerson),
+      maybe: maybeIds.map(toPerson),
+      pending: pendingIds.map(toPerson),
+    }
+  }, [heroEvent?.id, heroEvent?.participants, members, membersById])
+
+  const myHeroRsvpStatus = useMemo(() => {
+    if (!heroEvent) return undefined
+    const p = getUserEventParticipation(heroEvent, meKeys)
+    return p.status === 'none' ? undefined : p.status
+  }, [heroEvent, meKeys])
+
+  const activityItems = useMemo((): ActivityItem[] => {
+    const now = Date.now()
+    const dayMs = 1000 * 60 * 60 * 24
+    const items: ActivityItem[] = []
+
+    // Use farm-filtered sortedEvents to avoid showing activity from other farms
+    const activeFarmEventIds = new Set(sortedEvents.map(e => e.id))
+
+    for (const e of sortedEvents) {
+      const t = e.updatedAt?.getTime?.() || 0
+      if (!t || now - t > dayMs) continue
+      const dateStr = e.date ? ` · ${formatCompactDate(e.date)}` : ''
+      items.push({
+        key: `ev:${e.id}`,
+        ts: t,
+        title: `📅 ${e.title || 'Evento'}${dateStr}`,
+        onClick: () => navigate(`/events/${e.id}/summary`),
+      })
+    }
+
+    for (const x of expenses || []) {
+      if (x.eventId && !activeFarmEventIds.has(x.eventId)) continue
+      const t = x.updatedAt?.getTime?.() || 0
+      if (!t || now - t > dayMs) continue
+      const amountStr = typeof (x as any).amount === 'number' ? ` · €${(x as any).amount}` : ''
+      items.push({
+        key: `ex:${x.id}`,
+        ts: t,
+        title: `💸 ${x.title || 'Spesa'}${amountStr}`,
+        onClick: () => (x.eventId ? navigate(`/events/${x.eventId}/summary`) : navigate('/farm/settlement')),
+      })
+    }
+
+    for (const p of polls || []) {
+      if (p.eventId && !activeFarmEventIds.has(p.eventId)) continue
+      const t = p.updatedAt?.getTime?.() || 0
+      if (!t || now - t > dayMs) continue
+      const votesStr = Array.isArray((p as any).votes) && (p as any).votes.length > 0
+        ? ` · ${(p as any).votes.length} risposte`
+        : ''
+      items.push({
+        key: `po:${p.id}`,
+        ts: t,
+        title: `🗳️ ${p.title || 'Sondaggio'}${votesStr}`,
+        onClick: () => (p.eventId ? navigate(`/events/${p.eventId}/summary`) : navigate('/events')),
+      })
+    }
+
+    for (const l of lists || []) {
+      if (l.eventId && !activeFarmEventIds.has(l.eventId)) continue
+      const t = l.updatedAt?.getTime?.() || 0
+      if (!t || now - t > dayMs) continue
+      items.push({
+        key: `li:${l.id}`,
+        ts: t,
+        title: `📋 ${l.title || 'Lista'}`,
+        onClick: () => (l.eventId ? navigate(`/events/${l.eventId}/summary`) : navigate('/events')),
+      })
+    }
+
+    items.sort((a, b) => b.ts - a.ts)
+    return items.slice(0, 5)
+  }, [sortedEvents, expenses, polls, lists, navigate])
+
+  const showActivity = activityItems.length >= 2
+
+  const handleSwitchFarm = async (farmId: string) => {
+    if (!user?.id) return
+    setSwitcherBusy(true)
+    try {
+      await setActiveFarmId({ userId: user.id, farmId })
+      await refreshActiveFarmData()
+      setSwitcherOpen(false)
+    } finally {
+      setSwitcherBusy(false)
+    }
+  }
+
+  const setRsvp = async (eventId: string, status: RsvpStatus) => {
+    if (!user?.id || rsvpLoading !== null) return
+
+    setRsvpLoading({ eventId, status })
+    setRsvpError(null)
+    const errorMsg = 'Impossibile aggiornare la partecipazione. Riprova.'
+    let rollbackParticipants: Event['participants'] | null = null
+
+    try {
+      const name = user.displayName || user.email || 'Io'
+
+      // Optimistic local update
+      const cur = (events || []).find((e) => e.id === eventId)
+      if (cur) {
+        rollbackParticipants = Array.isArray(cur.participants) ? [...cur.participants] : []
+
+        const nextParticipants = (() => {
+          const ps: EventParticipant[] = Array.isArray(cur.participants) ? [...cur.participants] : []
+          const idx = ps.findIndex((p) => p.userId === user.id)
+          if (idx >= 0) {
+            ps[idx] = { ...ps[idx], userId: user.id, name, status, respondedAt: new Date() }
+          } else {
+            ps.push({ userId: user.id, name, status, respondedAt: new Date() })
+          }
+          return ps
+        })()
+
+        updateEvent(eventId, { participants: nextParticipants })
+      }
+
+      await eventService.updateParticipation(eventId, user.id, name, status)
+      const remote = await eventService.getById(eventId)
+      if (remote) updateEvent(eventId, remote)
+    } catch {
+      const remote = await eventService.getById(eventId).catch(() => null)
+      if (remote) {
+        updateEvent(eventId, remote)
+      } else if (rollbackParticipants) {
+        updateEvent(eventId, { participants: rollbackParticipants })
+      }
+
+      setRsvpError(errorMsg)
+      setTimeout(() => setRsvpError(null), 3500)
+    } finally {
+      setRsvpLoading(null)
+    }
+  }
+
+  return (
+    <div className="w-full pt-16 space-y-3">
+
+      {/* ── Sezione 1: intestazione gruppo ── */}
+      <div className="flex items-center justify-between gap-3 px-1">
+        <div className="min-w-0">
+          <div className="text-xs text-[--text-muted] uppercase tracking-wide">Gruppo</div>
+          <div className="text-lg font-semibold text-[--text-base] truncate">
+            {activeFarm?.name || (hasFarms ? 'Seleziona un gruppo' : 'Nessun gruppo')}
+          </div>
+          {activeFarm && typeof activeFarm.memberCount === 'number' ? (
+            <div className="text-xs text-[--text-muted]">{activeFarm.memberCount} membri</div>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          {!isOnline && (
+            <span className="inline-flex items-center gap-1 text-xs text-[--text-muted] bg-[--bg-raised] px-2 py-1 rounded-full">
+              <span className="h-1.5 w-1.5 rounded-full bg-[--text-muted]" />
+              Offline
+            </span>
+          )}
+          {initializing && (
+            <span className="inline-block h-4 w-4 border-2 border-neutral-300 border-t-neutral-700 rounded-full animate-spin" />
+          )}
+          {hasFarms && (
+            <button
+              type="button"
+              className="px-3 py-1.5 rounded-xl bg-[--bg-raised] border border-[--border-base] text-sm font-medium text-[--text-muted] hover:bg-[--bg-raised] transition"
+              onClick={() => setSwitcherOpen(true)}
+              disabled={!user?.id}
+            >
+              Cambia
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Sezione 2: stato (no farm / hero evento / vuoto) ── */}
+      {(!activeFarmId || !activeFarm) ? (
+        <div className="rounded-2xl border border-[--border-base] bg-[--bg-card] p-5">
+          {hasFarms ? (
+            <>
+              <div className="text-base font-semibold text-[--text-base]">Scegli un gruppo per iniziare</div>
+              <div className="mt-1 text-sm text-[--text-muted]">Seleziona con chi stai organizzando.</div>
+              <button
+                type="button"
+                className="mt-4 px-4 py-2 rounded-xl bg-[--text-base] text-[--bg-card] text-sm font-semibold"
+                onClick={() => setSwitcherOpen(true)}
+              >
+                Apri gruppi
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="text-base font-semibold text-[--text-base]">Crea il vostro gruppo</div>
+              <div className="mt-1 text-sm text-[--text-muted]">Il posto degli amici: eventi, sondaggi, chat. Tutto insieme.</div>
+              <button
+                type="button"
+                className="mt-4 px-4 py-2 rounded-xl bg-[--text-base] text-[--bg-card] text-sm font-semibold"
+                onClick={() => navigate('/settings/farms')}
+              >
+                Crea / Unisciti
+              </button>
+            </>
+          )}
+        </div>
+      ) : heroEvent ? (
+        /* Hero: prossimo evento */
+        <div className="rounded-2xl border border-[--border-base] bg-[--bg-card] overflow-hidden">
+          {/* Titolo + azioni */}
+          <div className="p-4 pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[11px] font-semibold uppercase tracking-wide text-[--text-muted]">Prossimo</div>
+                <div className="mt-0.5 text-xl font-semibold text-[--text-base] leading-tight truncate">{heroEvent.title || 'Evento'}</div>
+                <div className="mt-1 text-sm text-[--text-muted]">
+                  {formatHeroDate(heroEvent)}{heroEvent.location ? ` · ${heroEvent.location}` : ''}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 px-3 py-1.5 rounded-xl bg-[--bg-raised] text-[--text-base] text-sm font-medium hover:bg-[--bg-raised] transition"
+                onClick={() => navigate(`/events/${heroEvent.id}/summary`)}
+              >
+                Dettagli
+              </button>
+            </div>
+
+            {/* Chi viene — riga compatta */}
+            {heroRsvp && (
+              <div className="mt-3 flex items-center gap-3">
+                <AvatarStack people={[...heroRsvp.yes, ...heroRsvp.maybe]} max={5} />
+                <div className="text-xs text-[--text-muted]">
+                  {heroRsvp.yes.length > 0
+                    ? `${heroRsvp.yes.length} confermati`
+                    : 'Nessuno ha ancora confermato'}
+                  {heroRsvp.maybe.length > 0 ? `, ${heroRsvp.maybe.length} forse` : ''}
+                  {heroRsvp.pending.length > 0 ? ` · ${heroRsvp.pending.length} in attesa` : ''}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* RSVP: separatore + azione */}
+          <div className="border-t border-neutral-100 px-4 py-3">
+            {rsvpError && (
+              <div className="mb-2 rounded-lg border border-red-200 bg-red-50 px-2.5 py-1.5 text-xs text-red-700">
+                {rsvpError}
+              </div>
+            )}
+            {myHeroRsvpStatus ? (
+              <div className="flex items-center justify-between gap-3">
+                <span className={
+                  'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ' +
+                  (myHeroRsvpStatus === 'yes' ? 'bg-green-500/10 text-green-600' :
+                   myHeroRsvpStatus === 'maybe' ? 'bg-amber-500/10 text-amber-600' :
+                   'bg-[--bg-raised] text-[--text-muted]')
+                }>
+                  {myHeroRsvpStatus === 'yes' ? '✓ Partecipi' :
+                   myHeroRsvpStatus === 'maybe' ? '~ Forse' :
+                   '✗ Non partecipi'}
+                </span>
+                <button
+                  type="button"
+                  className="text-xs text-[--text-muted] hover:text-[--text-muted] transition"
+                  onClick={() => navigate(`/events/${heroEvent.id}/summary`)}
+                >
+                  Cambia risposta
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium text-[--text-muted] mr-1">Partecipo?</span>
+                {([
+                  { k: 'yes' as const, label: 'Sì', active: 'bg-green-600 text-white border-green-600' },
+                  { k: 'maybe' as const, label: 'Forse', active: 'bg-amber-500 text-white border-amber-500' },
+                  { k: 'no' as const, label: 'No', active: 'bg-neutral-700 text-white border-neutral-700' },
+                ]).map(({ k, label, active }) => (
+                  <button
+                    key={k}
+                    type="button"
+                    className={
+                      'flex-1 px-3 py-2 rounded-xl text-sm font-semibold border transition ' +
+                      (rsvpLoading?.eventId === heroEvent.id && rsvpLoading?.status === k ? active : 'bg-[--bg-card] text-[--text-muted] border-[--border-base] hover:bg-[--bg-subtle]')
+                    }
+                    disabled={!isOnline || rsvpLoading !== null}
+                    onClick={() => setRsvp(heroEvent.id, k)}
+                  >
+                    {rsvpLoading?.eventId === heroEvent.id && rsvpLoading?.status === k ? '…' : label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        /* Nessun evento: empty state con CTA */
+        <div className="rounded-2xl border border-[--border-base] bg-[--bg-card] p-5">
+          <div className="text-base font-semibold text-[--text-base]">Cosa state organizzando?</div>
+          <div className="mt-1 text-sm text-[--text-muted]">Proponi una data o crea un evento se la sai già.</div>
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              className="flex-1 px-3 py-2.5 rounded-xl bg-[--text-base] text-[--bg-card] text-sm font-semibold"
+              onClick={() => navigate('/polls?create=1&type=date')}
+            >
+              🗳️ Quando siete liberi?
+            </button>
+            <button
+              type="button"
+              className="flex-1 px-3 py-2.5 rounded-xl border border-[--border-base] text-[--text-base] text-sm font-semibold"
+              onClick={() => navigate('/events?create=1')}
+            >
+              📅 Ho una data
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Sezione 3: lista eventi in arrivo ── */}
+      {activeFarmId && activeFarm && (
+        <div className="rounded-2xl border border-[--border-base] bg-[--bg-card]">
+          <div className="flex items-center justify-between gap-3 px-4 pt-4 pb-2">
+            <div className="text-sm font-semibold text-[--text-base]">In arrivo</div>
+            <button
+              type="button"
+              className="text-xs text-[--text-muted] hover:text-[--text-muted] transition"
+              onClick={() => navigate('/events')}
+            >
+              Vedi tutti
+            </button>
+          </div>
+          <div className="divide-y divide-[--border-base]">
+            {upcomingEvents.length === 0 ? (
+              <div className="px-4 py-4 text-sm text-[--text-muted]">
+                Niente in programma.{' '}
+                <button
+                  type="button"
+                  className="text-[--text-base] font-medium underline"
+                  onClick={() => navigate('/events?create=1')}
+                >
+                  Crea qualcosa
+                </button>
+              </div>
+            ) : (
+              upcomingEvents.slice(0, 6).map((e) => {
+                const myStatus = (e.participants || []).find(p => p.userId === user?.id)?.status
+                return (
+                  <button
+                    key={e.id}
+                    type="button"
+                    className="w-full text-left px-4 py-3 hover:bg-[--bg-subtle] transition flex items-center justify-between gap-3"
+                    onClick={() => navigate(`/events/${e.id}/summary`)}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium text-[--text-base] truncate">{e.title || 'Evento'}</div>
+                      {e.location ? (
+                        <div className="text-xs text-[--text-muted] truncate">{e.location}</div>
+                      ) : null}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {myStatus && (
+                        <span className={
+                          'text-[10px] font-semibold px-2 py-0.5 rounded-full ' +
+                          (myStatus === 'yes' ? 'bg-green-500/10 text-green-600' :
+                           myStatus === 'maybe' ? 'bg-amber-500/10 text-amber-600' :
+                           'bg-[--bg-raised] text-[--text-muted]')
+                        }>
+                          {myStatus === 'yes' ? 'Sì' : myStatus === 'maybe' ? 'Forse' : 'No'}
+                        </span>
+                      )}
+                      <div className="text-xs text-[--text-muted] whitespace-nowrap">{formatCompactDate(e.date)}</div>
+                    </div>
+                  </button>
+                )
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Sezione 4: attività recente (solo se presente) ── */}
+      {showActivity && (
+        <div className="rounded-2xl border border-[--border-base] bg-[--bg-card]">
+          <div className="px-4 pt-4 pb-2 text-sm font-semibold text-[--text-base]">Aggiornamenti recenti</div>
+          <div className="divide-y divide-[--border-base]">
+            {activityItems.map((a) => (
+              <button
+                key={a.key}
+                type="button"
+                className="w-full text-left px-4 py-3 hover:bg-[--bg-subtle] transition text-sm text-[--text-muted]"
+                onClick={() => a.onClick?.()}
+              >
+                {a.title}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <FarmSwitcherModal
+        open={switcherOpen}
+        onClose={() => setSwitcherOpen(false)}
+        farms={(farms || []).map((f) => ({ id: f.id, name: f.name, memberCount: f.memberCount }))}
+        activeFarmId={activeFarmId}
+        onSelect={handleSwitchFarm}
+        onManage={() => navigate('/settings/farms')}
+        busy={switcherBusy}
+      />
+
+      {showTutorial && (
+        <TutorialModal onClose={() => setShowTutorial(false)} />
+      )}
+    </div>
+  )
+}
+
 

@@ -104,14 +104,14 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
   }, [])
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-t-2xl sm:rounded-lg shadow-xl w-full max-w-md h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
+    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-[70] p-4">
+      <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-lg shadow-xl w-full max-w-md h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
         <div className="p-6 pb-[calc(6rem+env(safe-area-inset-bottom))]">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-semibold text-gray-900">Nuovo Evento</h2>
+            <h2 className="text-xl font-semibold text-[--text-base]">Nuovo Evento</h2>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600"
+              className="text-[--text-muted] hover:text-[--text-muted]"
               disabled={isLoading}
             >
               ✕
@@ -121,15 +121,15 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
           <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-4">
             {/* Title */}
             <div>
-              <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="title" className="block text-sm font-medium text-[--text-muted] mb-1">
                 Titolo *
               </label>
               <input
                 type="text"
                 id="title"
                 {...register('title')}
-                className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                  errors.title ? 'border-red-300' : 'border-gray-300'
+                className={`w-full px-3 py-2 border rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                  errors.title ? 'border-red-300' : 'border-[--border-base]'
                 }`}
                 placeholder="Nome dell'evento"
                 disabled={isLoading}
@@ -141,14 +141,14 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
 
             {/* Description */}
             <div>
-              <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="description" className="block text-sm font-medium text-[--text-muted] mb-1">
                 Descrizione
               </label>
               <textarea
                 id="description"
                 rows={3}
                 {...register('description')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                className="w-full px-3 py-2 border border-[--border-base] rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500"
                 placeholder="Descrizione dell'evento..."
                 disabled={isLoading}
               />
@@ -156,13 +156,13 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
 
             {/* Category */}
             <div>
-              <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="category" className="block text-sm font-medium text-[--text-muted] mb-1">
                 Categoria *
               </label>
               <select
                 id="category"
                 {...register('category')}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500"
+                className="w-full px-3 py-2 border border-[--border-base] rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500"
                 disabled={isLoading}
               >
                 {Object.entries(EVENT_CATEGORIES).map(([key, { label, emoji }]) => (
@@ -178,15 +178,15 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
               <>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="date" className="block text-sm font-medium text-gray-700 mb-1">
+                    <label htmlFor="date" className="block text-sm font-medium text-[--text-muted] mb-1">
                       Data di Partenza *
                     </label>
                     <input
                       type="date"
                       id="date"
                       {...register('date')}
-                      className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                        errors.date ? 'border-red-300' : 'border-gray-300'
+                      className={`w-full px-3 py-2 border rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                        errors.date ? 'border-red-300' : 'border-[--border-base]'
                       }`}
                       disabled={isLoading}
                     />
@@ -196,7 +196,7 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                   </div>
 
                   <div>
-                    <label htmlFor="endDate" className="block text-sm font-medium text-gray-700 mb-1">
+                    <label htmlFor="endDate" className="block text-sm font-medium text-[--text-muted] mb-1">
                       Data di Ritorno *
                     </label>
                     <input
@@ -204,8 +204,8 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                       id="endDate"
                       {...register('endDate')}
                       min={watch('date')}
-                      className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                        errors.endDate ? 'border-red-300' : 'border-gray-300'
+                      className={`w-full px-3 py-2 border rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                        errors.endDate ? 'border-red-300' : 'border-[--border-base]'
                       }`}
                       disabled={isLoading}
                     />
@@ -216,15 +216,15 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                 </div>
 
                 <div>
-                  <label htmlFor="time" className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="time" className="block text-sm font-medium text-[--text-muted] mb-1">
                     Orario di Partenza *
                   </label>
                   <input
                     type="time"
                     id="time"
                     {...register('time')}
-                    className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                      errors.time ? 'border-red-300' : 'border-gray-300'
+                    className={`w-full px-3 py-2 border rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                      errors.time ? 'border-red-300' : 'border-[--border-base]'
                     }`}
                     disabled={isLoading}
                   />
@@ -236,15 +236,15 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
             ) : (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label htmlFor="date" className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="date" className="block text-sm font-medium text-[--text-muted] mb-1">
                     Data *
                   </label>
                   <input
                     type="date"
                     id="date"
                     {...register('date')}
-                    className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                      errors.date ? 'border-red-300' : 'border-gray-300'
+                    className={`w-full px-3 py-2 border rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                      errors.date ? 'border-red-300' : 'border-[--border-base]'
                     }`}
                     disabled={isLoading}
                   />
@@ -254,15 +254,15 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
                 </div>
 
                 <div>
-                  <label htmlFor="time" className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="time" className="block text-sm font-medium text-[--text-muted] mb-1">
                     Orario *
                   </label>
                   <input
                     type="time"
                     id="time"
                     {...register('time')}
-                    className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                      errors.time ? 'border-red-300' : 'border-gray-300'
+                    className={`w-full px-3 py-2 border rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                      errors.time ? 'border-red-300' : 'border-[--border-base]'
                     }`}
                     disabled={isLoading}
                   />
@@ -275,15 +275,15 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
 
             {/* Location */}
             <div>
-              <label htmlFor="location" className="block text-sm font-medium text-gray-700 mb-1">
+              <label htmlFor="location" className="block text-sm font-medium text-[--text-muted] mb-1">
                 Luogo *
               </label>
               <input
                 type="text"
                 id="location"
                 {...register('location')}
-                className={`w-full px-3 py-2 border rounded-md shadow-sm bg-white text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500 ${
-                  errors.location ? 'border-red-300' : 'border-gray-300'
+                className={`w-full px-3 py-2 border rounded-md shadow-sm bg-[--bg-card] text-[--text-base] focus:outline-none focus:ring-2 focus:ring-primary-500 ${
+                  errors.location ? 'border-red-300' : 'border-[--border-base]'
                 }`}
                 placeholder="Dove si svolge l'evento"
                 disabled={isLoading}
@@ -295,11 +295,11 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
 
             {/* Fixed action bar with safe-area */}
             <div className="fixed left-1/2 -translate-x-1/2 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[60] w-full max-w-md px-6">
-              <div className="bg-white border rounded-xl shadow-md px-4 py-3 flex space-x-3">
+              <div className="bg-[--bg-card] border rounded-xl shadow-md px-4 py-3 flex space-x-3">
                 <button
                   type="button"
                   onClick={onClose}
-                  className="flex-1 px-4 py-2 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors"
+                  className="flex-1 px-4 py-2 text-[--text-muted] bg-[--bg-raised] hover:bg-[--bg-raised] rounded-md transition-colors"
                   disabled={isLoading}
                 >
                   Annulla
@@ -324,3 +324,4 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
 }
 
 export default EventForm
+

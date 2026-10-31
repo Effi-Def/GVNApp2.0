@@ -40,7 +40,7 @@ const ExpenseComments = ({ comments, onAddComment, onDeleteComment }: ExpenseCom
       {/* Intestazione commenti */}
       <button
         onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center justify-between w-full text-sm text-gray-600 hover:text-gray-800"
+        className="flex items-center justify-between w-full text-sm text-[--text-muted] hover:text-[--text-base]"
       >
         <div className="flex items-center space-x-2">
           <span>💬</span>
@@ -60,23 +60,23 @@ const ExpenseComments = ({ comments, onAddComment, onDeleteComment }: ExpenseCom
       {isExpanded && (
         <div className="mt-3 space-y-3">
           {comments.length === 0 && (
-            <p className="text-sm text-gray-500 italic">Nessun commento ancora</p>
+            <p className="text-sm text-[--text-muted] italic">Nessun commento ancora</p>
           )}
           
           {comments.map((comment) => (
-            <div key={comment.id} className="bg-gray-50 rounded-lg p-3">
+            <div key={comment.id} className="bg-[--bg-subtle] rounded-lg p-3">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center space-x-2 mb-1">
-                    <span className="text-sm font-medium text-gray-700">{comment.authorName}</span>
-                    <span className="text-xs text-gray-500">{formatRelativeTime(comment.createdAt)}</span>
+                    <span className="text-sm font-medium text-[--text-muted]">{comment.authorName}</span>
+                    <span className="text-xs text-[--text-muted]">{formatRelativeTime(comment.createdAt)}</span>
                   </div>
-                  <p className="text-sm text-gray-800">{comment.text}</p>
+                  <p className="text-sm text-[--text-base]">{comment.text}</p>
                 </div>
                 {onDeleteComment && user?.id === comment.authorId && (
                   <button
                     onClick={() => onDeleteComment(comment.id)}
-                    className="ml-2 text-gray-400 hover:text-red-500 text-xs"
+                    className="ml-2 text-[--text-muted] hover:text-red-500 text-xs"
                   >
                     ✕
                   </button>
@@ -92,7 +92,7 @@ const ExpenseComments = ({ comments, onAddComment, onDeleteComment }: ExpenseCom
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
               placeholder="Aggiungi un commento..."
-              className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-blue-500"
+              className="flex-1 px-3 py-2 border border-[--border-base] rounded-lg text-sm focus:outline-none focus:border-blue-500"
             />
             <button
               type="submit"

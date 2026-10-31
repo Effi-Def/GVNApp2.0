@@ -133,7 +133,7 @@ async function sendFcmToUsers(userIds, kind, payload, relatedId, opts) {
         console.error('[Telegram] Failed to send notifications:', e);
     }
     // 3. Send FCM (Push Notifications)
-    const tokens = [];
+    const rawTokens = [];
     const chunks = [];
     const size = 10;
     for (let i = 0; i < userIds.length; i += size)
@@ -152,20 +152,28 @@ async function sendFcmToUsers(userIds, kind, payload, relatedId, opts) {
             const tSingle = notif?.fcmToken;
             const tMany = notif?.fcmTokens;
             if (tSingle)
-                tokens.push(tSingle);
+                rawTokens.push(tSingle);
             if (tMany && Array.isArray(tMany))
-                tokens.push(...tMany);
+                rawTokens.push(...tMany);
             console.log(`[FCM] User ${s.id} tokens found: single=${!!tSingle}, arrayCount=${tMany?.length || 0}`);
         });
     }
-    console.log(`[FCM] Total tokens to send: ${tokens.length}`);
+    // Deduplicate: fcmToken and fcmTokens may overlap (addFcmToken stores in both)
+    const tokens = Array.from(new Set(rawTokens));
+    console.log(`[FCM] Total tokens to send: ${tokens.length} (${rawTokens.length} before dedup)`);
     if (tokens.length === 0)
         return;
     try {
         const response = await fcm().sendEachForMulticast({
             tokens,
             notification: payload.notification,
-            data: payload.data,
+            data: {
+                // Merge caller-supplied data with kind/relatedId so the SW can build
+                // a per-type/per-entity notification tag (avoids collapsing all into one).
+                kind,
+                relatedId: relatedId || '',
+                ...payload.data,
+            },
             android: {
                 priority: 'high',
                 notification: {
@@ -231,9 +239,37 @@ exports.onEventCreated = functions.firestore.document('events/{id}').onCreate(as
     const data = snap.data();
     if (!data)
         return;
-    const userIds = getParticipantsUserIds(data);
-    // Humanized message
-    const eventDate = data.date ? new Date(data.date) : null;
+    // Start with participants explicitly listed in the event document (minus the creator)
+    let userIds = getParticipantsUserIds(data);
+    // If the event has farm visibility, notify ALL farm members so they know about the event
+    // even before they join it.  Members are stored in farms/{farmId}/members/{userId}.
+    const farmIds = Array.isArray(data?.visibility?.farms) ? data.visibility.farms : [];
+    if (farmIds.length > 0) {
+        for (const farmId of farmIds) {
+            try {
+                const membersSnap = await db().collection('farms').doc(farmId).collection('members').get();
+                membersSnap.docs.forEach(d => {
+                    // member doc id == userId; also check data.userId as fallback
+                    const uid = d.data()?.userId || d.id;
+                    if (uid && uid !== data.createdBy)
+                        userIds.push(uid);
+                });
+            }
+            catch (e) {
+                console.error(`[Event] Failed to fetch members for farm ${farmId}:`, e);
+            }
+        }
+        // De-duplicate (a user might be both in participants and in the farm)
+        userIds = Array.from(new Set(userIds));
+    }
+    if (userIds.length === 0) {
+        console.log('[Event] No recipients for new event, skipping notifications');
+        return;
+    }
+    // Humanized message — data.date is a Firestore Timestamp; use .toDate() to get a JS Date
+    const eventDate = data.date
+        ? (typeof data.date.toDate === 'function' ? data.date.toDate() : new Date(data.date))
+        : null;
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const t = eventDate ? new Date(eventDate) : null;

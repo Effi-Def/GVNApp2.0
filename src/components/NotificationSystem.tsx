@@ -10,7 +10,10 @@ interface NotificationSystemProps { userId: string }
 const NotificationSystem = ({ userId }: NotificationSystemProps) => {
   const navigate = useNavigate()
   const notifications = useNotificationsStore(state => state.notifications)
-  const unreadCount = useNotificationsStore(state => state.unreadCount())
+  // Stesso filtro usato da Navbar e MobileTopActions: esclude chat senza @mention
+  const unreadCount = useNotificationsStore(state =>
+    state.notifications.filter(n => !n.read && (n.type !== 'chat' || !!n.chatMention)).length
+  )
   const markAsReadStore = useNotificationsStore(state => state.markAsRead)
   const markAllAsReadStore = useNotificationsStore(state => state.markAllAsRead)
   const { notifications: notifSettings } = useUserSettingsStore()
@@ -66,7 +69,7 @@ const NotificationSystem = ({ userId }: NotificationSystemProps) => {
       {/* Pulsante notifiche */}
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 text-gray-600 hover:text-gray-800 hover:bg-gray-100 rounded-lg transition-colors"
+        className="relative p-2 text-[--text-muted] hover:text-[--text-base] hover:bg-[--bg-raised] rounded-lg transition-colors"
       >
         <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5-5V9a6 6 0 10-12 0v3l-5 5h5a6 6 0 0012 0z" />
@@ -87,10 +90,10 @@ const NotificationSystem = ({ userId }: NotificationSystemProps) => {
               setIsOpen(false)
             }}
           />
-          <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-lg shadow-lg border border-gray-200 z-20 max-h-96 overflow-hidden">
+          <div className="absolute right-0 top-full mt-2 w-80 bg-[--bg-card] rounded-lg shadow-lg border border-[--border-base] z-20 max-h-96 overflow-hidden">
             {/* Header */}
-            <div className="p-3 border-b border-gray-200 flex items-center justify-between">
-              <h3 className="font-medium text-gray-800">Notifiche</h3>
+            <div className="p-3 border-b border-[--border-base] flex items-center justify-between">
+              <h3 className="font-medium text-[--text-base]">Notifiche</h3>
               {unreadCount > 0 && (
                 <button
                   onClick={markAllAsRead}
@@ -104,7 +107,7 @@ const NotificationSystem = ({ userId }: NotificationSystemProps) => {
             {/* Lista notifiche */}
             <div className="max-h-80 overflow-y-auto">
               {unreadNotifications.length === 0 ? (
-                <div className="p-4 text-center text-gray-500">
+                <div className="p-4 text-center text-[--text-muted]">
                   <div className="text-4xl mb-2">🔕</div>
                   <p className="text-sm">Nessuna notifica</p>
                 </div>
@@ -112,7 +115,7 @@ const NotificationSystem = ({ userId }: NotificationSystemProps) => {
                 unreadNotifications.map((notification) => (
                   <div
                     key={notification.id}
-                    className={`p-3 border-b border-gray-100 hover:bg-gray-50 cursor-pointer ${
+                    className={`p-3 border-b border-gray-100 hover:bg-[--bg-subtle] cursor-pointer ${
                       !notification.read ? 'bg-blue-50' : ''
                     }`}
                     onClick={() => {
@@ -127,17 +130,17 @@ const NotificationSystem = ({ userId }: NotificationSystemProps) => {
                       <span className="text-lg">{getIcon(notification.type)}</span>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between">
-                          <p className={`text-sm font-medium ${!notification.read ? 'text-gray-900' : 'text-gray-700'}`}>
+                          <p className={`text-sm font-medium ${!notification.read ? 'text-[--text-base]' : 'text-[--text-muted]'}`}>
                             {notification.title}
                           </p>
                           {!notification.read && (
                             <div className="w-2 h-2 bg-blue-500 rounded-full ml-2" />
                           )}
                         </div>
-                        <p className="text-sm text-gray-600 mt-1">
+                        <p className="text-sm text-[--text-muted] mt-1">
                           {notification.message}
                         </p>
-                        <p className="text-xs text-gray-500 mt-1">
+                        <p className="text-xs text-[--text-muted] mt-1">
                           {formatRelativeTime(notification.createdAt)}
                         </p>
                       </div>
@@ -148,7 +151,7 @@ const NotificationSystem = ({ userId }: NotificationSystemProps) => {
             </div>
 
             {/* Footer */}
-            <div className="p-3 border-t border-gray-200 text-center">
+            <div className="p-3 border-t border-[--border-base] text-center">
               <div className="flex items-center justify-center gap-4">
                 <button
                   className="text-sm text-blue-600 hover:text-blue-800"
@@ -160,7 +163,7 @@ const NotificationSystem = ({ userId }: NotificationSystemProps) => {
                   Vedi tutte
                 </button>
                 <button
-                  className="text-sm text-gray-700 hover:text-gray-900"
+                  className="text-sm text-[--text-muted] hover:text-[--text-base]"
                   onClick={() => {
                     setIsOpen(false)
                     navigate('/settings/notifications')

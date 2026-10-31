@@ -38,10 +38,11 @@ export const PigAvatarGrid: React.FC<{ onSelect: (key: PigAvatarKey) => void }> 
   return (
     <div className="grid grid-cols-5 gap-3">
       {variants.slice(0, 20).map((v, i) => (
-        <button key={i} onClick={() => onSelect(`pig-${i}` as PigAvatarKey)} className="p-3 rounded-xl border hover:bg-gray-50 text-2xl">
+        <button key={i} onClick={() => onSelect(`pig-${i}` as PigAvatarKey)} className="p-3 rounded-xl border hover:bg-[--bg-subtle] text-2xl">
           <span>{v}</span>
         </button>
       ))}
     </div>
   )
 }
+

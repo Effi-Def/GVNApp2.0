@@ -3,8 +3,19 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import ErrorBoundary from './components/ErrorBoundary'
 import { AuthProvider } from './contexts/AuthContext'
+import { installE2ERuntime } from './e2e/runtime'
+import { initObservability } from './services/observability'
 import './index.css'
 import { registerSW } from 'virtual:pwa-register'
+import { initDarkMode } from './hooks/useDarkMode'
+
+// Apply dark class ASAP to avoid flash of light mode on reload
+initDarkMode()
+
+const e2eMode = installE2ERuntime()
+
+// Capture runtime errors with release tagging when observability is configured.
+initObservability()
 
 // Minimal toast utility
 function showToast(message: string, opts?: { action?: { label: string; onClick: () => void } }) {
@@ -70,97 +81,99 @@ if (g.__gvn_sw_update_prompt_shown == null) g.__gvn_sw_update_prompt_shown = fal
 if (g.__gvn_sw_update_in_progress == null) g.__gvn_sw_update_in_progress = false
 if (g.__gvn_sw_controllerchange_bound == null) g.__gvn_sw_controllerchange_bound = false
 
-// Register PWA and show a toast when a new version is available
-const updateSW = registerSW({
-  onRegisteredSW(_swUrl, registration) {
-    // In some mobile/PWA scenarios, updates can be slow to surface.
-    // Ask the browser to check for a newer SW shortly after startup.
-    if (!import.meta.env.DEV) {
-      try {
-        setTimeout(() => {
-          try { registration?.update() } catch {}
-        }, 1500)
-      } catch {}
-    }
-  },
-  onNeedRefresh() {
-    console.log('🆕 Service Worker detected new version available!')
-    
-    // CRITICAL: Prevent update loops during development
-    if (import.meta.env.DEV) {
-      console.log('🔧 DEV mode: skipping SW update prompt to prevent reload loops')
-      return
-    }
-    
-    // Rate-limit prompts across reloads (30 seconds to allow quick testing)
-    try {
-      const last = Number(localStorage.getItem('gvn_last_update_prompt') || '0')
-      const now = Date.now()
-      const timeSince = now - last
-      console.log(`⏱️ Time since last prompt: ${Math.round(timeSince / 1000)}s`)
-      if (timeSince < 30000) { // 30 seconds
-        console.log('⏭️ Skipping update prompt (too soon since last prompt, wait 30s)')
+// Register PWA and show a toast when a new version is available.
+// Skip it in E2E mode to keep smoke runs deterministic.
+if (!e2eMode) {
+  const updateSW = registerSW({
+    onRegisteredSW(_swUrl, registration) {
+      // In some mobile/PWA scenarios, updates can be slow to surface.
+      // Ask the browser to check for a newer SW shortly after startup.
+      if (!import.meta.env.DEV) {
+        try {
+          setTimeout(() => {
+            try { registration?.update() } catch {}
+          }, 1500)
+        } catch {}
+      }
+    },
+    onNeedRefresh() {
+      console.log('🆕 Service Worker detected new version available!')
+      
+      // CRITICAL: Prevent update loops during development
+      if (import.meta.env.DEV) {
+        console.log('🔧 DEV mode: skipping SW update prompt to prevent reload loops')
         return
       }
-      localStorage.setItem('gvn_last_update_prompt', String(now))
-    } catch {}
-    
-    if (g.__gvn_sw_update_prompt_shown) {
-      console.log('⏭️ Skipping update prompt (already shown in this session)')
-      return
-    }
-    
-    g.__gvn_sw_update_prompt_shown = true
-    console.log('🔔 Showing update prompt')
-    
-    // Visible toast
-    showToast('Nuova versione disponibile', {
-      action: {
-        label: 'Aggiorna',
-        onClick: () => {
-          if (g.__gvn_sw_update_in_progress) {
-            console.log('⏭️ Update already in progress')
-            return
-          }
-          g.__gvn_sw_update_in_progress = true
-          console.log('🔄 Starting update...')
-          
-          if (!g.__gvn_sw_controllerchange_bound && 'serviceWorker' in navigator) {
-            try {
-              navigator.serviceWorker.addEventListener('controllerchange', () => {
-                if (g.__gvn_sw_controllerchange_bound === true) return
-                g.__gvn_sw_controllerchange_bound = true
-                console.log('✅ New SW activated, reloading in 200ms...')
-                setTimeout(() => { try { location.reload() } catch {} }, 200)
-              }, { once: true } as any)
-            } catch (e) {
-              console.error('❌ Failed to bind controllerchange:', e)
+      
+      // Rate-limit prompts across reloads (30 seconds to allow quick testing)
+      try {
+        const last = Number(localStorage.getItem('gvn_last_update_prompt') || '0')
+        const now = Date.now()
+        const timeSince = now - last
+        console.log(`⏱️ Time since last prompt: ${Math.round(timeSince / 1000)}s`)
+        if (timeSince < 30000) {
+          console.log('⏭️ Skipping update prompt (too soon since last prompt, wait 30s)')
+          return
+        }
+        localStorage.setItem('gvn_last_update_prompt', String(now))
+      } catch {}
+      
+      if (g.__gvn_sw_update_prompt_shown) {
+        console.log('⏭️ Skipping update prompt (already shown in this session)')
+        return
+      }
+      
+      g.__gvn_sw_update_prompt_shown = true
+      console.log('🔔 Showing update prompt')
+      
+      showToast('Nuova versione disponibile', {
+        action: {
+          label: 'Aggiorna',
+          onClick: () => {
+            if (g.__gvn_sw_update_in_progress) {
+              console.log('⏭️ Update already in progress')
+              return
             }
-          }
-          try { 
-            updateSW(true)
-            console.log('✅ SW update triggered')
-          } catch (e) {
-            console.error('❌ Failed to trigger SW update:', e)
-          }
+            g.__gvn_sw_update_in_progress = true
+            console.log('🔄 Starting update...')
+            
+            if (!g.__gvn_sw_controllerchange_bound && 'serviceWorker' in navigator) {
+              try {
+                navigator.serviceWorker.addEventListener('controllerchange', () => {
+                  if (g.__gvn_sw_controllerchange_bound === true) return
+                  g.__gvn_sw_controllerchange_bound = true
+                  console.log('✅ New SW activated, reloading in 200ms...')
+                  setTimeout(() => { try { location.reload() } catch {} }, 200)
+                }, { once: true } as any)
+              } catch (e) {
+                console.error('❌ Failed to bind controllerchange:', e)
+              }
+            }
+            try {
+              updateSW(true)
+              console.log('✅ SW update triggered')
+            } catch (e) {
+              console.error('❌ Failed to trigger SW update:', e)
+            }
+          },
         },
-      },
-    })
-  },
-  onOfflineReady() {
-    console.log('✅ App ready for offline use')
-    showToast('App disponibile offline')
-  },
-})
+      })
+    },
+    onOfflineReady() {
+      console.log('✅ App ready for offline use')
+      showToast('App disponibile offline')
+    },
+  })
 
-// In production, auto-reload once when a new SW takes control.
-// This helps installed Android PWAs pick up changes immediately.
-if (!import.meta.env.DEV && 'serviceWorker' in navigator) {
-  try {
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      try { location.reload() } catch {}
-    }, { once: true } as any)
-  } catch {}
+  // In production, auto-reload once when a new SW takes control.
+  // This helps installed Android PWAs pick up changes immediately.
+  if (!import.meta.env.DEV && 'serviceWorker' in navigator) {
+    try {
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        try { location.reload() } catch {}
+      }, { once: true } as any)
+    } catch {}
+  }
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

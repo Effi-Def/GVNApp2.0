@@ -2,23 +2,40 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Design System Variables */
+/* ─────────────────────────────────────────────
+   Design System – CSS Custom Properties
+   Light mode (default) + Dark mode (.dark class)
+───────────────────────────────────────────── */
 :root {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   line-height: 1.6;
   font-weight: 400;
-  
-  /* Colori del design system */
+
+  /* Brand */
   --color-primary: #10b981;
+  --color-primary-dark: #059669;
   --color-accent: #ec4899;
-  --color-neutral-50: #fafafa;
-  --color-neutral-900: #171717;
+
+  /* Surfaces */
+  --bg-page:    #f5f5f5;
+  --bg-card:    #ffffff;
+  --bg-subtle:  #fafafa;
+  --bg-raised:  #ffffff;
+
+  /* Text */
+  --text-base:    #171717;
+  --text-muted:   #737373;
+  --text-inverse: #ffffff;
+
+  /* Borders */
+  --border-base:   #e5e5e5;
+  --border-strong: #d4d4d4;
 
   color-scheme: light;
-  color: var(--color-neutral-900);
-  background-color: var(--color-neutral-50);
+  color: var(--text-base);
+  background-color: var(--bg-page);
 
-  /* Typography ottimizzata */
+  /* Typography */
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -26,67 +43,120 @@
   -webkit-text-size-adjust: 100%;
 }
 
-/* Reset moderno */
-*, *::before, *::after {
-  box-sizing: border-box;
+/* Dark mode overrides – activated by class="dark" on <html> */
+.dark {
+  color-scheme: dark;
+
+  --bg-page:    #0f172a;
+  --bg-card:    #1e293b;
+  --bg-subtle:  #1e293b;
+  --bg-raised:  #273549;
+
+  --text-base:    #f1f5f9;
+  --text-muted:   #94a3b8;
+  --text-inverse: #0f172a;
+
+  --border-base:   #334155;
+  --border-strong: #475569;
 }
+
+/* ─────────────────────────────────────────────
+   Base resets
+───────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
 
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%);
+  background-color: var(--bg-page);
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
-/* Componenti personalizzati per GVNApp */
+/* ─────────────────────────────────────────────
+   GVN Design System Components
+   Using CSS vars so they respond to dark mode
+───────────────────────────────────────────── */
 @layer components {
-  /* Card moderna con shadow morbida */
+  /* Card */
   .gvn-card {
-    @apply bg-white rounded-2xl shadow-lg shadow-neutral-200/50 border border-neutral-100 transition-all duration-200 hover:shadow-xl hover:shadow-neutral-200/60;
+    @apply rounded-2xl border transition-all duration-200;
+    background-color: var(--bg-card);
+    border-color: var(--border-base);
+    box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.06);
   }
-  
-  /* Button primario con il nuovo stile */
+  .gvn-card:hover {
+    box-shadow: 0 4px 12px 0 rgb(0 0 0 / 0.10), 0 2px 4px -1px rgb(0 0 0 / 0.08);
+  }
+
+  /* Buttons */
   .gvn-btn-primary, .gvn-button-primary {
-    @apply bg-gradient-to-r from-primary-500 to-primary-600 text-white font-semibold px-6 py-3 rounded-xl shadow-lg shadow-primary-500/25 transition-all duration-200 hover:shadow-xl hover:shadow-primary-500/30 hover:scale-105 active:scale-95;
+    @apply inline-flex items-center justify-center gap-2 font-semibold px-5 py-2.5 rounded-xl
+           transition-all duration-200 focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-primary-500 focus-visible:ring-offset-2 active:scale-95
+           disabled:opacity-50 disabled:pointer-events-none;
+    background: linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark) 100%);
+    color: var(--text-inverse);
+    box-shadow: 0 4px 14px 0 rgb(16 185 129 / 0.30);
   }
-  
-  /* Button secondario */
+  .gvn-btn-primary:hover, .gvn-button-primary:hover {
+    box-shadow: 0 6px 20px 0 rgb(16 185 129 / 0.40);
+    filter: brightness(1.06);
+  }
+
   .gvn-btn-secondary, .gvn-button-secondary {
-    @apply bg-neutral-50 text-neutral-700 font-medium px-6 py-3 rounded-xl border border-neutral-200 transition-all duration-200 hover:bg-white hover:shadow-md hover:border-neutral-300;
+    @apply inline-flex items-center justify-center gap-2 font-medium px-5 py-2.5 rounded-xl
+           border transition-all duration-200 focus-visible:outline-none focus-visible:ring-2
+           focus-visible:ring-primary-500 focus-visible:ring-offset-2 active:scale-95
+           disabled:opacity-50 disabled:pointer-events-none;
+    background-color: var(--bg-subtle);
+    color: var(--text-base);
+    border-color: var(--border-base);
   }
-  
-  /* Input moderno */
+  .gvn-btn-secondary:hover, .gvn-button-secondary:hover {
+    background-color: var(--bg-raised);
+    border-color: var(--border-strong);
+  }
+
+  /* Input */
   .gvn-input {
-    @apply w-full px-4 py-3 rounded-xl border-2 border-neutral-200 bg-white text-neutral-900 placeholder-neutral-400 font-medium transition-all duration-200 focus:outline-none focus:border-primary-500 focus:ring-4 focus:ring-primary-500/10;
+    @apply w-full px-4 py-3 rounded-xl border-2 font-medium
+           placeholder:text-[--text-muted] transition-all duration-200
+           focus:outline-none focus:ring-4 focus:ring-primary-500/10;
+    background-color: var(--bg-card);
+    border-color: var(--border-base);
+    color: var(--text-base);
   }
-  
-  /* Titoli con font display */
-  .gvn-title {
-    @apply font-bold text-neutral-900 tracking-tight;
+  .gvn-input:focus {
+    border-color: var(--color-primary);
   }
-  
-  /* Testo principale */
-  .gvn-text {
-    @apply text-neutral-700;
-  }
-  
-  /* Colore primario */
-  .gvn-primary {
-    color: var(--color-primary);
-  }
-  
-  /* Badge con mascotte */
+
+  /* Typography helpers */
+  .gvn-title { @apply font-bold tracking-tight; color: var(--text-base); }
+  .gvn-text  { color: var(--text-muted); }
+  .gvn-primary { color: var(--color-primary); }
+
+  /* Badge mascotte */
   .gvn-badge-pig {
-    @apply inline-flex items-center space-x-1 bg-pink-50 text-pink-700 px-3 py-1 rounded-full text-sm font-medium border border-pink-200;
+    @apply inline-flex items-center space-x-1 px-3 py-1 rounded-full text-sm font-medium border;
+    background-color: #fdf2f8;
+    color: #be185d;
+    border-color: #fbcfe8;
+  }
+  .dark .gvn-badge-pig {
+    background-color: #4a1030;
+    color: #f9a8d4;
+    border-color: #831843;
   }
 }
 
-/* Animazioni personalizzate */
+/* ─────────────────────────────────────────────
+   Utilities
+───────────────────────────────────────────── */
 @layer utilities {
   .animate-float {
     animation: float 3s ease-in-out infinite;
   }
-  
   .safe-area-inset-bottom {
     padding-bottom: env(safe-area-inset-bottom);
   }
@@ -94,7 +164,12 @@ body {
 
 @keyframes float {
   0%, 100% { transform: translateY(0px); }
-  50% { transform: translateY(-10px); }
+  50%       { transform: translateY(-10px); }
+}
+
+@keyframes wavePulse {
+  from { transform: scaleY(0.2); }
+  to   { transform: scaleY(1); }
 }
 
 #root {

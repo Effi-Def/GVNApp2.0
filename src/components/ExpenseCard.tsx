@@ -21,13 +21,13 @@ const ExpenseCard = ({ expense, onEdit, onDelete }: ExpenseCardProps) => {
   const isPaidByCurrentUser = expense.paidBy === user?.id
 
   return (
-    <div className="bg-white border border-gray-200 rounded-lg p-4 shadow-sm">
+    <div className="bg-[--bg-card] border border-[--border-base] rounded-lg p-4 shadow-sm">
       {/* Header */}
       <div className="flex justify-between items-start mb-3">
         <div className="flex-1">
-          <h3 className="text-lg font-medium text-gray-900">{expense.title}</h3>
-          <p className="text-sm text-gray-500">
-            Totale: <span className="font-semibold text-gray-900">{expense.amount.toFixed(2)}€</span>
+          <h3 className="text-lg font-medium text-[--text-base]">{expense.title}</h3>
+          <p className="text-sm text-[--text-muted]">
+            Totale: <span className="font-semibold text-[--text-base]">{expense.amount.toFixed(2)}€</span>
           </p>
         </div>
         
@@ -35,7 +35,7 @@ const ExpenseCard = ({ expense, onEdit, onDelete }: ExpenseCardProps) => {
           {onEdit && (
             <button
               onClick={() => onEdit(expense)}
-              className="text-gray-400 hover:text-primary-600 p-1"
+              className="text-[--text-muted] hover:text-primary-600 p-1"
               title="Modifica spesa"
             >
               ✏️
@@ -44,7 +44,7 @@ const ExpenseCard = ({ expense, onEdit, onDelete }: ExpenseCardProps) => {
           {onDelete && (
             <button
               onClick={() => onDelete(expense.id)}
-              className="text-gray-400 hover:text-red-600 p-1"
+              className="text-[--text-muted] hover:text-red-600 p-1"
               title="Elimina spesa"
             >
               🗑️
@@ -55,7 +55,7 @@ const ExpenseCard = ({ expense, onEdit, onDelete }: ExpenseCardProps) => {
 
       {/* Payment Info */}
       <div className="mb-3">
-        <div className="text-sm text-gray-600 mb-2">
+        <div className="text-sm text-[--text-muted] mb-2">
           💳 Pagato da: <span className="font-medium">{isPaidByCurrentUser ? 'Te' : 'Altro utente'}</span>
         </div>
         
@@ -75,17 +75,17 @@ const ExpenseCard = ({ expense, onEdit, onDelete }: ExpenseCardProps) => {
 
       {/* Participants */}
       <div className="border-t pt-3">
-        <h4 className="text-sm font-medium text-gray-700 mb-2">
+        <h4 className="text-sm font-medium text-[--text-muted] mb-2">
           Partecipanti ({expense.participants.length})
         </h4>
         <div className="space-y-1">
           {expense.participants.map((participant, index) => (
             <div key={index} className="flex justify-between items-center text-sm">
-              <span className={`${participant.userId === user?.id ? 'font-medium text-primary-700' : 'text-gray-600'}`}>
+              <span className={`${participant.userId === user?.id ? 'font-medium text-primary-700' : 'text-[--text-muted]'}`}>
                 {participant.name} {participant.userId === user?.id && '(Tu)'}
               </span>
               <div className="flex items-center space-x-2">
-                <span className="text-gray-900 font-medium">
+                <span className="text-[--text-base] font-medium">
                   {participant.amount.toFixed(2)}€
                 </span>
                 <div className={`w-2 h-2 rounded-full ${
@@ -100,7 +100,7 @@ const ExpenseCard = ({ expense, onEdit, onDelete }: ExpenseCardProps) => {
       {/* Event Reference */}
       {expense.eventId && (
         <div className="mt-3 pt-2 border-t">
-          <div className="text-xs text-gray-500">
+          <div className="text-xs text-[--text-muted]">
             📅 Collegato a un evento
           </div>
         </div>
@@ -110,3 +110,4 @@ const ExpenseCard = ({ expense, onEdit, onDelete }: ExpenseCardProps) => {
 }
 
 export default ExpenseCard
+

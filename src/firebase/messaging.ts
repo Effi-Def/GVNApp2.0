@@ -2,8 +2,60 @@ import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messagi
 import app from './config'
 import { userService } from '../services/firestore'
 import { useUserSettingsStore } from '../stores/UserSettingsStore'
+import { reportError } from '../services/observability'
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+const MAX_TOKEN_RETRIES = 3
+const TOKEN_RETRY_BASE_MS = 1000
+
+/**
+ * Calls getToken() with up to MAX_TOKEN_RETRIES attempts and exponential backoff.
+ *
+ * iOS Safari race condition fix: navigator.serviceWorker.ready is awaited before
+ * the first attempt to guarantee the SW is in `active` state. Without this,
+ * getToken() can be called while the SW is still `installing`, causing a silent
+ * failure on iOS where the token is never retrieved.
+ *
+ * On final failure the error is captured by Sentry via reportError().
+ */
+async function getTokenWithRetry(
+  messaging: ReturnType<typeof getMessaging>,
+  options: { vapidKey: string; serviceWorkerRegistration: ServiceWorkerRegistration },
+  log: (msg: string) => void,
+): Promise<string> {
+  // Wait for the SW to reach `active` state before calling getToken.
+  // This is the primary fix for the iOS race condition.
+  log('[FCM] Awaiting navigator.serviceWorker.ready before getToken...')
+  await navigator.serviceWorker.ready
+
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= MAX_TOKEN_RETRIES; attempt++) {
+    try {
+      log(`[FCM] getToken attempt ${attempt}/${MAX_TOKEN_RETRIES}...`)
+      const token = await getToken(messaging, options)
+      if (!token) throw new Error('getToken returned an empty token')
+      log(`[FCM] getToken succeeded on attempt ${attempt}`)
+      return token
+    } catch (e) {
+      lastError = e
+      if (attempt < MAX_TOKEN_RETRIES) {
+        const delayMs = TOKEN_RETRY_BASE_MS * Math.pow(2, attempt - 1) // 1s, 2s, 4s
+        log(`[FCM] getToken failed (attempt ${attempt}): ${(e as Error)?.message ?? e}. Retrying in ${delayMs}ms...`)
+        await sleep(delayMs)
+      }
+    }
+  }
+
+  // All attempts exhausted — report to Sentry and rethrow.
+  reportError(lastError, {
+    source: 'fcm_getToken',
+    tags: { context: 'push_registration' },
+    extra: { attempts: MAX_TOKEN_RETRIES },
+  })
+  throw lastError
+}
 
 // --- Singleton guards ---
 // Tracks the userId for which the messaging/onMessage handler has already been
@@ -131,8 +183,7 @@ async function _doInitMessaging(userId: string, log: (msg: string) => void) {
     log('[FCM] Locating PWA SW registration...')
     const reg = await getPwaServiceWorkerRegistration(log)
 
-    log('[FCM] Calling getToken...')
-    const token = await getToken(messaging, { vapidKey, serviceWorkerRegistration: reg })
+    const token = await getTokenWithRetry(messaging, { vapidKey, serviceWorkerRegistration: reg }, log)
     if (token) {
       log('[FCM] Token obtained, saving to Firestore...')
       await userService.addFcmToken(userId, token)

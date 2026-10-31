@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { NotificationSettings, useUserSettingsStore } from '../stores/UserSettingsStore'
 import { useAuthStore } from '../stores/useAuthStore'
 import { initMessaging } from '../firebase/messaging'
 import { isSupported as fcmIsSupported } from 'firebase/messaging'
+import AdvancedSection from '../components/AdvancedSection'
 
 const NotificationPreferencesPage: React.FC = () => {
   const { user } = useAuthStore()
@@ -12,8 +13,14 @@ const NotificationPreferencesPage: React.FC = () => {
   const [typesDraft, setTypesDraft] = useState<NonNullable<NotificationSettings['types']>>({})
   const [typesDirty, setTypesDirty] = useState(false)
 
-  if (!user) return null
+  const userId = user?.id
   const types = typesDraft || {}
+
+  useEffect(() => {
+    if (!userId) return
+    // Always refresh on page entry (local fallback is handled in the store)
+    void loadFromFirestore(userId).catch(() => {})
+  }, [userId, loadFromFirestore])
 
   useEffect(() => {
     if (!typesDirty) {
@@ -21,13 +28,26 @@ const NotificationPreferencesPage: React.FC = () => {
     }
   }, [notifications.types, typesDirty])
 
-  const permission = useMemo(() => {
+  if (!userId) return null
+
+  const readPermission = () => {
     try {
-      if (typeof Notification === 'undefined') return 'unsupported'
+      if (typeof Notification === 'undefined') return 'unsupported' as const
       return Notification.permission
     } catch {
-      return 'unknown'
+      return 'unknown' as const
     }
+  }
+
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [permission, setPermission] = useState<ReturnType<typeof readPermission>>(readPermission)
+
+  // Aggiorna lo stato del permesso ogni volta che la pagina riceve il focus
+  // eslint-disable-next-line react-hooks/rules-of-hooks
+  useEffect(() => {
+    const refresh = () => setPermission(readPermission())
+    window.addEventListener('focus', refresh)
+    return () => window.removeEventListener('focus', refresh)
   }, [])
 
   const formatError = (e: unknown) => {
@@ -72,21 +92,23 @@ const NotificationPreferencesPage: React.FC = () => {
   }
 
   return (
-    <div className="p-4 sm:p-6 max-w-2xl mx-auto">
+    <div className="pt-16 px-4 sm:px-6 pb-4 sm:pb-6 max-w-2xl mx-auto">
       <h1 className="text-2xl font-bold mb-4">Preferenze notifiche</h1>
 
-      <div className="bg-white border border-gray-200 rounded-xl p-4 space-y-4">
+      <div className="bg-[--bg-card] border border-[--border-base] rounded-xl p-4 space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <div className="font-medium">Notifiche push su cellulare</div>
-            <div className="text-xs text-gray-600">Richiede consenso del browser e Service Worker</div>
+            <div className="text-xs text-[--text-muted]">Richiede consenso del browser e Service Worker</div>
           </div>
           <input type="checkbox" checked={notifications.pushEnabled} onChange={async (e)=>{
             const checked = e.target.checked
             setNotifications({ pushEnabled: checked })
             if (checked) {
               try {
-                await initMessaging(user.id)
+                // force=true: bypassa il guard singleton, necessario se l'utente
+                // aveva già abilitato/disabilitato push nella stessa sessione.
+                await initMessaging(user.id, undefined, true)
                 await saveToggle({ pushEnabled: true })
               } catch (err) {
                 console.error(err)
@@ -102,7 +124,7 @@ const NotificationPreferencesPage: React.FC = () => {
         <div className="flex items-center justify-between">
           <div>
             <div className="font-medium">Notifiche desktop leggere</div>
-            <div className="text-xs text-gray-600">Pop-up locale quando l'app è aperta</div>
+            <div className="text-xs text-[--text-muted]">Pop-up locale quando l'app è aperta</div>
           </div>
           <input type="checkbox" checked={notifications.desktopEnabled} onChange={async (e)=>{
             const checked = e.target.checked
@@ -113,9 +135,9 @@ const NotificationPreferencesPage: React.FC = () => {
       </div>
 
       {/* Troubleshooting */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 mt-6">
+      <div className="bg-[--bg-card] border border-[--border-base] rounded-xl p-4 mt-6">
         <h2 className="text-lg font-semibold mb-2">Diagnostica Notifiche</h2>
-        <p className="text-xs text-gray-600 mb-3">Se non ricevi le notifiche, controlla qui.</p>
+        <p className="text-xs text-[--text-muted] mb-3">Se non ricevi le notifiche, controlla qui.</p>
         
         <div className="space-y-3 text-sm">
           <div className="flex items-center justify-between">
@@ -140,7 +162,7 @@ const NotificationPreferencesPage: React.FC = () => {
           </div>
           
           {!window.matchMedia('(display-mode: standalone)').matches && (
-             <div className="bg-orange-50 p-2 rounded text-xs text-orange-800">
+             <div className="bg-orange-500/10 p-2 rounded text-xs text-orange-700 dark:text-orange-400">
                Su iOS (iPhone), le notifiche funzionano <strong>solo</strong> se aggiungi l'app alla Home.
              </div>
           )}
@@ -160,7 +182,7 @@ const NotificationPreferencesPage: React.FC = () => {
                   alert('Errore invio test: ' + e)
                 }
               }}
-              className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-800 rounded-lg text-sm font-medium"
+              className="w-full py-2 bg-[--bg-raised] hover:bg-[--bg-subtle] text-[--text-base] rounded-lg text-sm font-medium"
             >
               Invia Notifica di Test 🔔
             </button>
@@ -179,7 +201,7 @@ const NotificationPreferencesPage: React.FC = () => {
                 }
                 alert('Per abilitare le notifiche: apri Impostazioni di sistema > Notifiche > consenti per il browser/app. Su Android Chrome: premi ℹ️ nell\'URL > Notifiche. Su iOS: Impostazioni > Safari/Browser > Notifiche.')
               }}
-              className="w-full py-2 bg-neutral-100 hover:bg-neutral-200 text-neutral-800 rounded-lg text-sm font-medium"
+              className="w-full py-2 bg-[--bg-raised] hover:bg-[--bg-subtle] text-[--text-base] rounded-lg text-sm font-medium"
             >
               Apri impostazioni notifiche
             </button>
@@ -187,7 +209,7 @@ const NotificationPreferencesPage: React.FC = () => {
             <button 
               onClick={async () => {
                 try {
-                  await initMessaging(user.id)
+                  await initMessaging(user.id, undefined, true)
                   alert('Push reinizializzate con successo!')
                 } catch (e) {
                   alert('Errore reinizializzazione push: ' + e)
@@ -200,46 +222,52 @@ const NotificationPreferencesPage: React.FC = () => {
           </div>
         </div>
 
-        <PushDiagnostics userId={user.id} />
+        <AdvancedSection storageKey="gvn.advanced.notifications.pushDiagnostics" title="Avanzate">
+          <PushDiagnostics userId={user.id} onPermissionChange={setPermission} />
+        </AdvancedSection>
       </div>
 
-      <div className="mt-6 bg-white border border-gray-200 rounded-xl p-4">
-        <h2 className="text-lg font-semibold mb-2">Tipologie</h2>
-        <p className="text-xs text-gray-600 mb-3">Scegli quali notifiche vuoi ricevere</p>
-        <div className="space-y-3">
-          <label className="flex items-center justify-between">
-            <span>Eventi creati</span>
-            <input type="checkbox" checked={types.event !== false} onChange={(e)=>{ setTypesDirty(true); setTypesDraft({ ...types, event: e.target.checked }) }} />
-          </label>
-          <label className="flex items-center justify-between">
-            <span>Spese create</span>
-            <input type="checkbox" checked={types.expense !== false} onChange={(e)=>{ setTypesDirty(true); setTypesDraft({ ...types, expense: e.target.checked }) }} />
-          </label>
-          <label className="flex items-center justify-between">
-            <span>Sondaggi creati</span>
-            <input type="checkbox" checked={types.poll !== false} onChange={(e)=>{ setTypesDirty(true); setTypesDraft({ ...types, poll: e.target.checked }) }} />
-          </label>
-          <label className="flex items-center justify-between">
-            <span>Liste create</span>
-            <input type="checkbox" checked={types.list !== false} onChange={(e)=>{ setTypesDirty(true); setTypesDraft({ ...types, list: e.target.checked }) }} />
-          </label>
-          <label className="flex items-center justify-between">
-            <span>Messaggi chat (sperimentale)</span>
-            <input type="checkbox" checked={!!types.chat} onChange={(e)=>{ setTypesDirty(true); setTypesDraft({ ...types, chat: e.target.checked }) }} />
-          </label>
-        </div>
-        <div className="pt-4">
-          <button
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-60"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? 'Salvataggio...' : 'Salva preferenze'}
-          </button>
-          {saveMessage && (
-            <div className="mt-2 text-sm text-gray-700">{saveMessage}</div>
-          )}
-        </div>
+      <div className="mt-6">
+        <AdvancedSection storageKey="gvn.advanced.notifications.types" title="Avanzate: Tipologie">
+            <div className="bg-[--bg-card] border border-[--border-base] rounded-xl p-4">
+            <h2 className="text-lg font-semibold mb-2">Tipologie</h2>
+            <p className="text-xs text-[--text-muted] mb-3">Scegli quali notifiche vuoi ricevere</p>
+            <div className="space-y-3">
+              <label className="flex items-center justify-between">
+                <span>Eventi creati</span>
+                <input type="checkbox" checked={types.event !== false} onChange={(e)=>{ setTypesDirty(true); setTypesDraft({ ...types, event: e.target.checked }) }} />
+              </label>
+              <label className="flex items-center justify-between">
+                <span>Spese create</span>
+                <input type="checkbox" checked={types.expense !== false} onChange={(e)=>{ setTypesDirty(true); setTypesDraft({ ...types, expense: e.target.checked }) }} />
+              </label>
+              <label className="flex items-center justify-between">
+                <span>Sondaggi creati</span>
+                <input type="checkbox" checked={types.poll !== false} onChange={(e)=>{ setTypesDirty(true); setTypesDraft({ ...types, poll: e.target.checked }) }} />
+              </label>
+              <label className="flex items-center justify-between">
+                <span>Liste create</span>
+                <input type="checkbox" checked={types.list !== false} onChange={(e)=>{ setTypesDirty(true); setTypesDraft({ ...types, list: e.target.checked }) }} />
+              </label>
+              <label className="flex items-center justify-between">
+                <span>Messaggi chat (sperimentale)</span>
+                <input type="checkbox" checked={!!types.chat} onChange={(e)=>{ setTypesDirty(true); setTypesDraft({ ...types, chat: e.target.checked }) }} />
+              </label>
+            </div>
+            <div className="pt-4">
+              <button
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg disabled:opacity-60"
+                onClick={handleSave}
+                disabled={saving}
+              >
+                {saving ? 'Salvataggio...' : 'Salva preferenze'}
+              </button>
+              {saveMessage && (
+                <div className="mt-2 text-sm text-[--text-muted]">{saveMessage}</div>
+              )}
+            </div>
+          </div>
+        </AdvancedSection>
       </div>
     </div>
   )
@@ -247,7 +275,7 @@ const NotificationPreferencesPage: React.FC = () => {
 
 export default NotificationPreferencesPage
 
-function PushDiagnostics({ userId }: { userId: string }) {
+function PushDiagnostics({ userId, onPermissionChange }: { userId: string; onPermissionChange?: (p: NotificationPermission) => void }) {
   const { notifications } = useUserSettingsStore()
   const [supported, setSupported] = useState<boolean | null>(null)
   const [permission, setPermission] = useState<NotificationPermission | 'n/d'>('n/d')
@@ -288,7 +316,11 @@ function PushDiagnostics({ userId }: { userId: string }) {
   }, [])
 
   const requestPermission = async () => {
-    try { await Notification.requestPermission(); setPermission(Notification.permission) } catch {}
+    try {
+      await Notification.requestPermission()
+      setPermission(Notification.permission)
+      onPermissionChange?.(Notification.permission)
+    } catch {}
   }
 
   const reinit = async () => {
@@ -324,15 +356,15 @@ function PushDiagnostics({ userId }: { userId: string }) {
   }
 
   return (
-    <div className="mt-6 p-3 border rounded-lg bg-gray-50">
+    <div className="mt-6 p-3 border rounded-lg bg-[--bg-subtle] border-[--border-base]">
       <div className="font-semibold mb-2">Diagnostica Push (avanzata)</div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">
-        <div><span className="text-gray-600">Supporto FCM:</span> {supported == null ? 'n/d' : supported ? '✅' : '❌'}</div>
-        <div><span className="text-gray-600">Permesso:</span> {permission}</div>
-        <div><span className="text-gray-600">SW controlla la pagina:</span> {swControlled ? `sì (${swScript.split('/').pop()})` : 'no'}</div>
-        <div><span className="text-gray-600">VAPID key:</span> {vapidOk ? 'presente' : 'mancante'}</div>
+        <div><span className="text-[--text-muted]">Supporto FCM:</span> {supported == null ? 'n/d' : supported ? '✅' : '❌'}</div>
+        <div><span className="text-[--text-muted]">Permesso:</span> {permission}</div>
+        <div><span className="text-[--text-muted]">SW controlla la pagina:</span> {swControlled ? `sì (${swScript.split('/').pop()})` : 'no'}</div>
+        <div><span className="text-[--text-muted]">VAPID key:</span> {vapidOk ? 'presente' : 'mancante'}</div>
         <div className="col-span-1 sm:col-span-2 break-all">
-          <span className="text-gray-600">Token (preview):</span>
+          <span className="text-[--text-muted]">Token (preview):</span>
           {token ? <span className="text-green-600 font-mono ml-1">{token.slice(0, 24)}…</span> : <span className="text-orange-600 ml-1">non ottenuto</span>}
         </div>
         {lastError && <div className="col-span-1 sm:col-span-2 text-red-600 break-all font-mono text-xs mt-1 bg-red-50 p-1 rounded border border-red-200">{lastError}</div>}
@@ -348,7 +380,8 @@ function PushDiagnostics({ userId }: { userId: string }) {
         <button className="px-3 py-2 bg-indigo-600 text-white rounded disabled:opacity-50" disabled={busy} onClick={reinit}>{busy ? 'Inizializzo…' : 'Re‑inizializza push'}</button>
         <button className="px-3 py-2 bg-red-100 text-red-800 rounded hover:bg-red-200" onClick={resetSW}>Reset Service Worker ⚠️</button>
       </div>
-      <div className="text-xs text-gray-500 mt-2">Nota: in sviluppo (npm run dev) il Service Worker PWA è disabilitato, quindi le push possono non funzionare.</div>
+      <div className="text-xs text-[--text-muted] mt-2">Nota: in sviluppo (npm run dev) il Service Worker PWA è disabilitato, quindi le push possono non funzionare.</div>
     </div>
   )
 }
+

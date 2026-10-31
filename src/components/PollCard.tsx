@@ -86,22 +86,22 @@ const PollCard = ({ poll, onVote, onClose }: PollCardProps) => {
   }
 
   return (
-    <div className="bg-white rounded-lg shadow border border-gray-200 p-6">
+    <div className="bg-[--bg-card] rounded-lg shadow border border-[--border-base] p-6">
       {/* Header */}
       <div className="flex justify-between items-start mb-4">
         <div className="flex-1">
-          <h3 className="text-lg font-semibold text-gray-900 mb-1">
+          <h3 className="text-lg font-semibold text-[--text-base] mb-1">
             {poll.title}
           </h3>
           
           {/* Event and creation info */}
           {event && (
-            <div className="text-sm text-gray-600 mb-2">
+            <div className="text-sm text-[--text-muted] mb-2">
               📅 <span className="font-medium">{event.title}</span>
             </div>
           )}
           
-          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 text-sm text-gray-500">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 text-sm text-[--text-muted]">
             <div className="flex items-center gap-4">
               <span>
                 {getTotalVotes()} vot{getTotalVotes() === 1 ? 'o' : 'i'}
@@ -164,14 +164,14 @@ const PollCard = ({ poll, onVote, onClose }: PollCardProps) => {
               key={option.id}
               className={`relative border rounded-lg p-3 transition-colors ${
                 canClickToVote
-                  ? 'cursor-pointer hover:bg-gray-50 hover:border-primary-300'
+                  ? 'cursor-pointer hover:bg-[--bg-subtle] hover:border-primary-300'
                   : 'cursor-default'
               } ${
                 isUserChoice
                   ? 'border-primary-500 bg-primary-50'
                   : canClickToVote
-                  ? 'border-gray-200 hover:border-primary-200'
-                  : 'border-gray-200'
+                  ? 'border-[--border-base] hover:border-primary-200'
+                  : 'border-[--border-base]'
               }`}
               onClick={() => canClickToVote && handleVote(option.id)}
             >
@@ -189,7 +189,7 @@ const PollCard = ({ poll, onVote, onClose }: PollCardProps) => {
                   {isUserChoice && (
                     <div className="w-2 h-2 bg-primary-600 rounded-full mr-3" />
                   )}
-                  <span className="font-medium text-gray-900">
+                  <span className="font-medium text-[--text-base]">
                     {option.text}
                   </span>
                   {isUserChoice && canClickToVote && (
@@ -201,10 +201,10 @@ const PollCard = ({ poll, onVote, onClose }: PollCardProps) => {
                 
                 {showResults && (
                   <div className="flex items-center text-sm">
-                    <span className="font-semibold text-gray-700 mr-2">
+                    <span className="font-semibold text-[--text-muted] mr-2">
                       {votes}
                     </span>
-                    <span className="text-gray-500">
+                    <span className="text-[--text-muted]">
                       ({percentage.toFixed(0)}%)
                     </span>
                   </div>
@@ -217,7 +217,7 @@ const PollCard = ({ poll, onVote, onClose }: PollCardProps) => {
 
       {/* Footer */}
       <div className="mt-4 pt-4 border-t border-gray-100">
-        <div className="flex justify-between items-center text-sm text-gray-500">
+        <div className="flex justify-between items-center text-sm text-[--text-muted]">
           <span>
             Creato da {isCreator ? 'te' : 'un amico'}
           </span>
@@ -225,7 +225,7 @@ const PollCard = ({ poll, onVote, onClose }: PollCardProps) => {
           <div className="flex items-center gap-2">
             {userVote && !isPollClosed && !isExpired && (
               <span className="text-primary-600 font-medium">
-                ✅ Hai votato · <span className="text-gray-500 font-normal">Clicca per cambiare</span>
+                ✅ Hai votato · <span className="text-[--text-muted] font-normal">Clicca per cambiare</span>
               </span>
             )}
             {userVote && (isPollClosed || isExpired) && (
@@ -251,3 +251,4 @@ const PollCard = ({ poll, onVote, onClose }: PollCardProps) => {
 }
 
 export default PollCard
+
