@@ -6,7 +6,8 @@
     "outDir": "lib",
     "rootDir": "src",
     "sourceMap": true,
-    "strict": true
+    "strict": true,
+    "types": ["node"]
   },
   "compileOnSave": true,
   "include": ["src"]

@@ -208,7 +208,7 @@ const ExpenseSettlement: React.FC<Props> = ({ expenses, payments, events, curren
       {otherDebts.length > 0 && (
         <div className="bg-[--bg-card] rounded-xl border border-[--border-base] overflow-hidden">
           <div className="bg-[--bg-subtle] px-4 py-3 border-b border-[--border-base]">
-            <h3 className="font-semibold text-[--text-muted]">Altri debiti nel gruppo</h3>
+            <h3 className="font-semibold text-[--text-muted]">Altri debiti nella fattoria</h3>
           </div>
           <div className="divide-y divide-[--border-base]">
             {otherDebts.map((debt, idx) => (

@@ -75,7 +75,7 @@ const EventDashboard = ({ event, onClose }: EventDashboardProps) => {
 
   if (loading) {
     return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[70]">
+      <div className="fixed inset-0 !mt-0 bg-black/50 flex items-center justify-center z-[70]">
         <div className="bg-[--bg-card] rounded-lg shadow-xl p-8">
           <div className="flex items-center justify-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
@@ -87,8 +87,8 @@ const EventDashboard = ({ event, onClose }: EventDashboardProps) => {
   }
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center sm:p-4 z-[70]">
-      <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-4xl h-[calc(100dvh-4rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+    <div className="fixed inset-0 !mt-0 bg-black/50 flex items-end sm:items-center justify-center sm:p-4 z-[70]">
+      <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl w-full max-w-4xl max-h-[calc(100dvh-4rem)] sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
         <div className="p-6">
           {/* Header */}
           <div className="flex justify-between items-center mb-6 border-b pb-4">

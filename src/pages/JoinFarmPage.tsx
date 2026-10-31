@@ -49,7 +49,7 @@ const JoinFarmPage: React.FC = () => {
       setTimeout(() => navigate('/', { replace: true }), 1400)
     } catch (e: any) {
       console.error('JoinFarmPage error:', e)
-      const msg = typeof e?.message === 'string' ? e.message : 'Errore durante l\'accesso al gruppo'
+      const msg = typeof e?.message === 'string' ? e.message : 'Errore durante l\'accesso alla fattoria'
       setErrorMsg(msg)
       setStatus('error')
     }
@@ -67,7 +67,7 @@ const JoinFarmPage: React.FC = () => {
           <div>
             <div className="text-2xl font-bold text-[--text-base]">Sei stato invitato!</div>
             <div className="mt-2 text-sm text-[--text-muted]">
-              Un tuo amico ti sta aspettando — eventi, sondaggi e chat del gruppo, tutto in un posto.
+              Un tuo amico ti sta aspettando — eventi, sondaggi e chat della fattoria, tutto in un posto.
             </div>
           </div>
           <button
@@ -90,7 +90,7 @@ const JoinFarmPage: React.FC = () => {
     return (
       <div className="min-h-[70vh] flex flex-col items-center justify-center gap-4 px-6">
         <div className="animate-spin rounded-full h-12 w-12 border-4 border-neutral-200 border-t-neutral-800" />
-        <p className="text-sm text-[--text-muted]">Accesso al gruppo in corso…</p>
+        <p className="text-sm text-[--text-muted]">Accesso alla fattoria in corso…</p>
       </div>
     )
   }
@@ -100,7 +100,7 @@ const JoinFarmPage: React.FC = () => {
       <div className="min-h-[70vh] flex flex-col items-center justify-center gap-3 px-6">
         <div className="text-5xl animate-bounce">🎉</div>
         <div className="text-xl font-semibold text-[--text-base] text-center">
-          {farmName ? `Benvenuto in "${farmName}"!` : 'Benvenuto nel gruppo!'}
+          {farmName ? `Benvenuto in "${farmName}"!` : 'Benvenuto nella fattoria!'}
         </div>
         <p className="text-sm text-[--text-muted]">Stai per entrare…</p>
       </div>

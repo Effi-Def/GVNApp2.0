@@ -9,6 +9,7 @@ import type { Event, EventParticipant, FarmMembership } from '../types'
 import TutorialModal, { shouldShowTutorial } from '../components/TutorialModal'
 import { getUserKeys, getUserEventParticipation, userCanViewEvent } from '../utils/events'
 import { formatEuro } from '../utils/expenseUtils'
+import { FIRST_RUN_EVENT } from '../utils/firstRun'
 
 type RsvpStatus = 'yes' | 'maybe' | 'no'
 
@@ -118,7 +119,7 @@ function FarmSwitcherModal({
         <div className="bg-[--bg-card] rounded-t-3xl sm:rounded-3xl border border-[--border-base] shadow-xl p-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-semibold text-[--text-base]">Cambia gruppo</div>
+              <div className="text-sm font-semibold text-[--text-base]">Cambia fattoria</div>
               <div className="text-xs text-[--text-muted]">Scegli con chi stai organizzando</div>
             </div>
             <button type="button" className="text-sm text-[--text-muted] hover:text-[--text-base]" onClick={onClose}>
@@ -143,9 +144,9 @@ function FarmSwitcherModal({
                   onClick={() => onSelect(f.id)}
                 >
                   <div className="min-w-0">
-                    <div className="text-sm font-semibold truncate">{f.name || 'Gruppo'}</div>
+                    <div className="text-sm font-semibold truncate">{f.name || 'Fattoria'}</div>
                     <div className="text-xs text-[--text-muted]">
-                      {typeof f.memberCount === 'number' ? `${f.memberCount} membri` : 'Membri'}
+                      {typeof f.memberCount === 'number' ? `${f.memberCount} ${f.memberCount === 1 ? 'maiale' : 'maiali'}` : 'Maiali'}
                     </div>
                   </div>
                   {active ? (
@@ -164,7 +165,7 @@ function FarmSwitcherModal({
               className="px-3 py-2 rounded-xl bg-[--bg-raised] text-[--text-base] hover:bg-[--bg-raised]"
               onClick={onManage}
             >
-              Gestisci gruppi
+              Gestisci fattorie
             </button>
             {busy ? (
               <div className="text-xs text-[--text-muted] flex items-center gap-2">
@@ -244,9 +245,12 @@ export default function HomePage() {
 
   // Show tutorial once for new users who just created/joined their first farm
   useEffect(() => {
-    if (hasFarms && shouldShowTutorial()) {
-      setShowTutorial(true)
+    const check = () => {
+      if (hasFarms && shouldShowTutorial()) setShowTutorial(true)
     }
+    check()
+    window.addEventListener(FIRST_RUN_EVENT, check)
+    return () => window.removeEventListener(FIRST_RUN_EVENT, check)
   }, [hasFarms])
 
   const meKeys = useMemo(() => getUserKeys(user), [user?.id, user?.email])
@@ -437,15 +441,15 @@ export default function HomePage() {
   return (
     <div className="w-full pt-16 space-y-3">
 
-      {/* ── Sezione 1: intestazione gruppo ── */}
+      {/* ── Sezione 1: intestazione fattoria ── */}
       <div className="flex items-center justify-between gap-3 px-1">
         <div className="min-w-0">
-          <div className="text-xs text-[--text-muted] uppercase tracking-wide">Gruppo</div>
+          <div className="text-xs text-[--text-muted] uppercase tracking-wide">Fattoria</div>
           <div className="text-lg font-semibold text-[--text-base] truncate">
-            {activeFarm?.name || (hasFarms ? 'Seleziona un gruppo' : 'Nessun gruppo')}
+            {activeFarm?.name || (hasFarms ? 'Seleziona una fattoria' : 'Nessuna fattoria')}
           </div>
           {activeFarm && typeof activeFarm.memberCount === 'number' ? (
-            <div className="text-xs text-[--text-muted]">{activeFarm.memberCount} membri</div>
+            <div className="text-xs text-[--text-muted]">{activeFarm.memberCount} {activeFarm.memberCount === 1 ? 'maiale' : 'maiali'}</div>
           ) : null}
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -476,19 +480,19 @@ export default function HomePage() {
         <div className="rounded-2xl border border-[--border-base] bg-[--bg-card] p-5">
           {hasFarms ? (
             <>
-              <div className="text-base font-semibold text-[--text-base]">Scegli un gruppo per iniziare</div>
+              <div className="text-base font-semibold text-[--text-base]">Scegli una fattoria per iniziare</div>
               <div className="mt-1 text-sm text-[--text-muted]">Seleziona con chi stai organizzando.</div>
               <button
                 type="button"
                 className="mt-4 px-4 py-2 rounded-xl bg-[--text-base] text-[--bg-card] text-sm font-semibold"
                 onClick={() => setSwitcherOpen(true)}
               >
-                Apri gruppi
+                Apri fattorie
               </button>
             </>
           ) : (
             <>
-              <div className="text-base font-semibold text-[--text-base]">Crea il vostro gruppo</div>
+              <div className="text-base font-semibold text-[--text-base]">Crea la vostra fattoria</div>
               <div className="mt-1 text-sm text-[--text-muted]">Il posto degli amici: eventi, sondaggi, chat. Tutto insieme.</div>
               <button
                 type="button"

@@ -137,7 +137,7 @@ self.addEventListener('notificationclick', function(event) {
       manifest: {
         name: 'GVNApp - Social Events Hub',
         short_name: 'GVNApp',
-        description: 'Progressive Web App per organizzare eventi sociali e gestire spese di gruppo',
+        description: 'Progressive Web App per organizzare eventi sociali e gestire spese condivise',
         theme_color: '#3B82F6',
         background_color: '#ffffff',
         display: 'standalone',

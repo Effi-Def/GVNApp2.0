@@ -109,8 +109,11 @@ function hasWindow() {
   return typeof window !== 'undefined'
 }
 
+// Never active in a production build, whatever localStorage says
+const E2E_ALLOWED = import.meta.env.DEV || import.meta.env.VITE_E2E === '1'
+
 export function isE2EMode() {
-  if (!hasWindow()) return false
+  if (!E2E_ALLOWED || !hasWindow()) return false
   try {
     return window.localStorage.getItem(ENABLED_KEY) === '1'
   } catch {

@@ -46,6 +46,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          VITE_E2E: '1'
 
       - name: Install Playwright browser
         run: npx playwright install --with-deps chromium

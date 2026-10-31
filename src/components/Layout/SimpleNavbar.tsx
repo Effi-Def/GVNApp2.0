@@ -5,7 +5,7 @@ const SimpleNavbar = () => {
 
   const navigation = [
     { name: 'Home', href: '/', icon: '🏠' },
-    { name: 'Gruppo', href: '/farm', icon: '👥' },
+    { name: 'Fattoria', href: '/farm', icon: '👥' },
     { name: 'Eventi', href: '/events', icon: '📅' },
   ]
 

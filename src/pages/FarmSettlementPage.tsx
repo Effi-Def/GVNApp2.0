@@ -76,8 +76,8 @@ export default function FarmSettlementPage() {
     return (
       <div className="pt-16 w-full">
         <div className="rounded-3xl border border-[--border-base] bg-[--bg-card] p-6">
-          <div className="text-lg font-semibold">Nessun gruppo attivo</div>
-          <div className="mt-1 text-sm text-[--text-muted]">Seleziona un gruppo per vedere i conti.</div>
+          <div className="text-lg font-semibold">Nessuna fattoria attiva</div>
+          <div className="mt-1 text-sm text-[--text-muted]">Seleziona una fattoria per vedere i conti.</div>
           <button className="mt-4 px-4 py-2 rounded-xl bg-[--text-base] text-[--bg-card]" onClick={() => navigate('/')}>Torna alla Home</button>
         </div>
       </div>
@@ -96,18 +96,18 @@ export default function FarmSettlementPage() {
             className="px-3 py-2 rounded-xl bg-[--bg-raised] text-[--text-base] hover:bg-neutral-200"
             onClick={() => navigate('/farm')}
           >
-            ← Farm
+            ← Fattoria
           </button>
           <div className="text-right">
             <div className="text-xs uppercase tracking-wide text-[--text-muted]">Chi deve a chi</div>
-            <div className="text-xs text-[--text-muted]">{activeFarm.name || 'Gruppo'}</div>
+            <div className="text-xs text-[--text-muted]">{activeFarm.name || 'Fattoria'}</div>
           </div>
         </div>
 
         <div className="mt-4">
           <div className="text-2xl font-semibold text-[--text-base]">Chi deve a chi</div>
           <div className="mt-1 text-sm text-[--text-muted]">
-            Riassunto di tutte le spese del gruppo, ottimizzato per il minimo numero di scambi.
+            Riassunto di tutte le spese della fattoria, ottimizzato per il minimo numero di scambi.
           </div>
         </div>
 

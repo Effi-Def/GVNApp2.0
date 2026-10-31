@@ -180,7 +180,7 @@ const SettingsPage: React.FC = () => {
             🔔 Notifiche
           </button>
           <button type="button" className={btnSecondary} onClick={() => navigate('/settings/farms')}>
-            🐷 Gruppi
+            🐷 Fattorie
           </button>
           <button type="button" className={btnSecondary} onClick={() => navigate('/legal/privacy')}>
             Privacy

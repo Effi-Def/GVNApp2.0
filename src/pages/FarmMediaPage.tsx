@@ -196,7 +196,7 @@ export default function FarmMediaPage() {
   if (!activeFarmId || !activeFarm) {
     return (
       <div className="pt-16 px-4 max-w-3xl mx-auto">
-        <p className="text-sm text-[--text-muted]">Nessun gruppo attivo. <button className="underline text-primary-600" onClick={() => navigate('/')}>Torna alla Home</button></p>
+        <p className="text-sm text-[--text-muted]">Nessuna fattoria attiva. <button className="underline text-primary-600" onClick={() => navigate('/')}>Torna alla Home</button></p>
       </div>
     )
   }

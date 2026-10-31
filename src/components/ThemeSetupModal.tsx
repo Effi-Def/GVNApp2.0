@@ -10,8 +10,7 @@
 
 import { useEffect, useState } from 'react'
 import { useDarkMode, ThemePreference } from '../hooks/useDarkMode'
-
-const SEEN_KEY = 'gvn-theme-setup-seen'
+import { isThemeSetupDone, markThemeSetupDone } from '../utils/firstRun'
 
 const OPTIONS: { value: ThemePreference; label: string; icon: string; desc: string }[] = [
   { value: 'light',  icon: '☀️',  label: 'Chiara',  desc: 'Sfondo bianco, testo scuro' },
@@ -31,9 +30,7 @@ export default function ThemeSetupModal() {
   }, [selected]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    try {
-      if (!localStorage.getItem(SEEN_KEY)) setOpen(true)
-    } catch { /* private / SSR */ }
+    if (!isThemeSetupDone()) setOpen(true)
   }, [])
 
   useEffect(() => {
@@ -46,7 +43,7 @@ export default function ThemeSetupModal() {
   if (!open) return null
 
   const confirm = () => {
-    try { localStorage.setItem(SEEN_KEY, '1') } catch {}
+    markThemeSetupDone()
     setOpen(false)
   }
 

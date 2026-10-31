@@ -1,31 +1,15 @@
 import { useState } from 'react'
-
-const STORAGE_KEY = 'gvn.tutorial.v1'
-const PENDING_KEY = 'gvn.tutorial.pending'
+import { isThemeSetupDone, isTutorialPending, markTutorialDone } from '../utils/firstRun'
 
 export function shouldShowTutorial(): boolean {
-  try {
-    const done = localStorage.getItem(STORAGE_KEY)
-    if (done) return false
-    const pending = localStorage.getItem(PENDING_KEY)
-    return !!pending
-  } catch {
-    return false
-  }
-}
-
-export function markTutorialDone() {
-  try {
-    localStorage.setItem(STORAGE_KEY, '1')
-    localStorage.removeItem(PENDING_KEY)
-  } catch {}
+  return isThemeSetupDone() && isTutorialPending()
 }
 
 const STEPS = [
   {
     emoji: '👋',
     title: 'Benvenuto in GVN!',
-    body: 'Il posto del tuo gruppo. Qui organizzi tutto: eventi, sondaggi, chat e spese condivise.',
+    body: 'La tua fattoria. Qui organizzi tutto: eventi, sondaggi, chat e spese condivise.',
   },
   {
     emoji: '📅',
@@ -35,17 +19,17 @@ const STEPS = [
   {
     emoji: '🗳️',
     title: 'Sondaggi e date',
-    body: 'Non sai quando siete tutti liberi? Crea un sondaggio con più date e lascia che il gruppo decida.',
+    body: 'Non sai quando siete tutti liberi? Crea un sondaggio con più date e lascia che la fattoria decida.',
   },
   {
     emoji: '💬',
-    title: 'Chat del gruppo',
+    title: 'Chat della fattoria',
     body: 'Ogni evento ha la sua chat. Manda messaggi, foto e video. Tutto nel contesto giusto.',
   },
   {
     emoji: '🔗',
     title: 'Invita gli amici',
-    body: 'Vai in Gruppo → tocca il tuo gruppo → Invita per copiare il link e condividerlo.',
+    body: 'Vai in Fattoria → tocca il tua fattoria → Invita per copiare il link e condividerlo.',
   },
 ]
 

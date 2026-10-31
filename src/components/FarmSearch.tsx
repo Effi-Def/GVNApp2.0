@@ -305,7 +305,7 @@ export default function FarmSearch({ farmId, channels, farmEvents = [] }: Props)
             <div className="flex-1 overflow-y-auto">
               {!searched && !loading && (
                 <div className="px-4 py-8 text-center text-sm text-[--text-muted]">
-                  Digita almeno 2 caratteri per cercare nei messaggi del gruppo.
+                  Digita almeno 2 caratteri per cercare nei messaggi della fattoria.
                 </div>
               )}
 

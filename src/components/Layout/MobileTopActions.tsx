@@ -22,21 +22,20 @@ const MobileTopActions = () => {
   const farmOptions = useMemo(() => {
     const list = Array.isArray(farms) ? farms : []
     return list
-      .map(f => ({ id: f.id, name: f.name || 'Gruppo' }))
+      .map(f => ({ id: f.id, name: f.name || 'Fattoria' }))
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [farms])
 
   return (
     <>
       {/* LEFT: farm name / switcher */}
-      {user?.id && activeFarm && (
+      {user?.id && activeFarm && farmOptions.length > 1 && (
         <div className="md:hidden fixed top-4 left-4 z-30">
-          {farmOptions.length > 1 ? (
             <button
               type="button"
-              className="rounded-xl bg-white/90 backdrop-blur border border-[--border-base] shadow px-3 py-2 hover:scale-105 transition flex items-center gap-1 max-w-[160px] disabled:opacity-70 disabled:cursor-wait"
-              title="Cambia gruppo"
-              aria-label="Cambia gruppo"
+              className="rounded-xl bg-[--bg-card] border border-[--border-base] shadow px-3 py-2 hover:scale-105 transition flex items-center gap-1 max-w-[160px] disabled:opacity-70 disabled:cursor-wait"
+              title="Cambia fattoria"
+              aria-label="Cambia fattoria"
               onClick={() => !switching && setFarmOpen(true)}
               disabled={switching}
             >
@@ -44,11 +43,6 @@ const MobileTopActions = () => {
                 ? <><span className="text-xs font-semibold text-[--text-muted] truncate">Caricamento...</span><span className="text-[10px] shrink-0 animate-spin">⏳</span></>
                 : <><span className="text-xs font-semibold text-[--text-base] truncate">{activeFarm.name}</span><span className="text-[--text-muted] text-[10px] shrink-0">▾</span></>}
             </button>
-          ) : (
-            <span className="rounded-xl bg-white/90 backdrop-blur border border-[--border-base] shadow px-3 py-2 text-xs font-semibold text-[--text-base] truncate max-w-[160px] block">
-              {switching ? 'Caricamento...' : activeFarm.name}
-            </span>
-          )}
 
           {farmOpen && farmOptions.length > 1 && (
             <div className="fixed inset-0 z-[70]">
@@ -60,7 +54,7 @@ const MobileTopActions = () => {
               />
               <div className="absolute left-1/2 top-24 -translate-x-1/2 w-[360px] max-w-[92vw] bg-[--bg-card] rounded-2xl border border-[--border-base] shadow-xl p-3">
                 <div className="flex items-center justify-between px-2 py-1">
-                  <div className="font-semibold text-[--text-base]">Gruppi</div>
+                  <div className="font-semibold text-[--text-base]">Fattorie</div>
                   <button type="button" className="text-sm text-[--text-muted] hover:text-[--text-base]" onClick={() => setFarmOpen(false)}>Chiudi</button>
                 </div>
                 <div className="mt-2 space-y-1">
@@ -81,7 +75,7 @@ const MobileTopActions = () => {
                         }}
                       >
                         <span className="truncate">{o.name}</span>
-                        {active && <span className="text-xs font-semibold">Attivo</span>}
+                        {active && <span className="text-xs font-semibold">Attiva</span>}
                       </button>
                     )
                   })}
@@ -94,18 +88,10 @@ const MobileTopActions = () => {
 
       {/* RIGHT: action icons */}
       <div className="md:hidden fixed top-4 right-4 z-30 flex items-center gap-3">
-      <Link
-        to="/events?create=1"
-        className="rounded-xl bg-primary-600 text-white shadow px-3 py-2 hover:bg-primary-700 transition-colors"
-        title="Organizza evento"
-        aria-label="Organizza evento"
-      >
-        <span className="text-sm font-semibold">Organizza</span>
-      </Link>
       {/* Notifications (pig) */}
       <Link
         to="/notifications"
-        className="relative rounded-xl bg-white/90 backdrop-blur border border-[--border-base] shadow px-2.5 py-1.5 text-2xl hover:scale-105 transition"
+        className="relative rounded-xl bg-[--bg-card] border border-[--border-base] shadow px-2.5 py-1.5 text-2xl hover:scale-105 transition"
         title="Notifiche"
         aria-label="Notifiche"
         onClick={(e) => {
@@ -145,7 +131,7 @@ const MobileTopActions = () => {
       {/* Settings (gear) */}
       <Link
         to="/settings"
-        className="rounded-xl bg-white/90 backdrop-blur border border-[--border-base] shadow p-2 hover:scale-105 transition"
+        className="rounded-xl bg-[--bg-card] border border-[--border-base] shadow p-2 hover:scale-105 transition"
         title="Impostazioni"
         aria-label="Impostazioni"
         onClick={(e) => {

@@ -31,14 +31,14 @@ const LoginPage = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-primary-100 flex items-center justify-center px-4">
+    <div className="fixed inset-0 overflow-y-auto bg-gradient-to-br from-primary-50 to-primary-100 dark:from-[#0f172a] dark:to-[#1e293b] flex items-center justify-center px-4 py-8">
       <div className="max-w-md w-full bg-[--bg-card] rounded-lg shadow-xl p-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-[--text-base] mb-2">GVNApp</h1>
           <p className="text-[--text-muted]">
             {fromInvite
-              ? 'Accedi per unirti al gruppo del tuo amico.'
-              : 'Il posto del tuo gruppo di amici.'}
+              ? 'Accedi per unirti alla fattoria del tuo amico.'
+              : 'La fattoria dei tuoi amici.'}
           </p>
         </div>
 

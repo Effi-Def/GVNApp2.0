@@ -14,7 +14,7 @@ export default function FarmSwitcher() {
     const uniq = new Map<string, string>()
     for (const f of farms || []) {
       if (!f?.id) continue
-      uniq.set(f.id, f.name || 'Gruppo')
+      uniq.set(f.id, f.name || 'Fattoria')
     }
     return Array.from(uniq.entries()).map(([id, name]) => ({ id, name }))
   }, [farms])
@@ -30,9 +30,9 @@ export default function FarmSwitcher() {
         className="max-w-[240px] border border-[--border-base] bg-[--bg-card] rounded-xl px-3 py-2 text-sm font-semibold text-[--text-base] hover:bg-[--bg-subtle] disabled:opacity-70 disabled:cursor-wait"
         onClick={() => !switching && setOpen(true)}
         disabled={switching}
-        title="Cambia gruppo"
+        title="Cambia fattoria"
       >
-        {switching ? '⏳ Caricamento...' : (activeFarm?.name || 'Gruppo')}
+        {switching ? '⏳ Caricamento...' : (activeFarm?.name || 'Fattoria')}
         {!switching && <span className="ml-2 text-[--text-muted]">▾</span>}
       </button>
 
@@ -46,7 +46,7 @@ export default function FarmSwitcher() {
           />
           <div className="absolute right-6 top-24 w-[340px] max-w-[92vw] bg-[--bg-card] rounded-2xl border border-[--border-base] shadow-xl p-3 text-left">
             <div className="flex items-center justify-between px-2 py-1">
-              <div className="font-semibold text-[--text-base]">Gruppi</div>
+              <div className="font-semibold text-[--text-base]">Fattorie</div>
               <button type="button" className="text-sm text-[--text-muted] hover:text-[--text-base]" onClick={() => setOpen(false)}>Chiudi</button>
             </div>
 
@@ -68,14 +68,14 @@ export default function FarmSwitcher() {
                     }}
                   >
                     <span className="truncate">{o.name}</span>
-                    {active && <span className="text-xs font-semibold">Attivo</span>}
+                    {active && <span className="text-xs font-semibold">Attiva</span>}
                   </button>
                 )
               })}
             </div>
 
             <div className="mt-3 border-t border-neutral-100 pt-3 px-2">
-              <div className="text-xs font-semibold text-[--text-muted] mb-2">Tema del gruppo</div>
+              <div className="text-xs font-semibold text-[--text-muted] mb-2">Tema della fattoria</div>
               <div className="flex gap-2">
                 {(['default', 'cool', 'warm'] as const).map((k) => (
                   <button

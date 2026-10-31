@@ -54,7 +54,7 @@ const OnboardingPage = () => {
   const createFarm = async () => {
     const name = farmName.trim()
     if (!name) {
-      setCreateError('Dai un nome al gruppo prima di continuare')
+      setCreateError('Dai un nome alla fattoria prima di continuare')
       return
     }
     setCreateError(null)
@@ -93,9 +93,9 @@ const OnboardingPage = () => {
       <div className="max-w-xl mx-auto">
         <div className="rounded-3xl border border-[--border-base] bg-[--bg-card] p-6 text-center">
           <div className="text-5xl mb-3">🎉</div>
-          <div className="text-2xl font-semibold text-[--text-base]">Gruppo creato!</div>
+          <div className="text-2xl font-semibold text-[--text-base]">Fattoria creata!</div>
           <div className="mt-2 text-sm text-[--text-muted]">
-            Ora invita i tuoi amici — senza di loro il gruppo è vuoto.
+            Ora invita i tuoi amici — senza di loro la fattoria è vuota.
           </div>
           <div className="mt-6 space-y-3">
             <button
@@ -128,7 +128,7 @@ const OnboardingPage = () => {
   return (
     <div className="max-w-xl mx-auto">
       <div className="rounded-3xl border border-[--border-base] bg-[--bg-card] p-6">
-        <div className="text-2xl font-semibold text-[--text-base]">Crea il vostro gruppo</div>
+        <div className="text-2xl font-semibold text-[--text-base]">Crea la vostra fattoria</div>
         <div className="mt-2 text-sm text-[--text-muted]">
           Il posto per eventi, sondaggi e chat. Dopo puoi invitare gli altri.
         </div>
@@ -149,7 +149,7 @@ const OnboardingPage = () => {
               value={farmName}
               onChange={(e) => setFarmName(e.target.value)}
               className="flex-1 px-4 py-3 rounded-2xl border border-[--border-base] bg-[--bg-card] text-base text-[--text-base] font-medium placeholder:text-[--text-muted]"
-              placeholder="Es. Amici del liceo"
+              placeholder="Es. Fattoria degli amici"
               autoFocus
               disabled={submitting}
               onKeyDown={(e) => e.key === 'Enter' && createFarm()}
@@ -184,7 +184,7 @@ const OnboardingPage = () => {
             onClick={createFarm}
             disabled={submitting || !farmName.trim()}
           >
-            {submitting ? 'Creazione...' : 'Crea il vostro spazio →'}
+            {submitting ? 'Creazione...' : 'Crea la vostra fattoria →'}
           </button>
         </div>
 

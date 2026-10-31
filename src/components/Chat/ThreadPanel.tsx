@@ -116,7 +116,7 @@ const ThreadPanel: React.FC<Props> = ({ descriptor, message, onClose }) => {
     <>
       {/* Backdrop — tapping closes the panel on mobile */}
       <div
-        className="fixed inset-0 bg-black/40 z-40 sm:hidden"
+        className="fixed inset-0 !mt-0 bg-black/40 z-40 sm:hidden"
         onClick={onClose}
       />
 

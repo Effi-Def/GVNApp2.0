@@ -50,8 +50,6 @@ const PollsPage = () => {
   const [submitting, setSubmitting] = useState(false)
   const handledNavStateRef = useRef(false)
 
-  const navEventId = (location.state as { eventId?: string } | null)?.eventId
-  const allowCreateFromGlobal = !!((location.state as { openForm?: boolean } | null)?.openForm && navEventId)
   
   // Prevent background scroll on mobile when poll form modal is open
   useEffect(() => {
@@ -429,7 +427,7 @@ const PollsPage = () => {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-bold text-[--text-base] mb-0.5">Sondaggi 🗳️</h1>
-            <p className="text-sm text-[--text-muted]">Crea sondaggi e raccogli le opinioni del gruppo</p>
+            <p className="text-sm text-[--text-muted]">Crea sondaggi e raccogli le opinioni della fattoria</p>
           </div>
           <button
             onClick={() => { setEditingPoll(null); setShowForm(true) }}
@@ -645,9 +643,9 @@ const PollsPage = () => {
 
       {/* Modal Form */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-4 z-[70]">
-          <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
-            <div className="p-6 pb-[calc(6rem+env(safe-area-inset-bottom))]">
+        <div className="fixed inset-0 !mt-0 bg-black/50 flex items-end sm:items-center justify-center p-4 z-[70]">
+          <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
+            <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-[--text-base]">
                   {editingPoll
@@ -813,8 +811,8 @@ const PollsPage = () => {
                 </div>
 
                 {/* Fixed action bar with safe-area */}
-                <div className="fixed left-1/2 -translate-x-1/2 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[60] w-full max-w-md px-6">
-                  <div className="bg-[--bg-card] border rounded-xl shadow-md px-4 py-3 flex space-x-3">
+                <div className="sticky bottom-0 z-10 pt-3 pb-[env(safe-area-inset-bottom)]">
+                  <div className="bg-[--bg-card] border border-[--border-base] rounded-xl shadow-md px-4 py-3 flex space-x-3">
                     <button
                       type="button"
                       onClick={() => {
@@ -846,21 +844,6 @@ const PollsPage = () => {
               </form>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Bottone Mobile (solo da Summary evento) */}
-      {allowCreateFromGlobal && (
-        <div className="fixed bottom-28 right-6 md:bottom-8 z-40">
-          <button 
-            onClick={() => setShowForm(true)}
-            className="bg-neutral-900 hover:bg-neutral-700 text-white p-4 rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 hover:scale-110"
-            title="Crea nuovo sondaggio"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
         </div>
       )}
     </div>

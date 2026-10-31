@@ -25,8 +25,6 @@ const ListsPage = () => {
   const itemInputRefs = useRef<Record<number, HTMLInputElement | null>>({})
   const handledNavStateRef = useRef<string>('')
 
-  const navEventId = (location.state as { eventId?: string } | null)?.eventId
-  const allowCreateFromGlobal = !!((location.state as { openForm?: boolean } | null)?.openForm && navEventId)
 
   const currentUserId = user?.id || 'anonymous'
   const userKeys = getUserKeys(user)
@@ -382,7 +380,7 @@ const ListsPage = () => {
             className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500 hover:bg-green-600 active:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
           >
             <span className="text-base leading-none font-bold">+</span>
-            <span className="hidden sm:inline">Nuova</span>
+            <span>Nuova</span>
           </button>
         </div>
         {/* Filtri */}
@@ -829,9 +827,7 @@ const ListsPage = () => {
             <div className="text-6xl mb-4">📋</div>
             <h3 className="text-xl font-semibold text-[--text-muted] mb-2">Nessuna lista</h3>
             <p className="text-[--text-muted]">
-              {allowCreateFromGlobal
-                ? 'Crea la prima lista per organizzare le attività di gruppo'
-                : 'Questa pagina è di consultazione. Per creare una lista: apri un evento e usa il Riassunto.'}
+              Tocca + Nuova per creare la prima lista della fattoria.
             </p>
           </div>
         )}
@@ -839,9 +835,9 @@ const ListsPage = () => {
 
       {/* Modal Form */}
       {showForm && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center p-4 z-[70]">
-          <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
-            <div className="p-6 pb-[calc(6rem+env(safe-area-inset-bottom))]">
+        <div className="fixed inset-0 !mt-0 bg-black/50 flex items-end sm:items-center justify-center p-4 z-[70]">
+          <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
+            <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-[--text-base]">
                   {editingList ? 'Modifica Lista' : 'Nuova Lista'}
@@ -1149,8 +1145,8 @@ const ListsPage = () => {
                   )}
                 </div>
                 {/* Fixed action bar: guaranteed above mobile bottom UI */}
-                <div className="fixed left-1/2 -translate-x-1/2 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[60] w-full max-w-md px-6">
-                  <div className="bg-[--bg-card] border rounded-xl shadow-md px-4 py-3 flex space-x-3">
+                <div className="sticky bottom-0 z-10 pt-3 pb-[env(safe-area-inset-bottom)]">
+                  <div className="bg-[--bg-card] border border-[--border-base] rounded-xl shadow-md px-4 py-3 flex space-x-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -1175,21 +1171,6 @@ const ListsPage = () => {
               </form>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Bottone Mobile (solo da Summary evento) */}
-      {allowCreateFromGlobal && (
-        <div className="fixed bottom-28 right-6 md:bottom-8 z-40">
-          <button
-            onClick={() => setShowForm(true)}
-            className="bg-green-500 hover:bg-green-600 text-white p-4 rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 hover:scale-110 ring-4 ring-green-100"
-            title="Crea nuova lista"
-          >
-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-          </button>
         </div>
       )}
     </div>

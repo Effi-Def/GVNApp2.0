@@ -31,6 +31,9 @@ const EventChatPage = () => {
       if (window.getComputedStyle(el).position === 'fixed') {
         el.style.height = `${vv.height}px`
         el.style.top = `${vv.offsetTop}px`
+      } else {
+        el.style.height = ''
+        el.style.top = ''
       }
     }
 
@@ -119,8 +122,7 @@ const EventChatPage = () => {
   return (
     <div
       ref={containerRef}
-      className="fixed left-0 right-0 bg-[--bg-card] dark:bg-gray-900 flex flex-col overflow-hidden md:relative md:h-[100dvh] md:max-w-screen-md md:mx-auto md:shadow-2xl"
-      style={{ top: 0, height: '100dvh' }}
+      className="fixed top-0 left-0 right-0 h-[100dvh] bg-[--bg-card] dark:bg-gray-900 flex flex-col overflow-hidden md:relative md:top-auto md:mt-20 md:h-[calc(100dvh-5rem)] md:max-w-screen-md md:mx-auto md:shadow-2xl"
     >
       <EventChat 
         eventId={event.id} 

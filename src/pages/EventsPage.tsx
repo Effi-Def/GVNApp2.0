@@ -442,6 +442,19 @@ const EventsPage = () => {
           )}
         </div>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setEditingEvent(null)
+              setQuickPrefillDate('')
+              setShowForm(true)
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-primary-600 hover:bg-primary-700 text-white text-sm font-medium rounded-lg transition-colors"
+            title="Crea nuovo evento"
+          >
+            <span className="text-base leading-none font-bold">+</span>
+            <span>Nuovo</span>
+          </button>
           <select
             value={sortMode}
             onChange={(e) => setSortMode(e.target.value as any)}
@@ -546,7 +559,7 @@ const EventsPage = () => {
         <div className="rounded-2xl border border-[--border-base] bg-[--bg-card] p-8 text-center">
           <div className="text-3xl mb-3">📅</div>
           <div className="text-base font-semibold text-[--text-base] mb-1">Nessun evento</div>
-          <div className="text-sm text-[--text-muted]">Crea il primo evento del gruppo.</div>
+          <div className="text-sm text-[--text-muted]">Crea il primo evento della fattoria.</div>
         </div>
       )}
 
@@ -607,8 +620,8 @@ const EventsPage = () => {
 
       {/* Legacy edit form (full) */}
       {showForm && editingEvent && (
-        <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center sm:p-4 z-[70]">
-          <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full h-[calc(100dvh-4rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+        <div className="fixed inset-0 !mt-0 bg-black/50 flex items-end sm:items-center justify-center sm:p-4 z-[70]">
+          <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-xl shadow-xl max-w-md w-full max-h-[calc(100dvh-4rem)] sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)]">
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-xl font-bold text-[--text-base]">Modifica Evento</h2>
@@ -760,7 +773,7 @@ const EventsPage = () => {
                         }}
                         className="w-full px-3 py-2 border border-[--border-base] rounded-lg focus:outline-none focus:border-green-500"
                       >
-                        <option value="farm">👥 Gruppo attuale (Standard)</option>
+                        <option value="farm">🐷 Fattoria attuale (Standard)</option>
                         <option value="members">👥 Solo alcune persone</option>
                         <option value="public">🌍 Tutte le fattorie (Pubblico)</option>
                       </select>
@@ -841,23 +854,6 @@ const EventsPage = () => {
           </div>
         </div>
       )}
-
-      {/* Bottone Mobile */}
-      <div className="fixed bottom-28 right-6 md:bottom-8 z-40">
-        <button 
-          onClick={() => {
-            setEditingEvent(null)
-            setQuickPrefillDate('')
-            setShowForm(true)
-          }}
-          className="bg-green-500 hover:bg-green-600 text-white p-4 rounded-full shadow-xl hover:shadow-2xl transition-all duration-200 hover:scale-110 ring-4 ring-green-100"
-          title="Crea nuovo evento"
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-          </svg>
-        </button>
-      </div>
     </div>
   )
 }

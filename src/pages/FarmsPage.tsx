@@ -88,7 +88,7 @@ const FarmsPage: React.FC = () => {
       const anyErr: any = e
       const code = typeof anyErr?.code === 'string' ? anyErr.code : ''
       const msg = typeof anyErr?.message === 'string' ? anyErr.message : ''
-      alert(`Errore durante il caricamento dei membri.${code ? `\n\nCodice: ${code}` : ''}${msg ? `\n${msg}` : ''}`)
+      alert(`Errore durante il caricamento dei maiali.${code ? `\n\nCodice: ${code}` : ''}${msg ? `\n${msg}` : ''}`)
     } finally {
       setMembersLoading(false)
     }
@@ -123,18 +123,18 @@ const FarmsPage: React.FC = () => {
   return (
     <div className="pt-16 px-4 pb-8 max-w-2xl mx-auto space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-[--text-base]">Gruppi</h1>
+        <h1 className="text-2xl font-bold text-[--text-base]">Fattorie</h1>
         <button type="button" className={btnSec} onClick={() => refresh()} disabled={loading}>
           Aggiorna
         </button>
       </div>
 
       <div className={cardCls}>
-        <h2 className="font-semibold text-[--text-base] mb-3">Crea un gruppo</h2>
+        <h2 className="font-semibold text-[--text-base] mb-3">Crea una fattoria</h2>
         <div className="flex gap-2">
           <input
             className={inputCls}
-            placeholder="Es. Amici del liceo"
+            placeholder="Es. Fattoria degli amici"
             value={newFarmName}
             onChange={(e) => setNewFarmName(e.target.value)}
           />
@@ -192,7 +192,7 @@ const FarmsPage: React.FC = () => {
 
       {!loading && farms.length === 0 && (
         <div className={cardCls}>
-          <p className="text-sm text-[--text-muted]">Non sei ancora in nessun gruppo.</p>
+          <p className="text-sm text-[--text-muted]">Non sei ancora in nessuna fattoria.</p>
         </div>
       )}
 
@@ -212,11 +212,11 @@ const FarmsPage: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <h3 className="font-semibold text-[--text-base]">{farm.name}</h3>
                     <span className="text-xs px-2 py-1 rounded-full bg-[--bg-subtle] text-[--text-muted]">
-                      {isOwner ? '👑 Admin' : 'Membro'}
+                      {isOwner ? '👑 Re Maiale' : 'Maiale'}
                     </span>
                   </div>
                   {typeof farm.memberCount === 'number' && (
-                    <p className="text-xs text-[--text-muted] mt-1">{farm.memberCount} membri</p>
+                    <p className="text-xs text-[--text-muted] mt-1">{farm.memberCount} {farm.memberCount === 1 ? 'maiale' : 'maiali'}</p>
                   )}
                 </div>
 
@@ -259,7 +259,7 @@ const FarmsPage: React.FC = () => {
                       type="button"
                       className="px-3 py-2 rounded-xl text-sm border border-red-200 bg-red-50 text-red-600 hover:bg-red-100 transition-colors"
                       onClick={async () => {
-                        if (!confirm('Uscire dal gruppo?')) return
+                        if (!confirm('Uscire dalla fattoria?')) return
                         try {
                           await farmService.leaveFarm({ farmId: farm.id, userId: user.id })
                           await refresh()
@@ -287,7 +287,7 @@ const FarmsPage: React.FC = () => {
                         if (next) await loadMembers(farm.id)
                       }}
                     >
-                      Membri{farmMembers.length ? ` (${farmMembers.length})` : ''}
+                      Maiali{farmMembers.length ? ` (${farmMembers.length})` : ''}
                     </button>
 
                     <button
@@ -307,7 +307,7 @@ const FarmsPage: React.FC = () => {
                     <div className="mt-3 border border-[--border-base] rounded-xl p-3 bg-[--bg-subtle] space-y-2">
                       {membersLoading && <p className="text-xs text-[--text-muted]">Caricamento...</p>}
                       {!membersLoading && farmMembers.length === 0 && (
-                        <p className="text-xs text-[--text-muted]">Nessun membro trovato.</p>
+                        <p className="text-xs text-[--text-muted]">Nessun maiale trovato.</p>
                       )}
                       {!membersLoading && farmMembers.length > 0 && (
                         <div className="space-y-2">
@@ -320,7 +320,7 @@ const FarmsPage: React.FC = () => {
                               )}
                               <div className="text-sm text-[--text-base] flex-1">
                                 <div className="font-medium">{m.displayName || m.userId}</div>
-                                <div className="text-xs text-[--text-muted]">{m.role === 'owner' ? '👑 Admin' : 'Membro'}</div>
+                                <div className="text-xs text-[--text-muted]">{m.role === 'owner' ? '👑 Re Maiale' : 'Maiale'}</div>
                               </div>
                               {isOwner && m.role !== 'owner' && (
                                 <button
@@ -329,7 +329,7 @@ const FarmsPage: React.FC = () => {
                                   className="px-2 py-1 rounded-lg text-xs font-medium bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 disabled:opacity-50 transition-colors"
                                   onClick={async () => {
                                     const name = m.displayName || m.userId
-                                    if (!confirm(`Rimuovere ${name} dal gruppo?`)) return
+                                    if (!confirm(`Rimuovere ${name} dalla fattoria?`)) return
                                     setKickingId(m.userId)
                                     try {
                                       await farmService.removeMember({ farmId: farm.id, ownerId: user.id, memberId: m.userId })

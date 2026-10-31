@@ -149,8 +149,8 @@ export default function FarmDashboardPage() {
     return (
       <div className="pt-16 w-full">
         <div className="rounded-3xl border border-[--border-base] bg-[--bg-card] p-6">
-          <div className="text-lg font-semibold">Nessun gruppo attivo</div>
-          <div className="mt-1 text-sm text-[--text-muted]">Seleziona un gruppo dalla Home per continuare.</div>
+          <div className="text-lg font-semibold">Nessuna fattoria attiva</div>
+          <div className="mt-1 text-sm text-[--text-muted]">Seleziona una fattoria dalla Home per continuare.</div>
           <div className="mt-4 flex gap-2">
             <button
               className="px-4 py-2 rounded-xl bg-primary-600 text-white"
@@ -162,7 +162,7 @@ export default function FarmDashboardPage() {
               className="px-4 py-2 rounded-xl bg-[--bg-raised] text-[--text-base]"
               onClick={() => navigate('/settings/farms')}
             >
-              Gestisci gruppi
+              Gestisci fattorie
             </button>
           </div>
         </div>
@@ -175,18 +175,18 @@ export default function FarmDashboardPage() {
       <div className="rounded-3xl border border-[--border-base] bg-[--bg-card]/80 backdrop-blur p-4 sm:p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="text-xs uppercase tracking-wide text-[--text-muted]">Gruppo</div>
-            <div className="text-xl font-semibold text-[--text-base]">{activeFarm.name || 'Gruppo'}</div>
+            <div className="text-xs uppercase tracking-wide text-[--text-muted]">Fattoria</div>
+            <div className="text-xl font-semibold text-[--text-base]">{activeFarm.name || 'Fattoria'}</div>
             <div className="mt-1 text-sm text-[--text-muted]">
-              {typeof activeFarm.memberCount === 'number' ? `${activeFarm.memberCount} membri` : 'Membri'}
-              {isAdmin ? ' • Admin' : ''}
+              {typeof activeFarm.memberCount === 'number' ? `${activeFarm.memberCount} ${activeFarm.memberCount === 1 ? 'maiale' : 'maiali'}` : 'Maiali'}
+              {isAdmin ? ' • Re Maiale' : ''}
             </div>
           </div>
 
           <button
             className="px-3 py-2 rounded-xl bg-[--bg-raised] text-[--text-base] hover:bg-[--bg-subtle]"
             onClick={() => navigate('/')}
-            title="Cambia gruppo"
+            title="Cambia fattoria"
           >
             Cambia
           </button>
@@ -197,7 +197,7 @@ export default function FarmDashboardPage() {
             className="px-4 py-2 rounded-xl bg-[--text-base] text-[--bg-card] text-sm font-semibold hover:opacity-90"
             onClick={() => navigate('/chats')}
           >
-            💬 Chat del gruppo
+            💬 Chat della fattoria
           </button>
           <button
             className="px-4 py-2 rounded-xl bg-[--bg-raised] text-[--text-base] text-sm font-semibold hover:bg-[--bg-subtle]"
@@ -273,7 +273,7 @@ export default function FarmDashboardPage() {
             <div className="rounded-2xl border border-[--border-base] bg-[--bg-card] p-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
-                  <div className="text-sm font-semibold text-[--text-base]">Membri</div>
+                  <div className="text-sm font-semibold text-[--text-base]">Maiali</div>
                   {onlineCount > 0 && (
                     <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400 font-medium">
                       <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block" />
@@ -292,7 +292,7 @@ export default function FarmDashboardPage() {
               {membersLoading ? (
                 <div className="mt-2 text-sm text-[--text-muted]">Caricamento...</div>
               ) : members.length === 0 ? (
-                <div className="mt-2 text-sm text-[--text-muted]">Nessun membro trovato.</div>
+                <div className="mt-2 text-sm text-[--text-muted]">Nessun maiale trovato.</div>
               ) : (
                 <div className="mt-3 space-y-2">
                   {members.slice(0, 12).map(m => {
@@ -310,12 +310,12 @@ export default function FarmDashboardPage() {
                               {m.displayName || m.userId}
                             </div>
                             <div className="text-xs text-[--text-muted]">
-                              {m.role === 'owner' ? 'Owner' : 'Membro'}
+                              {m.role === 'owner' ? 'Re Maiale' : 'Maiale'}
                             </div>
                           </div>
                         </div>
                         {m.role === 'owner' && (
-                          <span className="text-xs px-2 py-1 rounded-full bg-[--text-base] text-[--bg-card] flex-shrink-0">Owner</span>
+                          <span className="text-xs px-2 py-1 rounded-full bg-[--text-base] text-[--bg-card] flex-shrink-0">Re Maiale</span>
                         )}
                       </div>
                     )

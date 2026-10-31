@@ -671,7 +671,7 @@ export const onJoinRequestApproved = functions.firestore
         {
           notification: {
             title: 'Richiesta approvata 🐷',
-            body: `Sei ora membro di "${farmName}"!`,
+            body: `Ora fai parte di "${farmName}"!`,
           },
           data: { click_action: '/farm' },
         },

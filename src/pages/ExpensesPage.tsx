@@ -239,7 +239,7 @@ const ExpensesPage = () => {
         <div className="flex flex-row items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-bold text-[--text-base] mb-0.5">Spese 💰</h1>
-            <p className="text-sm text-[--text-muted]">Gestisci le spese di gruppo e i saldi</p>
+            <p className="text-sm text-[--text-muted]">Gestisci le spese della fattoria e i saldi</p>
           </div>
           <div className="flex items-center gap-2">
             <button

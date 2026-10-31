@@ -39,7 +39,7 @@ export const farmWriteService = {
   async finalizeMembership(params: { farmId: string; userId: string }): Promise<void> {
     const now = Timestamp.now()
     const memberSnap = await getDoc(doc(db, 'farms', params.farmId, 'members', params.userId)).catch(() => null)
-    if (!memberSnap?.exists()) throw new Error('Non sei ancora membro del gruppo')
+    if (!memberSnap?.exists()) throw new Error('Non fai ancora parte della fattoria')
 
     await userPrivateService.ensure(params.userId)
     await setDoc(
@@ -57,7 +57,7 @@ export const farmWriteService = {
 
   async createFarm(params: { name: string; ownerId: string; iconEmoji?: string; privacy?: Farm['privacy'] }): Promise<Farm> {
     const name = params.name.trim()
-    if (!name) throw new Error('Nome gruppo obbligatorio')
+    if (!name) throw new Error('Nome fattoria obbligatorio')
 
     await userPrivateService.ensure(params.ownerId)
 
@@ -176,7 +176,7 @@ export const farmWriteService = {
         return
       }
       if (statusNorm === 'denied') {
-        throw new Error('Richiesta negata dall\'admin del gruppo')
+        throw new Error('Richiesta negata dal Re Maiale della fattoria')
       }
       return
     }
@@ -258,9 +258,9 @@ export const farmWriteService = {
 
   async removeMember(params: { farmId: string; ownerId: string; memberId: string }): Promise<void> {
     const farmSnap = await getDoc(doc(db, 'farms', params.farmId))
-    if (!farmSnap.exists()) throw new Error('Gruppo non trovato')
+    if (!farmSnap.exists()) throw new Error('Fattoria non trovata')
     if (farmSnap.data().ownerId === params.memberId) {
-      throw new Error('Non puoi rimuovere l\'admin dal gruppo')
+      throw new Error('Non puoi rimuovere il Re Maiale dalla fattoria')
     }
     const batch = writeBatch(db)
     batch.delete(doc(db, 'farms', params.farmId, 'members', params.memberId))

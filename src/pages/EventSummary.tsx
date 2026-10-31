@@ -98,7 +98,7 @@ const EventSummary = () => {
   const stageLabel = useMemo(() => {
     const { confirmed, total } = participationStats
     if (total === 0) return 'Nessuna risposta'
-    return `${confirmed.length} / ${total} ${confirmed.length === 1 ? 'confermato' : 'confermati'}`
+    return `${confirmed.length} / ${total} confermati`
   }, [participationStats])
   const startOfDay = (d: Date) => { const nd = new Date(d); nd.setHours(0,0,0,0); return nd }
   const dateKey = (d: Date) => {
@@ -608,7 +608,7 @@ const EventSummary = () => {
           <div>
             <h2 className="text-sm font-semibold text-[--text-base]">💬 Chat evento</h2>
             <p className="text-xs text-[--text-muted] mt-0.5">
-              {canChat ? 'Coordina il gruppo in tempo reale.' : 'Disponibile dopo aver confermato la partecipazione.'}
+              {canChat ? 'Coordina i maiali in tempo reale.' : 'Disponibile dopo aver confermato la partecipazione.'}
             </p>
           </div>
           <button
@@ -708,7 +708,7 @@ const EventSummary = () => {
       <div className="bg-[--bg-card] rounded-xl border border-[--border-base]">
         <button
           onClick={() => setShowBalances(v => !v)}
-          className="w-full px-4 py-3 flex items-center justify-between"
+          className="w-full px-4 py-3 flex items-center justify-between text-left"
         >
           <div>
             <h2 className="text-lg font-semibold">Saldi evento</h2>
@@ -734,7 +734,7 @@ const EventSummary = () => {
 
       {/* My debts/credits vs people in this event - collapsible */}
       <div className="bg-[--bg-card] rounded-xl border border-[--border-base]">
-        <button onClick={() => setShowMyDebts(v => !v)} className="w-full px-4 py-3 flex items-center justify-between">
+        <button onClick={() => setShowMyDebts(v => !v)} className="w-full px-4 py-3 flex items-center justify-between text-left">
           <div>
             <h2 className="text-lg font-semibold">La tua situazione</h2>
             <p className="text-xs text-[--text-muted]">Importi positivi = ti devono dare, negativi = devi tu.</p>

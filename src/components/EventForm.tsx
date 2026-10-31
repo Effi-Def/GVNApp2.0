@@ -104,9 +104,9 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
   }, [])
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-end sm:items-center justify-center z-[70] p-4">
-      <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-lg shadow-xl w-full max-w-md h-[calc(100dvh-2rem)] sm:h-auto sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
-        <div className="p-6 pb-[calc(6rem+env(safe-area-inset-bottom))]">
+    <div className="fixed inset-0 !mt-0 bg-black/50 flex items-end sm:items-center justify-center z-[70] p-4">
+      <div className="bg-[--bg-card] rounded-t-2xl sm:rounded-lg shadow-xl w-full max-w-md max-h-[calc(100dvh-2rem)] sm:max-h-[90vh] overflow-y-auto pb-[env(safe-area-inset-bottom)] relative">
+        <div className="p-6">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-semibold text-[--text-base]">Nuovo Evento</h2>
             <button
@@ -294,8 +294,8 @@ const EventForm = ({ onSubmit, onClose, isLoading = false }: EventFormProps) => 
             </div>
 
             {/* Fixed action bar with safe-area */}
-            <div className="fixed left-1/2 -translate-x-1/2 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-[60] w-full max-w-md px-6">
-              <div className="bg-[--bg-card] border rounded-xl shadow-md px-4 py-3 flex space-x-3">
+            <div className="sticky bottom-0 z-10 pt-3 pb-[env(safe-area-inset-bottom)]">
+              <div className="bg-[--bg-card] border border-[--border-base] rounded-xl shadow-md px-4 py-3 flex space-x-3">
                 <button
                   type="button"
                   onClick={onClose}

@@ -21,16 +21,20 @@ const Navbar = () => {
     : ((user?.displayName && user.displayName !== 'Utente') ? user.displayName : (user?.email ? user.email.split('@')[0] : 'Utente'))
 
   const navigation = [
-    { name: 'Home', href: '/', icon: '🏠', emoji: '🏠' },
-    { name: 'Gruppo', href: '/farm', icon: '👥', emoji: '👥' },
-    { name: 'Eventi', href: '/events', icon: '📅', emoji: '🎉' },
+    { name: 'Home', href: '/', emoji: '🏠' },
+    { name: 'Fattoria', href: '/farm', emoji: '🚜' },
+    { name: 'Eventi', href: '/events', emoji: '📅' },
+    { name: 'Spese', href: '/expenses', emoji: '💰' },
+    { name: 'Sondaggi', href: '/polls', emoji: '🗳️' },
+    { name: 'Liste', href: '/lists', emoji: '📋' },
   ]
+  const isActive = (href: string) => href === '/' ? location.pathname === '/' : location.pathname.startsWith(href)
 
   // Logout is available in the mobile "Altro" menu; not exposed in top navbar
 
   return (
-    <nav className="bg-[--bg-card] shadow-lg border-b border-[--border-base] fixed top-0 left-0 right-0 z-50 backdrop-blur-sm bg-white/95">
-      <div className="max-w-7xl mx-auto px-6 lg:px-8">
+    <nav className="bg-[--bg-card] shadow-lg border-b border-[--border-base] fixed top-0 left-0 right-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 lg:px-8">
         <div className="flex justify-between items-center h-20">
           
           {/* Logo con mascotte */}
@@ -39,36 +43,39 @@ const Navbar = () => {
               <div className="flex items-center justify-center w-10 h-10 bg-gradient-to-br from-primary-500 to-primary-600 rounded-xl shadow-lg">
                 <span className="text-white font-bold text-lg font-display">G</span>
               </div>
-              <div className="flex flex-col">
+              <div className="hidden lg:flex flex-col">
                 <span className="text-xl font-bold font-display text-[--text-base] tracking-tight">GVNApp</span>
               </div>
               {/* Piccola mascotte */}
-              <span className="text-lg group-hover:animate-bounce transition-transform">
+              <span className="hidden lg:inline text-lg group-hover:animate-bounce transition-transform">
                 <PigAvatar keyName={(profile?.avatarKey as any) || 'pig-0'} />
               </span>
             </Link>
           </div>
 
           {/* Navigation Links - Centrata */}
-          <div className="hidden lg:flex items-center space-x-1 bg-[--bg-subtle] rounded-2xl p-2">
+          <div className="flex items-center gap-1 bg-[--bg-subtle] rounded-2xl p-1">
             {navigation.map((item) => (
               <Link
                 key={item.name}
                 to={item.href}
-                className={`inline-flex items-center px-4 py-3 rounded-xl text-sm font-medium transition-all duration-200 ${
-                  location.pathname === item.href
-                    ? 'bg-primary-500 text-white shadow-md shadow-primary-500/25 transform scale-105'
-                    : 'text-[--text-muted] hover:text-primary-600 hover:bg-white/80 hover:shadow-sm'
+                title={item.name}
+                aria-label={item.name}
+                aria-current={isActive(item.href) ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center min-w-[2.75rem] lg:min-w-[4rem] px-1.5 py-1.5 rounded-xl text-xs font-medium transition-all duration-200 ${
+                  isActive(item.href)
+                    ? 'bg-primary-600 text-white shadow-sm'
+                    : 'text-[--text-muted] hover:text-primary-600 hover:bg-[--bg-card]'
                 }`}
               >
-                <span className="mr-2 text-base">{item.emoji}</span>
-                <span className="font-medium">{item.name}</span>
+                <span className="text-base leading-5" aria-hidden>{item.emoji}</span>
+                <span className="hidden lg:block">{item.name}</span>
               </Link>
             ))}
           </div>
 
           {/* User Menu - Redesigned */}
-          <div className="flex items-center space-x-3 sm:space-x-4">
+          <div className="flex items-center gap-1 lg:gap-2">
             {/* Primary action */}
             <button
               type="button"
@@ -109,6 +116,7 @@ const Navbar = () => {
               to="/notifications"
               className="relative p-2 text-2xl hover:scale-110 transition-transform"
               title="Notifiche"
+              aria-label="Notifiche"
               onClick={(e) => {
                 e.preventDefault()
                 const { markAsRead } = useNotificationsStore.getState()
@@ -146,7 +154,7 @@ const Navbar = () => {
             <button
               type="button"
               onClick={toggleDark}
-              className="p-2 text-[--text-muted] dark:text-gray-300 hover:text-[--text-base] dark:hover:text-white hover:bg-[--bg-raised] dark:hover:bg-gray-800 rounded-lg transition-colors"
+              className="p-2 text-[--text-muted] hover:text-[--text-base] hover:bg-[--bg-raised] rounded-lg transition-colors"
               title={isDark ? 'Modalità chiara' : 'Modalità scura'}
               aria-label={isDark ? 'Passa alla modalità chiara' : 'Passa alla modalità scura'}
             >
@@ -178,7 +186,7 @@ const Navbar = () => {
             </Link>
 
             {/* User pill (hide on xs to free space) */}
-            <div className="hidden sm:flex items-center space-x-3 bg-[--bg-subtle] rounded-2xl p-2 pr-4">
+            <div className="hidden xl:flex items-center space-x-3 bg-[--bg-subtle] rounded-2xl p-2 pr-4">
               {user?.photoURL && (
                 <img
                   className="h-10 w-10 rounded-xl border-2 border-white shadow-sm"

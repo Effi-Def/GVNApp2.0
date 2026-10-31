@@ -4,7 +4,6 @@ import Navbar from './Navbar'
 import BottomNavigation from './BottomNavigation'
 import FirebaseTroubleshooting from '../FirebaseTroubleshooting'
 import MobileTopActions from './MobileTopActions'
-import AnnouncementModal from '../AnnouncementModal'
 import ThemeSetupModal from '../ThemeSetupModal'
 import NotificationPermissionBanner from '../NotificationPermissionBanner'
 import ChatFloatingLauncher from '../Chat/ChatFloatingLauncher'
@@ -90,18 +89,21 @@ const Layout = ({ children }: LayoutProps) => {
       )}
       
       {/* Global floating chat launcher (hidden on chat views) */}
-      {showChrome && !isEventChatPage && <ChatFloatingLauncher />}
+      {showChrome && !isEventChatPage && (
+        <div className="hidden md:block">
+          <ChatFloatingLauncher />
+        </div>
+      )}
 
       {/* Tiny build/version indicator (bottom-left) for cache bust debugging */}
-      <div className="fixed left-2 bottom-2 z-40 text-[10px] font-mono text-[--text-muted] select-none pointer-events-none opacity-70">
-        v{BUILD_STAMP}
-      </div>
+      {import.meta.env.DEV ? (
+        <div className="fixed left-2 bottom-2 z-40 text-[10px] font-mono text-[--text-muted] select-none pointer-events-none opacity-70">
+          v{BUILD_STAMP}
+        </div>
+      ) : null}
 
       {/* Debug Component (only in development, never mounted in production) */}
       {import.meta.env.DEV && !isE2EMode() ? <FirebaseTroubleshooting /> : null}
-
-      {/* One-time announcement popup for important updates */}
-      {showChrome ? <AnnouncementModal /> : null}
 
       {/* First-run theme picker */}
       {showChrome ? <ThemeSetupModal /> : null}

@@ -97,27 +97,9 @@ function AppContent() {
         // 1. Load user settings (notifications, profile)
         await useUserSettingsStore.getState().loadFromFirestore(user.id)
 
-        // 2. Always try to init push notifications:
-        //    - If permission is already 'granted' → init silently (no prompt)
-        //    - If permission is 'default' → request it automatically, then init
-        //    - If permission is 'denied' → skip silently
-        const permissionStatus = typeof Notification !== 'undefined'
-          ? Notification.permission
-          : 'denied'
-
-        if (permissionStatus === 'denied') {
-          console.log('🔕 Notification permission denied by user, skipping FCM init')
-          return
-        }
-
-        if (permissionStatus === 'default') {
-          console.log('🔔 Requesting notification permission automatically...')
-          const result = await Notification.requestPermission().catch(() => 'denied' as NotificationPermission)
-          if (result !== 'granted') {
-            console.log('🔕 Notification permission not granted:', result)
-            return
-          }
-        }
+        // 2. Init push notifications only if already allowed: asking for the
+        //    permission is up to NotificationPermissionBanner, after a user tap.
+        if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return
 
         console.log('🔔 Notification permission granted, initializing FCM...')
         await initMessaging(user.id)

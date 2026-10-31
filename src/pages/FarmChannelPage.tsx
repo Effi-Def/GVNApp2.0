@@ -76,7 +76,7 @@ const FarmChannelPage: React.FC = () => {
   if (!activeFarm) {
     return (
       <div className="flex items-center justify-center h-screen text-[--text-muted] text-sm">
-        Nessun gruppo attivo.
+        Nessuna fattoria attiva.
       </div>
     )
   }
