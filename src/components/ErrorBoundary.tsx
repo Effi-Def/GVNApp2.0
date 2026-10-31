@@ -1,7 +1,7 @@
 import React from 'react'
 import { reportError } from '../services/observability'
 
-type Props = { children: React.ReactNode }
+type Props = { children: React.ReactNode; resetKey?: string }
 type State = { hasError: boolean; error?: any }
 
 export class ErrorBoundary extends React.Component<Props, State> {
@@ -12,6 +12,12 @@ export class ErrorBoundary extends React.Component<Props, State> {
 
   static getDerivedStateFromError(error: any): State {
     return { hasError: true, error }
+  }
+
+  componentDidUpdate(prevProps: Props) {
+    if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false, error: undefined })
+    }
   }
 
   componentDidCatch(error: any, info: any) {

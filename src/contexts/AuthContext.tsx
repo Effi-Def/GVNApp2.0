@@ -61,9 +61,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             // IMPORTANT: ensure `id` is always the auth uid (avoid any stored `id` field overriding it)
             // The e-mail comes from auth only: profiles are readable by other users.
             userData = { ...(userDoc.data() as any), id: firebaseUser.uid, email: firebaseUser.email! } as User
-            if ('email' in (userDoc.data() || {})) {
-              void updateDoc(doc(db, 'users', firebaseUser.uid), { email: deleteField() })
-                .catch((e) => console.warn('⚠️ Could not remove legacy profile e-mail:', e))
+            const staleFields = ['email', 'test', 'timestamp'].filter(field => field in (userDoc.data() || {}))
+            if (staleFields.length > 0) {
+              void updateDoc(doc(db, 'users', firebaseUser.uid), Object.fromEntries(staleFields.map(field => [field, deleteField()])))
+                .catch((e) => console.warn('⚠️ Could not clean legacy profile fields:', e))
             }
           } else {
             console.log('📝 Creating new user document in Firestore')

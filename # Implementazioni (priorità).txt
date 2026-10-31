@@ -482,7 +482,7 @@ Obiettivo: chiudere i gap minimi per passare da "release candidate" a "prodotto 
   - E2E in CI eseguiti su server `preview` (piu` vicino al comportamento release rispetto a `dev`)
 
 ### [012] Compliance minima prodotto (P1)
-- **Status:** done
+- **Status:** in-progress (manca titolare/contatto reale nella Privacy Policy)
 - **Tipo/Area/Effort:** legal | compliance | S
 - **Finestra:** Giorni 8-9
 - **Obiettivo:** copertura legale essenziale per produzione pubblica.
@@ -507,7 +507,7 @@ Obiettivo: chiudere i gap minimi per passare da "release candidate" a "prodotto 
     - Settings (`src/pages/SettingsPage.tsx`)
 
 ### [013] Observability e incident response minima (P1)
-- **Status:** done
+- **Status:** in-progress (manca `VITE_SENTRY_DSN`: senza DSN gli errori non partono)
 - **Tipo/Area/Effort:** reliability | ops | M
 - **Finestra:** Giorni 9-11
 - **Obiettivo:** ridurre MTTR su errori reali.
@@ -516,7 +516,7 @@ Obiettivo: chiudere i gap minimi per passare da "release candidate" a "prodotto 
   - alert base su errori Functions
   - runbook incident (login down, push down, rules deny spike)
 - **Acceptance criteria:**
-  - [x] errore FE catturato con stack + release
+  - [ ] errore FE catturato con stack + release (codice pronto, DSN da configurare)
   - [x] almeno 3 alert operativi documentati
   - [x] runbook testato con 1 game day rapido
 

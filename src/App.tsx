@@ -229,7 +229,7 @@ function AppContent() {
   return (
     <ActiveFarmProvider>
       <Layout>
-        <ErrorBoundary>
+        <ErrorBoundary resetKey={location.pathname}>
           <Suspense fallback={<PageLoader />}>
           <Routes>
             <Route path="/" element={<HomePage />} />
