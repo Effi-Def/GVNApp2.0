@@ -1,6 +1,5 @@
 import {
   collection,
-  getCountFromServer,
   getDocs,
   query,
   orderBy,
@@ -35,14 +34,21 @@ function mapMsg(d: any, contextId: string): ChatMessage {
 }
 
 export const chatReadService = {
-  /** Messages after the last read, counted by the server without downloading them. */
-  async getUnreadCount(eventId: string, lastReadAt: Date): Promise<number> {
+  /**
+   * Messages of others after the last read. Own, system and deleted messages can only be
+   * told apart on the client, so the read is capped: the badge shows 99+ beyond that.
+   */
+  async getUnreadCount(eventId: string, lastReadAt: Date, userId: string): Promise<number> {
     const q = query(
       collection(db, 'events', eventId, 'messages'),
       where('createdAt', '>', Timestamp.fromDate(lastReadAt)),
+      limit(100),
     )
-    const snap = await getCountFromServer(q)
-    return snap.data().count
+    const snap = await getDocs(q)
+    return snap.docs.filter(d => {
+      const data = d.data()
+      return data.userId !== userId && !data.deleted && data.type !== 'system'
+    }).length
   },
 
   /** Generic listener — accepts any Firestore messages collection path. */

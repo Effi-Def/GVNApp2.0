@@ -4,6 +4,7 @@ import {
   addDoc,
   updateDoc,
   deleteDoc,
+  deleteField,
   runTransaction,
   Timestamp,
 } from 'firebase/firestore'
@@ -50,6 +51,10 @@ export const listWriteService = {
       delete updateData.id
       delete updateData.createdAt
       const sanitized = cleanUndefinedDeep(updateData)
+      // An explicit undefined here means "no longer linked", not "leave as it is"
+      for (const key of ['eventId', 'farmId'] as const) {
+        if (key in listData && listData[key] === undefined) sanitized[key] = deleteField()
+      }
 
       await updateDoc(docRef, sanitized)
       console.log('✅ List updated successfully:', id)
@@ -63,9 +68,19 @@ export const listWriteService = {
     }
   },
 
-  /** Applies a change on the latest saved items, so concurrent edits are not lost. */
-  async changeItems(id: string, change: (items: ListItem[]) => ListItem[]): Promise<ListItem[]> {
+  /**
+   * Applies a change on the latest saved items, so concurrent edits are not lost.
+   * Transactions need the network: offline the change starts from `cachedItems` and is
+   * queued by the SDK, so a list stays usable on a poor connection.
+   */
+  async changeItems(id: string, change: (items: ListItem[]) => ListItem[], cachedItems: ListItem[]): Promise<ListItem[]> {
     const docRef = doc(db, 'lists', id)
+    if (!navigator.onLine) {
+      const next = change(cachedItems)
+      updateDoc(docRef, { items: cleanUndefinedDeep(next), updatedAt: Timestamp.now() })
+        .catch(error => console.error('❌ Error syncing list items:', error))
+      return next
+    }
     return runTransaction(db, async (tx) => {
       const snap = await tx.get(docRef)
       if (!snap.exists()) throw new Error('Lista non trovata')

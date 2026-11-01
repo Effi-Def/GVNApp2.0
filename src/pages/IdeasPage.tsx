@@ -191,6 +191,48 @@ const IdeasPage = () => {
     navigate('/polls?create=1&type=date', { state: { idea: buildIdeaEventPrefill(idea) } })
   }
 
+  const renderClosedIdeas = (label: string, items: Idea[], canMarkDone: boolean) => items.length > 0 && (
+    <details className="rounded-2xl border border-[--border-base] bg-[--bg-card] overflow-hidden group">
+      <summary className="px-4 py-3 text-sm font-medium text-[--text-muted] cursor-pointer select-none list-none flex items-center justify-between hover:bg-[--bg-subtle] transition">
+        <span>{label}</span>
+        <span className="text-xs group-open:rotate-180 transition-transform inline-block" aria-hidden>▾</span>
+      </summary>
+      <div className="divide-y divide-[--border-base] border-t border-[--border-base]">
+        {items.map(idea => (
+          <div key={idea.id} className="flex items-center gap-3 px-4 py-3">
+            <div className="shrink-0 text-base" aria-hidden>{getIdeaCategory(idea.category).emoji}</div>
+            <div className="flex-1 min-w-0 text-sm font-medium text-[--text-base] break-words">{idea.title}</div>
+            {!!idea.eventId && events.some(e => e.id === idea.eventId) && (
+              <button
+                type="button"
+                className="shrink-0 text-xs font-medium text-primary-600 underline"
+                onClick={() => navigate(`/events/${idea.eventId}/summary`)}
+              >
+                Apri evento
+              </button>
+            )}
+            {canMarkDone && (
+              <button
+                type="button"
+                className="shrink-0 text-xs font-medium text-[--text-base] underline"
+                onClick={() => handleMarkDone(idea)}
+              >
+                Fatta
+              </button>
+            )}
+            <button
+              type="button"
+              className="shrink-0 text-xs text-[--text-muted] underline"
+              onClick={() => handleReopen(idea)}
+            >
+              Riapri
+            </button>
+          </div>
+        ))}
+      </div>
+    </details>
+  )
+
   const inputClass = 'w-full px-3 py-2 rounded-lg border border-[--border-base] bg-[--bg-card] text-[--text-base] focus:outline-none focus:border-primary-500'
 
   return (
@@ -383,84 +425,8 @@ const IdeasPage = () => {
             )
           })}
 
-          {organizedIdeas.length > 0 && (
-            <details className="rounded-2xl border border-[--border-base] bg-[--bg-card] overflow-hidden group">
-              <summary className="px-4 py-3 text-sm font-medium text-[--text-muted] cursor-pointer select-none list-none flex items-center justify-between hover:bg-[--bg-subtle] transition">
-                <span>Già organizzate ({organizedIdeas.length})</span>
-                <span className="text-xs group-open:rotate-180 transition-transform inline-block" aria-hidden>▾</span>
-              </summary>
-              <div className="divide-y divide-[--border-base] border-t border-[--border-base]">
-                {organizedIdeas.map(idea => {
-                  const hasEvent = !!idea.eventId && events.some(e => e.id === idea.eventId)
-                  return (
-                    <div key={idea.id} className="flex items-center gap-3 px-4 py-3">
-                      <div className="shrink-0 text-base" aria-hidden>{getIdeaCategory(idea.category).emoji}</div>
-                      <div className="flex-1 min-w-0 text-sm font-medium text-[--text-base] break-words">{idea.title}</div>
-                      {hasEvent && (
-                        <button
-                          type="button"
-                          className="shrink-0 text-xs font-medium text-primary-600 underline"
-                          onClick={() => navigate(`/events/${idea.eventId}/summary`)}
-                        >
-                          Apri evento
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="shrink-0 text-xs font-medium text-[--text-base] underline"
-                        onClick={() => handleMarkDone(idea)}
-                      >
-                        Fatta
-                      </button>
-                      <button
-                        type="button"
-                        className="shrink-0 text-xs text-[--text-muted] underline"
-                        onClick={() => handleReopen(idea)}
-                      >
-                        Riapri
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            </details>
-          )}
-
-          {doneIdeas.length > 0 && (
-            <details className="rounded-2xl border border-[--border-base] bg-[--bg-card] overflow-hidden group">
-              <summary className="px-4 py-3 text-sm font-medium text-[--text-muted] cursor-pointer select-none list-none flex items-center justify-between hover:bg-[--bg-subtle] transition">
-                <span>Fatte ✅ ({doneIdeas.length})</span>
-                <span className="text-xs group-open:rotate-180 transition-transform inline-block" aria-hidden>▾</span>
-              </summary>
-              <div className="divide-y divide-[--border-base] border-t border-[--border-base]">
-                {doneIdeas.map(idea => {
-                  const hasEvent = !!idea.eventId && events.some(e => e.id === idea.eventId)
-                  return (
-                    <div key={idea.id} className="flex items-center gap-3 px-4 py-3">
-                      <div className="shrink-0 text-base" aria-hidden>{getIdeaCategory(idea.category).emoji}</div>
-                      <div className="flex-1 min-w-0 text-sm font-medium text-[--text-base] break-words">{idea.title}</div>
-                      {hasEvent && (
-                        <button
-                          type="button"
-                          className="shrink-0 text-xs font-medium text-primary-600 underline"
-                          onClick={() => navigate(`/events/${idea.eventId}/summary`)}
-                        >
-                          Apri evento
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="shrink-0 text-xs text-[--text-muted] underline"
-                        onClick={() => handleReopen(idea)}
-                      >
-                        Riapri
-                      </button>
-                    </div>
-                  )
-                })}
-              </div>
-            </details>
-          )}
+          {renderClosedIdeas(`Già organizzate (${organizedIdeas.length})`, organizedIdeas, true)}
+          {renderClosedIdeas(`Fatte ✅ (${doneIdeas.length})`, doneIdeas, false)}
         </div>
       )}
 

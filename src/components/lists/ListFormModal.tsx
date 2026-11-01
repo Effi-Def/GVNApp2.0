@@ -50,6 +50,8 @@ export default function ListFormModal({ editingList, initialEventId, events, get
   const inputClass = 'w-full px-3 py-2 border border-[--border-base] rounded-lg bg-[--bg-card] text-[--text-base] focus:outline-none focus:border-green-500'
   const slotType = isSlotList(values.type)
   const people = getPeople(values.eventId)
+  // The items of a saved to-do list change from the list itself
+  const itemsLocked = (editingList?.type || 'shopping') === 'todo' && !!editingList
 
   // Prevent background scroll on mobile while the form is open
   useEffect(() => {
@@ -193,6 +195,7 @@ export default function ListFormModal({ editingList, initialEventId, events, get
                     <input
                       type="text"
                       value={item}
+                      disabled={itemsLocked}
                       aria-label={`Elemento ${index + 1}`}
                       onChange={(e) => setValues({ ...values, items: setAt(values.items, index, e.target.value) })}
                       onKeyDown={(e) => {
@@ -206,7 +209,7 @@ export default function ListFormModal({ editingList, initialEventId, events, get
                       className={`flex-1 min-w-0 ${inputClass}`}
                       placeholder={`Elemento ${index + 1}`}
                     />
-                    {values.items.length > 1 && (
+                    {values.items.length > 1 && !itemsLocked && (
                       <button
                         type="button"
                         onClick={() => removeItem(index)}
@@ -288,17 +291,18 @@ export default function ListFormModal({ editingList, initialEventId, events, get
                   )}
                 </div>
               ))}
-              <button
-                type="button"
-                onClick={addItem}
-                className="w-full py-2 border-2 border-dashed border-[--border-base] rounded-lg text-[--text-muted] hover:border-green-500 hover:text-green-600 transition-colors"
-              >
-                + Aggiungi elemento
-              </button>
-              {values.type === 'todo' && editingList && (
+              {itemsLocked ? (
                 <p className="text-xs text-[--text-muted] mt-2">
-                  Stato, scadenza e assegnatari si cambiano direttamente dalla lista.
+                  Elementi, stato, scadenza e assegnatari si cambiano direttamente dalla lista.
                 </p>
+              ) : (
+                <button
+                  type="button"
+                  onClick={addItem}
+                  className="w-full py-2 border-2 border-dashed border-[--border-base] rounded-lg text-[--text-muted] hover:border-green-500 hover:text-green-600 transition-colors"
+                >
+                  + Aggiungi elemento
+                </button>
               )}
             </div>
 

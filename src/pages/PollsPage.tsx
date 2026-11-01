@@ -141,6 +141,11 @@ const PollsPage = () => {
     }))
   }, [location?.state, events])
 
+  // A prefill lasts as long as its form. Declared before the ?create=1 effect, which may set it on mount.
+  useEffect(() => {
+    if (!showForm) setIdeaPrefill(null)
+  }, [showForm])
+
   // Auto-open create form when ?create=1
   useEffect(() => {
     const params = new URLSearchParams(location?.search || '')
@@ -346,23 +351,9 @@ const PollsPage = () => {
         votedAt: new Date()
       }
 
-      // Aggiorna le opzioni con il nuovo conteggio
-      const updatedOptions = poll.options.map(option => 
-        option.id === optionId 
-          ? { ...option, votes: option.votes + 1 }
-          : option
-      )
-
-      const updatedPollData = {
-        ...poll,
-        votes: [...poll.votes, newVote],
-        options: updatedOptions,
-        updatedAt: new Date()
-      }
-
       await pollService.vote(pollId, newVote)
 
-      updatePoll(pollId, updatedPollData)
+      updatePoll(pollId, { votes: [...poll.votes, newVote], updatedAt: new Date() })
 
       console.log('✅ Vote recorded successfully')
     } catch (error) {

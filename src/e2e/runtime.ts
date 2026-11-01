@@ -793,7 +793,11 @@ function patchPollAndListServices() {
     async update(listId: string, listData: Partial<ShoppingList>) {
       updateDb((db) => {
         const current = db.lists[listId]
-        if (current) db.lists[listId] = { ...current, ...cloneValue(listData), updatedAt: new Date() }
+        if (!current) return
+        const next: ShoppingList = { ...current, ...cloneValue(listData), updatedAt: new Date() }
+        if ('eventId' in listData && !listData.eventId) delete next.eventId
+        if ('farmId' in listData && !listData.farmId) delete next.farmId
+        db.lists[listId] = next
       })
     },
     async changeItems(listId: string, change: (items: ListItem[]) => ListItem[]) {
@@ -895,11 +899,52 @@ function patchIdeaService() {
   })
 }
 
+// EventChat addresses chats by path: events map to their id, farm channels to the full path
+function chatKey(path: string) {
+  return path.match(/^events\/([^/]+)/)?.[1] ?? path.replace(/\/messages$/, '')
+}
+
 function patchChatService() {
+  const service = chatService as any
   Object.assign(chatService as object, {
-    async getUnreadCount(eventId: string, lastReadAt: Date) {
+    listenPath(messagesPath: string, callback: MessageListener) {
+      return service.listen(chatKey(messagesPath), callback)
+    },
+    listenParticipantsAt(basePath: string, callback: ParticipantListener) {
+      return service.listenParticipants(chatKey(basePath), callback)
+    },
+    listenTypingAt(basePath: string, callback: TypingListener) {
+      return service.listenTyping(chatKey(basePath), callback)
+    },
+    listenReplies(_messagesPath: string, _messageId: string, callback: MessageListener) {
+      callback([])
+      return () => {}
+    },
+    async markReadAt(basePath: string, userId: string, meta?: { displayName?: string; photoURL?: string }) {
+      await service.markRead(chatKey(basePath), userId, meta)
+    },
+    async sendMessageTo(
+      descriptor: { messagesPath: string },
+      payload: { text?: string; files?: File[]; quoted?: ChatMessage['quoted']; mentions?: string[] },
+      actor: { id: string; displayName: string; photoURL?: string },
+      onProgress?: (fileName: string, pct: number) => void,
+    ) {
+      await service.sendMessage(chatKey(descriptor.messagesPath), payload, actor, onProgress)
+    },
+    async toggleReactionAt(messagesPath: string, messageId: string, emoji: string, userId: string, hasReacted: boolean) {
+      await service.toggleReaction(chatKey(messagesPath), messageId, emoji, userId, hasReacted)
+    },
+    async deleteMessageAt(messagesPath: string, messageId: string) {
+      await service.deleteMessage(chatKey(messagesPath), messageId)
+    },
+    async setTypingAt(basePath: string, userId: string, typing: boolean) {
+      await service.setTyping(chatKey(basePath), userId, typing)
+    },
+    async getUnreadCount(eventId: string, lastReadAt: Date, userId: string) {
       const messages = ensureDb().chats[eventId] || []
-      return messages.filter((message) => message.createdAt > lastReadAt).length
+      return messages.filter((message) =>
+        message.createdAt > lastReadAt && message.userId !== userId && !message.deleted && message.type !== 'system'
+      ).length
     },
     listen(eventId: string, callback: MessageListener) {
       const db = ensureDb()

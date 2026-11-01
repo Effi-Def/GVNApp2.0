@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useAppStore } from '../../stores/AppStore'
 import { useUserSettingsStore } from '../../stores/UserSettingsStore'
 import { useAuthStore } from '../../stores/useAuthStore'
@@ -39,6 +39,7 @@ const ChatListItem = ({ ev, onClick }: { ev: any, onClick: () => void }) => (
  */
 const ChatFloatingLauncher: React.FC = () => {
   const navigate = useNavigate()
+  const { pathname } = useLocation()
   const { events } = useAppStore()
   const { user } = useAuthStore()
   const { notifications } = useUserSettingsStore()
@@ -121,6 +122,12 @@ const ChatFloatingLauncher: React.FC = () => {
       if (panelRef.current) panelRef.current.style.height = ''
     }
   }, [open, activeEventId])
+
+  // The popup covers the page: an action inside it that changes route must reveal the new page
+  useEffect(() => {
+    setOpen(false)
+    setActiveEventId(null)
+  }, [pathname])
 
   useEffect(() => {
     if (!open) return

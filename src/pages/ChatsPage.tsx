@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { chatService } from '../services/firestore'
 import { useAuthStore } from '../stores/useAuthStore'
@@ -21,6 +21,7 @@ export default function ChatsPage() {
   const [events, setEvents] = useState<Event[]>([])
   const [myReads, setMyReads] = useState<Record<string, Date | undefined>>({})
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
+  const countedRef = useRef<Record<string, string>>({})
   const meId = user?.id || user?.email || ''
 
   // All accessible chats — no farm filter on load, user picks farm manually
@@ -40,19 +41,22 @@ export default function ChatsPage() {
     return () => { unsubs.forEach(u => u()) }
   }, [events, meId])
 
-  // Numeric badge only for chats with new activity: each count is a server read
+  // Numeric badge only for chats with new activity. Each count is a server read,
+  // so it runs once per state of the chat, not at every participants snapshot.
   useEffect(() => {
-    let alive = true
     for (const e of events) {
+      if (!(e.id in myReads)) continue
       const lastActivity = e.chatLastActivityAt?.getTime?.() || 0
       const lastRead = myReads[e.id]
       if (lastActivity <= (lastRead?.getTime() || 0)) continue
-      chatService.getUnreadCount(e.id, lastRead ?? new Date(0))
-        .then(count => { if (alive) setUnreadCounts(prev => ({ ...prev, [e.id]: count })) })
-        .catch(() => { if (alive) setUnreadCounts(prev => ({ ...prev, [e.id]: 0 })) })
+      const countKey = `${lastActivity}:${lastRead?.getTime() || 0}`
+      if (countedRef.current[e.id] === countKey) continue
+      countedRef.current[e.id] = countKey
+      chatService.getUnreadCount(e.id, lastRead ?? new Date(0), meId)
+        .then(count => setUnreadCounts(prev => ({ ...prev, [e.id]: count })))
+        .catch(() => setUnreadCounts(prev => ({ ...prev, [e.id]: 0 })))
     }
-    return () => { alive = false }
-  }, [events, myReads])
+  }, [events, myReads, meId])
 
   // Apply optional farm filter
   const filteredEvents = useMemo(() => {

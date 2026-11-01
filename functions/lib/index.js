@@ -413,10 +413,15 @@ exports.onIdeaInterestChanged = functions.firestore
     const afterCount = Array.isArray(after.interestedIds) ? after.interestedIds.length : 0;
     if (beforeCount >= IDEA_INTEREST_THRESHOLD || afterCount < IDEA_INTEREST_THRESHOLD)
         return;
-    await change.after.ref.update({ interestNotifiedAt: admin.firestore.FieldValue.serverTimestamp() });
+    // The author does not need a push about their own tap: the next one to join will trigger it
+    const authorJustJoined = !before.interestedIds?.includes(after.createdBy) && after.interestedIds.includes(after.createdBy);
+    if (authorJustJoined)
+        return;
     const title = 'La tua idea piace 🐷';
     const body = `“${after.title || 'La tua idea'}”: ${afterCount} ci stanno. Organizzate?`;
     await sendFcmToUsers([after.createdBy], 'event', { notification: { title, body }, data: { click_action: '/ideas' } }, context.params.ideaId);
+    // Set only after sending, so a failure can be retried by the next "Ci sto"
+    await change.after.ref.update({ interestNotifiedAt: admin.firestore.FieldValue.serverTimestamp() });
 });
 exports.onChatMessageCreated = functions.firestore.document('events/{eventId}/messages/{messageId}').onCreate(async (snap, context) => {
     const message = snap.data();

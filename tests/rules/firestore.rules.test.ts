@@ -13,9 +13,9 @@ import {
   deleteDoc,
   deleteField,
   doc,
-  getCountFromServer,
   getDoc,
   getDocs,
+  limit,
   query,
   serverTimestamp,
   setDoc,
@@ -314,14 +314,32 @@ describe('lists', () => {
 })
 
 describe('chat unread count', () => {
-  const unread = (uid: string) => getCountFromServer(query(
+  const unread = (uid: string) => getDocs(query(
     collection(db(uid), 'events', 'event-1', 'messages'),
     where('createdAt', '>', Timestamp.fromDate(new Date('2030-01-01T00:00:00.000Z'))),
+    limit(100),
   ))
 
   it('is available to who can chat and hidden from the others', async () => {
     await assertSucceeds(unread(MEMBER))
     await assertFails(unread(OUTSIDER))
+  })
+})
+
+describe('farm invites', () => {
+  beforeEach(async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'farmInvites', 'secret-token'), { farmId: FARM, createdBy: OWNER, active: true })
+    })
+  })
+
+  it('opens an invite only for who already has its token', async () => {
+    await assertSucceeds(getDoc(doc(db(OUTSIDER), 'farmInvites', 'secret-token')))
+  })
+
+  it('does not let anyone list the tokens', async () => {
+    await assertFails(getDocs(collection(db(OUTSIDER), 'farmInvites')))
+    await assertFails(getDocs(query(collection(db(OUTSIDER), 'farmInvites'), where('farmId', '==', FARM))))
   })
 })
 

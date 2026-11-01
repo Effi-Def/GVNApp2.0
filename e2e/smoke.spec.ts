@@ -58,8 +58,9 @@ test('crea evento -> RSVP -> chat invio messaggio', async ({ page }) => {
   await page.getByPlaceholder('Scrivi un messaggio...').fill('Messaggio smoke e2e')
   await page.getByPlaceholder('Scrivi un messaggio...').press('Enter')
 
-  await expect(page.getByPlaceholder('Scrivi un messaggio...')).toHaveValue('')
   await expect(page.getByRole('main').getByText('Messaggio smoke e2e', { exact: true })).toBeVisible()
+  // Checked after the bubble: a failed send clears the box and then restores the draft
+  await expect(page.getByPlaceholder('Scrivi un messaggio...')).toHaveValue('')
 })
 
 test('crea idea -> Ci sto -> organizza evento', async ({ page }) => {
@@ -139,10 +140,10 @@ test('messaggio in chat -> salva come idea', async ({ page }) => {
   await openChatButton.click()
   await page.getByPlaceholder('Scrivi un messaggio...').fill('Dovremmo andare a Lisbona')
   await page.getByPlaceholder('Scrivi un messaggio...').press('Enter')
-  await expect(page.getByPlaceholder('Scrivi un messaggio...')).toHaveValue('')
 
   const message = page.getByRole('main').getByText('Dovremmo andare a Lisbona', { exact: true })
   await expect(message).toBeVisible()
+  await expect(page.getByPlaceholder('Scrivi un messaggio...')).toHaveValue('')
   await message.hover()
   await page.getByRole('button', { name: 'Opzioni messaggio' }).click()
   await page.getByRole('button', { name: /Salva come idea/ }).click()

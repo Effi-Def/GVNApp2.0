@@ -121,7 +121,7 @@ const ListsPage = () => {
   const changeItems = async (list: ShoppingList, change: (items: ListItem[]) => ListItem[]) => {
     setActionError(null)
     try {
-      const items = await listService.changeItems(list.id, change)
+      const items = await listService.changeItems(list.id, change, list.items)
       updateList(list.id, { items, updatedAt: new Date() })
     } catch (err) {
       console.error('❌ Error updating list items:', err)
@@ -195,7 +195,8 @@ const ListsPage = () => {
           title,
           description,
           eventId: values.eventId || undefined,
-          farmId: values.eventId ? undefined : (editingList.farmId || activeFarmId || undefined),
+          // A private list stays private: only a list leaving its event moves to the farm
+          farmId: values.eventId ? undefined : (editingList.eventId ? (activeFarmId || undefined) : editingList.farmId),
           type: values.type,
         }
         await listService.update(editingList.id, metadata)
@@ -203,7 +204,7 @@ const ListsPage = () => {
         // Status, due dates and assignees of a to-do list change from the list itself
         if ((editingList.type || 'shopping') !== 'todo') {
           const texts = values.items.map(t => t.trim()).filter(Boolean)
-          items = await listService.changeItems(editingList.id, current => mergeEditedItems(current, texts, values.type, currentUserId))
+          items = await listService.changeItems(editingList.id, current => mergeEditedItems(current, texts, values.type, currentUserId), editingList.items)
         }
         updateList(editingList.id, { ...metadata, items, updatedAt: new Date() })
       } else {

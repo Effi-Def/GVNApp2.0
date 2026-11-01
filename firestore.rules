@@ -290,7 +290,8 @@ service cloud.firestore {
 
     // Invite tokens (document id = token)
     match /farmInvites/{tokenId} {
-      allow read: if isSignedIn();
+      // By id only: listing would hand out every token, and a token is enough to join a farm
+      allow get: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid && isFarmOwner(request.resource.data.farmId);
       allow delete: if isSignedIn() && isFarmOwner(resource.data.farmId);
       allow update: if false;

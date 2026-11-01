@@ -25,6 +25,7 @@
 - Tema scuro, allineamento testi, menu tra 768 e 1023 px, titolo chat su desktop.
 - Compilazione delle Cloud Functions.
 - Liste: "Condivisa" ora dice il vero, le liste senza evento sono visibili a tutta la fattoria, le modifiche simultanee non si sovrascrivono, una lista appena creata non sparisce cambiando pagina, lo stato "Fatto" spunta l'elemento e le scadenze non slittano di un giorno.
+- I token di invito non sono piu` elencabili da qualsiasi utente: bastava un token per entrare in una fattoria.
 - I Maiali che non hanno creato un sondaggio possono votarlo; i nuovi sondaggi senza evento sono visibili a tutta la fattoria.
 
 ### Notes
