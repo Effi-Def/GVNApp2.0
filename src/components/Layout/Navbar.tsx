@@ -23,6 +23,7 @@ const Navbar = () => {
   const navigation = [
     { name: 'Home', href: '/', emoji: '🏠' },
     { name: 'Fattoria', href: '/farm', emoji: '🚜' },
+    { name: 'Da fare', href: '/ideas', emoji: '💡' },
     { name: 'Eventi', href: '/events', emoji: '📅' },
     { name: 'Spese', href: '/expenses', emoji: '💰' },
     { name: 'Sondaggi', href: '/polls', emoji: '🗳️' },

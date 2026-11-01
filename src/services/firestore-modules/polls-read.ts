@@ -39,7 +39,7 @@ export const pollReadService = {
     }
   },
 
-  async getForUserVisibleEvents(params: { userId: string; eventIds: string[] }): Promise<Poll[]> {
+  async getForUserVisibleEvents(params: { userId: string; eventIds: string[]; farmId?: string | null }): Promise<Poll[]> {
     try {
       const uniqueEventIds = Array.from(new Set((params.eventIds || []).filter(Boolean)))
       const chunks: string[][] = []
@@ -47,6 +47,10 @@ export const pollReadService = {
 
       const queries: Promise<any>[] = []
       queries.push(getDocs(query(collection(db, 'polls'), where('createdBy', '==', params.userId), limit(APP_CONFIG.PAGINATION_LIMIT))))
+
+      if (params.farmId) {
+        queries.push(getDocs(query(collection(db, 'polls'), where('farmId', '==', params.farmId), limit(APP_CONFIG.PAGINATION_LIMIT))))
+      }
 
       for (const c of chunks) {
         queries.push(getDocs(query(collection(db, 'polls'), where('eventId', 'in', c), limit(APP_CONFIG.PAGINATION_LIMIT))))

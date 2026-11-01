@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { chatService } from '../services/firestore'
 import { useAuthStore } from '../stores/useAuthStore'
@@ -20,6 +20,8 @@ export default function ChatsPage() {
   const [farmFilter, setFarmFilter] = useState<'all' | string>('all')
   const [events, setEvents] = useState<Event[]>([])
   const [myReads, setMyReads] = useState<Record<string, Date | undefined>>({})
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({})
+  const countedRef = useRef<Record<string, string>>({})
   const meId = user?.id || user?.email || ''
 
   // All accessible chats — no farm filter on load, user picks farm manually
@@ -38,6 +40,23 @@ export default function ChatsPage() {
     }))
     return () => { unsubs.forEach(u => u()) }
   }, [events, meId])
+
+  // Numeric badge only for chats with new activity. Each count is a server read,
+  // so it runs once per state of the chat, not at every participants snapshot.
+  useEffect(() => {
+    for (const e of events) {
+      if (!(e.id in myReads)) continue
+      const lastActivity = e.chatLastActivityAt?.getTime?.() || 0
+      const lastRead = myReads[e.id]
+      if (lastActivity <= (lastRead?.getTime() || 0)) continue
+      const countKey = `${lastActivity}:${lastRead?.getTime() || 0}`
+      if (countedRef.current[e.id] === countKey) continue
+      countedRef.current[e.id] = countKey
+      chatService.getUnreadCount(e.id, lastRead ?? new Date(0), meId)
+        .then(count => setUnreadCounts(prev => ({ ...prev, [e.id]: count })))
+        .catch(() => setUnreadCounts(prev => ({ ...prev, [e.id]: 0 })))
+    }
+  }, [events, myReads, meId])
 
   // Apply optional farm filter
   const filteredEvents = useMemo(() => {
@@ -75,7 +94,7 @@ export default function ChatsPage() {
     <div className="pt-16 px-4 pb-4 max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-3">
         <h1 className="text-xl font-bold">Chat degli eventi</h1>
-        <span className="text-xs text-[--text-muted]">{summaries.filter(s => s.hasNew).length} non letti</span>
+        <span className="text-xs text-[--text-muted]">{summaries.filter(s => s.hasNew).length} con nuovi messaggi</span>
       </div>
 
       {/* Farm filter pills — only shown when user has multiple farms with chats */}
@@ -125,7 +144,11 @@ export default function ChatsPage() {
               <div className="flex-1 text-left min-w-0">
                 <div className="font-semibold text-[--text-base] flex items-center gap-2">
                   <span className="truncate max-w-[55vw]">{s.event.title}</span>
-                  {s.hasNew && <span className="shrink-0 text-xs px-2 py-0.5 rounded-full bg-primary-100 text-primary-700">Nuovi</span>}
+                  {s.hasNew && (
+                    <span className="shrink-0 min-w-[1.25rem] h-5 px-1.5 text-xs font-bold rounded-full bg-primary-600 text-white flex items-center justify-center">
+                      {unreadCounts[s.event.id] ? (unreadCounts[s.event.id] > 99 ? '99+' : unreadCounts[s.event.id]) : 'Nuovi'}
+                    </span>
+                  )}
                 </div>
                 <div className="text-xs text-[--text-muted] flex items-center gap-1.5 mt-0.5">
                   {eventFarm && farmOptions.length > 1 && (

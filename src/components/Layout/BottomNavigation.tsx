@@ -12,6 +12,7 @@ const ANGLE_MAP: Record<number, number[]> = {
   2: [-38, 38],
   3: [-55, 0, 55],
   4: [-65, -22, 22, 65],
+  5: [-72, -36, 0, 36, 72],
 }
 
 const BottomNavigation = () => {
@@ -48,6 +49,7 @@ const BottomNavigation = () => {
   const fabActions = useMemo(() => {
     const all = [
       { icon: '📅', label: 'Evento',    to: '/events?create=1',   always: true  },
+      { icon: '💡', label: 'Idea',      to: '/ideas?create=1',    always: true  },
       { icon: '🗳️', label: 'Sondaggio', to: '/polls?create=1',    always: false },
       { icon: '📋', label: 'Lista',     to: '/lists?create=1',    always: false },
       { icon: '💰', label: 'Spesa',     to: '/expenses?create=1', always: false },
@@ -104,7 +106,7 @@ const BottomNavigation = () => {
               const angles = ANGLE_MAP[fabActions.length] ?? [0]
               const deg = angles[i] ?? 0
               const rad = deg * Math.PI / 180
-              const r = 90
+              const r = fabActions.length > 4 ? 115 : 90
               const xPx = r * Math.sin(rad)
               const yPx = r * Math.cos(rad)
               return (
@@ -188,6 +190,7 @@ const BottomNavigation = () => {
           {moreOpen && (
             <div className="absolute z-[47] bottom-24 right-4 left-4 max-h-[70dvh] overflow-y-auto bg-[--bg-card] border border-[--border-base] rounded-2xl shadow-xl p-2 text-[--text-base]">
               {[
+                { icon: '💡', label: 'Cose da fare', to: '/ideas' },
                 { icon: '📅', label: 'Eventi', to: '/events' },
                 { icon: '💰', label: 'Spese', to: '/expenses' },
                 { icon: '🗳️', label: 'Sondaggi', to: '/polls' },

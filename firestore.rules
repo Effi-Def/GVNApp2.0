@@ -188,7 +188,8 @@ service cloud.firestore {
       let d = get(/databases/$(database)/documents/lists/$(listId)).data;
       return d.createdBy == request.auth.uid
         || isSharedWith(d)
-        || (('eventId' in d) && canReadEventById(d.eventId));
+        || (('eventId' in d) && canReadEventById(d.eventId))
+        || (('farmId' in d) && isFarmMember(d.farmId));
     }
 
     // Helper: check if authenticated user can modify the given list document (and its items)
@@ -196,7 +197,8 @@ service cloud.firestore {
       let d = get(/databases/$(database)/documents/lists/$(listId)).data;
       return d.createdBy == request.auth.uid
         || isSharedWith(d)
-        || (('eventId' in d) && canWriteEventContent(d.eventId));
+        || (('eventId' in d) && canWriteEventContent(d.eventId))
+        || (('farmId' in d) && isFarmMember(d.farmId));
     }
 
     function canReadPollData(data) {
@@ -206,7 +208,41 @@ service cloud.firestore {
           (data.eventId is string) &&
           (data.eventId.size() > 0) &&
           canReadEventById(data.eventId)
+        )
+        || (
+          ('farmId' in data) &&
+          (data.farmId is string) &&
+          isFarmMember(data.farmId)
         );
+    }
+
+    // A vote only appends the caller's own entry to `votes`
+    function isOwnPollVote() {
+      let before = resource.data.get('votes', []);
+      let after = request.resource.data.get('votes', []);
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['votes', 'updatedAt'])
+        && after.size() == before.size() + 1
+        && after.hasAll(before)
+        && after[after.size() - 1].userId == request.auth.uid;
+    }
+
+    function ideaContentOk(data) {
+      return (data.title is string) && data.title.size() > 0 && data.title.size() <= 120
+        && (data.category in ['posto', 'ristorante', 'evento', 'viaggio', 'altro'])
+        && (!('note' in data) || ((data.note is string) && data.note.size() <= 1000))
+        && (!('location' in data) || ((data.location is string) && data.location.size() <= 200))
+        && (!('link' in data) || ((data.link is string) && data.link.size() <= 500 && data.link.matches('^https?://.+')))
+        && (data.status in ['open', 'organized', 'done'])
+        && (!('eventId' in data) || (data.eventId is string))
+        && (data.interestedIds is list) && data.interestedIds.size() <= 500;
+    }
+
+    // Members may only add or remove themselves from `interestedIds`
+    function isOwnIdeaInterestChange() {
+      let before = resource.data.interestedIds.toSet();
+      let after = request.resource.data.interestedIds.toSet();
+      return after.difference(before).hasOnly([request.auth.uid])
+        && before.difference(after).hasOnly([request.auth.uid]);
     }
 
     // Users collection
@@ -254,7 +290,8 @@ service cloud.firestore {
 
     // Invite tokens (document id = token)
     match /farmInvites/{tokenId} {
-      allow read: if isSignedIn();
+      // By id only: listing would hand out every token, and a token is enough to join a farm
+      allow get: if isSignedIn();
       allow create: if isSignedIn() && request.resource.data.createdBy == request.auth.uid && isFarmOwner(request.resource.data.farmId);
       allow delete: if isSignedIn() && isFarmOwner(resource.data.farmId);
       allow update: if false;
@@ -378,15 +415,28 @@ service cloud.firestore {
       allow read: if isSignedIn() && (
         (resource.data.createdBy == request.auth.uid) ||
         isSharedWith(resource.data) ||
-        (('eventId' in resource.data) && canReadEventById(resource.data.eventId))
+        (('eventId' in resource.data) && canReadEventById(resource.data.eventId)) ||
+        (('farmId' in resource.data) && isFarmMember(resource.data.farmId))
       );
 
       allow create: if isSignedIn() && (
         (request.resource.data.createdBy == request.auth.uid) &&
-        (!('eventId' in request.resource.data) || canWriteEventContent(request.resource.data.eventId))
+        (!('eventId' in request.resource.data) || canWriteEventContent(request.resource.data.eventId)) &&
+        (!('farmId' in request.resource.data) || isFarmMember(request.resource.data.farmId))
       );
 
-      allow update, delete: if isSignedIn() && (
+      // Farm members work on the items; the rest of a farm list stays with its creator.
+      allow update: if isSignedIn() && (
+        (resource.data.createdBy == request.auth.uid) ||
+        isSharedWith(resource.data) ||
+        (('eventId' in resource.data) && canWriteEventContent(resource.data.eventId)) ||
+        (
+          ('farmId' in resource.data) && isFarmMember(resource.data.farmId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['items', 'updatedAt'])
+        )
+      );
+
+      allow delete: if isSignedIn() && (
         (resource.data.createdBy == request.auth.uid) ||
         isSharedWith(resource.data) ||
         (('eventId' in resource.data) && canWriteEventContent(resource.data.eventId))
@@ -417,15 +467,21 @@ service cloud.firestore {
     // Polls collection
     match /polls/{pollId} {
       allow read: if isSignedIn() && canReadPollData(resource.data);
-      // Creator must either have no eventId (personal poll) or have write access on the linked event.
+      // Creator must either have no eventId (personal or farm poll) or have write access on the linked event.
       allow create: if isSignedIn() &&
         request.resource.data.createdBy == request.auth.uid &&
         (
           !('eventId' in request.resource.data) ||
           request.resource.data.eventId == null ||
           canWriteEventContent(request.resource.data.eventId)
-        );
-      allow update, delete: if isSignedIn() && 
+        ) &&
+        (!('farmId' in request.resource.data) || isFarmMember(request.resource.data.farmId));
+      // Creator edits the poll; whoever can read it may add their own vote.
+      allow update: if isSignedIn() && (
+        resource.data.createdBy == request.auth.uid ||
+        (canReadPollData(resource.data) && isOwnPollVote())
+      );
+      allow delete: if isSignedIn() &&
         resource.data.createdBy == request.auth.uid;
     }
     
@@ -457,6 +513,39 @@ service cloud.firestore {
       allow read: if true;
       // Must be written server-side (Cloud Functions/Admin SDK bypasses rules).
       allow write: if false;
+    }
+
+    // ── Farm ideas ("Cose da fare") ────────────────────────────────────────
+    // Visible to all farm members. Any member can mark interest and organize an idea;
+    // content can be changed or deleted only by its author or the farm owner.
+    match /farms/{farmId}/ideas/{ideaId} {
+      allow read: if isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId));
+
+      allow create: if isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId))
+        && request.resource.data.keys().hasOnly([
+             'farmId', 'title', 'category', 'note', 'link', 'location',
+             'createdBy', 'interestedIds', 'status', 'createdAt', 'updatedAt'
+           ])
+        && request.resource.data.farmId == farmId
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.status == 'open'
+        && request.resource.data.interestedIds == [request.auth.uid]
+        && ideaContentOk(request.resource.data);
+
+      allow update: if isSignedIn() && (isFarmMember(farmId) || isFarmOwner(farmId))
+        && ideaContentOk(request.resource.data)
+        && isOwnIdeaInterestChange()
+        && (
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['interestedIds', 'status', 'eventId', 'updatedAt'])
+          || (
+            (resource.data.createdBy == request.auth.uid || isFarmOwner(farmId))
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['title', 'category', 'note', 'link', 'location', 'interestedIds', 'status', 'eventId', 'updatedAt'])
+          )
+        );
+
+      allow delete: if isSignedIn() && (resource.data.createdBy == request.auth.uid || isFarmOwner(farmId));
     }
 
     // ── Farm channels ──────────────────────────────────────────────────────

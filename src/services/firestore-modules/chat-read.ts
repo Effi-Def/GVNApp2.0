@@ -5,6 +5,8 @@ import {
   orderBy,
   limit,
   onSnapshot,
+  Timestamp,
+  where,
 } from 'firebase/firestore'
 import { db } from '../../firebase/config'
 import { ChatAttachment, ChatMessage } from '../../types'
@@ -32,6 +34,23 @@ function mapMsg(d: any, contextId: string): ChatMessage {
 }
 
 export const chatReadService = {
+  /**
+   * Messages of others after the last read. Own, system and deleted messages can only be
+   * told apart on the client, so the read is capped: the badge shows 99+ beyond that.
+   */
+  async getUnreadCount(eventId: string, lastReadAt: Date, userId: string): Promise<number> {
+    const q = query(
+      collection(db, 'events', eventId, 'messages'),
+      where('createdAt', '>', Timestamp.fromDate(lastReadAt)),
+      limit(100),
+    )
+    const snap = await getDocs(q)
+    return snap.docs.filter(d => {
+      const data = d.data()
+      return data.userId !== userId && !data.deleted && data.type !== 'system'
+    }).length
+  },
+
   /** Generic listener — accepts any Firestore messages collection path. */
   listenPath(messagesPath: string, cb: (messages: ChatMessage[]) => void, onError?: (e: any) => void) {
     const segments = messagesPath.split('/')

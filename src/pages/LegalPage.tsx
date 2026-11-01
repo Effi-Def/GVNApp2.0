@@ -28,7 +28,7 @@ const DOCS: Record<LegalDocType, LegalDoc> = {
         heading: '2. Dati trattati',
         body: [
           'Account: identificativi di autenticazione (Google), nome visualizzato, email.',
-          'Contenuti utente: eventi, partecipazioni, chat, spese, pagamenti, sondaggi, liste, impostazioni.',
+          'Contenuti utente: eventi, partecipazioni, chat, spese, pagamenti, sondaggi, liste, idee, impostazioni.',
           'Dati tecnici: token push notifiche, log tecnici necessari a sicurezza e funzionamento.',
         ],
       },

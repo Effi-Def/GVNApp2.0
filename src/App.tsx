@@ -18,6 +18,7 @@ const EventsPage = lazy(() => import('./pages/EventsPage'))
 const ExpensesPage = lazy(() => import('./pages/ExpensesPage'))
 const PollsPage = lazy(() => import('./pages/PollsPage'))
 const ListsPage = lazy(() => import('./pages/ListsPage'))
+const IdeasPage = lazy(() => import('./pages/IdeasPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const EventSummary = lazy(() => import('./pages/EventSummary'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage'))
@@ -246,6 +247,7 @@ function AppContent() {
             <Route path="/expenses" element={<ExpensesPage />} />
             <Route path="/polls" element={<PollsPage />} />
             <Route path="/lists" element={<ListsPage />} />
+            <Route path="/ideas" element={<IdeasPage />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/settings/farms" element={<FarmPage />} />
             <Route path="/farms/join/:token" element={<JoinFarmPage />} />

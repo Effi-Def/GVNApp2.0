@@ -120,10 +120,11 @@ const BubbleMenu: React.FC<{
   onReply: () => void
   onOpenThread?: () => void
   onCopy: () => void
+  onSaveAsIdea?: () => void
   onDelete: () => void
   onOpenPicker: () => void
   canEdit: boolean
-}> = ({ onReply, onOpenThread, onCopy, onDelete, onOpenPicker, canEdit }) => {
+}> = ({ onReply, onOpenThread, onCopy, onSaveAsIdea, onDelete, onOpenPicker, canEdit }) => {
   const [open, setOpen] = useState(false)
   return (
     <div className="relative">
@@ -156,6 +157,12 @@ const BubbleMenu: React.FC<{
               onClick={() => { onCopy(); setOpen(false) }}>
               📋 Copia
             </button>
+            {onSaveAsIdea && (
+              <button className="w-full text-left px-4 py-2.5 hover:bg-[--bg-subtle] flex items-center gap-2"
+                onClick={() => { onSaveAsIdea(); setOpen(false) }}>
+                💡 Salva come idea
+              </button>
+            )}
             {canEdit && (
               <button className="w-full text-left px-4 py-2.5 hover:bg-red-50 text-red-600 flex items-center gap-2"
                 onClick={() => { onDelete(); setOpen(false) }}>
@@ -181,6 +188,7 @@ export interface MessageBubbleProps {
   onOpenThread?: (m: ChatMessage) => void
   onDelete?: (m: ChatMessage) => void
   onToggleReaction?: (m: ChatMessage, emoji: string) => void
+  onSaveAsIdea?: (m: ChatMessage) => void
   canEditOrDelete?: (m: ChatMessage) => boolean
   renderTicks?: (m: ChatMessage) => React.ReactNode
   isThreadView?: boolean
@@ -194,7 +202,7 @@ const VISIBLE_LIMIT = 6
 const MessageBubble: React.FC<MessageBubbleProps> = ({
   m, mine, grouped, meId,
   people,
-  onReply, onOpenThread, onDelete, onToggleReaction,
+  onReply, onOpenThread, onDelete, onToggleReaction, onSaveAsIdea,
   canEditOrDelete, renderTicks,
   isThreadView = false,
 }) => {
@@ -393,6 +401,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 onReply={() => onReply?.(m)}
                 onOpenThread={!isThreadView && onOpenThread ? () => onOpenThread(m) : undefined}
                 onCopy={() => m.text && navigator.clipboard.writeText(m.text)}
+                onSaveAsIdea={m.text && onSaveAsIdea ? () => onSaveAsIdea(m) : undefined}
                 onDelete={() => onDelete?.(m)}
                 onOpenPicker={openDesktopPicker}
                 canEdit={canEditOrDelete?.(m) ?? false}
@@ -540,6 +549,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <button onClick={() => { navigator.clipboard.writeText(m.text!); setContextMenuOpen(false) }}
                   className="w-full text-left px-4 py-3.5 flex items-center gap-3 text-[--text-base] rounded-xl active:bg-[--bg-subtle]">
                   <span className="text-lg">📋</span> Copia testo
+                </button>
+              )}
+              {!m.deleted && m.text && onSaveAsIdea && (
+                <button onClick={() => { onSaveAsIdea(m); setContextMenuOpen(false) }}
+                  className="w-full text-left px-4 py-3.5 flex items-center gap-3 text-[--text-base] rounded-xl active:bg-[--bg-subtle]">
+                  <span className="text-lg">💡</span> Salva come idea
                 </button>
               )}
               {!m.deleted && (canEditOrDelete?.(m) ?? false) && onDelete && (

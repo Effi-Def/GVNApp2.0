@@ -44,7 +44,7 @@ export const listReadService = {
     }
   },
 
-  async getForUserVisibleEvents(params: { userId: string; eventIds: string[] }): Promise<ShoppingList[]> {
+  async getForUserVisibleEvents(params: { userId: string; eventIds: string[]; farmId?: string | null }): Promise<ShoppingList[]> {
     try {
       const uniqueEventIds = Array.from(new Set((params.eventIds || []).filter(Boolean)))
       const chunks: string[][] = []
@@ -52,6 +52,10 @@ export const listReadService = {
 
       const queries: Promise<any>[] = []
       queries.push(getDocs(query(collection(db, 'lists'), where('createdBy', '==', params.userId), limit(APP_CONFIG.PAGINATION_LIMIT))))
+
+      if (params.farmId) {
+        queries.push(getDocs(query(collection(db, 'lists'), where('farmId', '==', params.farmId), limit(APP_CONFIG.PAGINATION_LIMIT))))
+      }
 
       for (const c of chunks) {
         queries.push(getDocs(query(collection(db, 'lists'), where('eventId', 'in', c), limit(APP_CONFIG.PAGINATION_LIMIT))))

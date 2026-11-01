@@ -9,4 +9,5 @@ export {
 	userPrivateService,
 	farmService,
 	channelService,
+	ideaService,
 } from './firestore-modules'

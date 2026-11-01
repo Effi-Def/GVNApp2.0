@@ -226,6 +226,8 @@ export interface Poll {
   options: PollOption[]
   createdBy: string
   eventId?: string
+  farmId?: string // Fattoria che vede il sondaggio quando non è legato a un evento
+  idea?: IdeaEventPrefill // Idea da cui è nato il sondaggio
   votes: PollVote[]
   isActive: boolean  // Aggiungiamo stato attivo/chiuso
   createdAt: Date
@@ -248,12 +250,45 @@ export interface PollVote {
   votedAt: Date
 }
 
+export type IdeaCategory = 'posto' | 'ristorante' | 'evento' | 'viaggio' | 'altro'
+export type IdeaStatus = 'open' | 'organized' | 'done'
+
+// "Cose da fare": idee della fattoria, prima che diventino un evento
+export interface Idea {
+  id: string
+  farmId: string
+  title: string
+  category: IdeaCategory
+  note?: string
+  link?: string
+  location?: string
+  createdBy: string
+  interestedIds: string[]
+  status: IdeaStatus
+  eventId?: string
+  createdAt: Date
+  updatedAt: Date
+}
+
+export type IdeaDraft = Pick<Idea, 'title' | 'category' | 'note' | 'link' | 'location'>
+
+// Ciò che serve per creare un evento da un'idea, anche passando da un sondaggio
+export interface IdeaEventPrefill {
+  id: string
+  farmId: string
+  title: string
+  note?: string
+  location?: string
+  category: EventCategory
+}
+
 export interface ShoppingList {
   id: string
   title: string
   description?: string // Aggiungiamo descrizione opzionale
   items: ListItem[]  // Cambiamo il nome del tipo
   eventId?: string
+  farmId?: string // Fattoria che vede la lista quando non è legata a un evento
   createdBy: string
   shared?: boolean  // Aggiungiamo flag condivisione
   sharedWith?: string[] // IDs degli utenti con cui è condivisa la lista
@@ -277,12 +312,14 @@ export interface ListItem {  // Rinominiamo e aggiungiamo proprietà
   // Campi opzionali per To-do e altri tipi specializzati
   status?: 'todo' | 'in-progress' | 'done'
   dueDate?: Date
-  assignees?: { userId?: string; userName: string }[]
+  assignees?: ListItemAssignee[]
   notes?: string
   // Estensioni per tipi speciali: trasporti (macchine) e stanze
   capacity?: number // posti disponibili nello slot (es. 5 per auto, 2 per stanza)
-  driver?: { userId?: string; userName: string } // solo per macchine
+  driver?: ListItemAssignee // solo per macchine
 }
+
+export type ListItemAssignee = { userId?: string; userName: string }
 
 // Alias per backward compatibility
 export interface ShoppingListItem extends ListItem {}
